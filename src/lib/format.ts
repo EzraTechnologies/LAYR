@@ -38,6 +38,16 @@ export function displayFilename(path: string): string {
   return name.replace(/\.(gcode|gco|g|ufp)$/i, '');
 }
 
+/** Formats Unix seconds as `15 Jan 14:32` (or `15 Jan 2025` for other years). */
+export function formatDate(unixSeconds: number | null | undefined, now = Date.now()): string {
+  if (unixSeconds === null || unixSeconds === undefined || !Number.isFinite(unixSeconds)) return '—';
+  const date = new Date(unixSeconds * 1000);
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return new Intl.DateTimeFormat('en-GB', sameYear
+    ? { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }
+    : { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+}
+
 export function formatFilament(mm: number | null | undefined): string {
   if (mm === null || mm === undefined || !Number.isFinite(mm) || mm <= 0) return '—';
   return mm >= 1000 ? `${(mm / 1000).toFixed(2)} m` : `${Math.round(mm)} mm`;

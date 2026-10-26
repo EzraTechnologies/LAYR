@@ -1,32 +1,28 @@
 <script lang="ts">
+  import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
-  import type { PrinterState } from '../lib/printer/model';
+  import EStopButton from './EStopButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
-  interface Props {
-    printerState: PrinterState;
-    demo: boolean;
-    timeZone?: string;
-  }
-
-  let { printerState, demo, timeZone }: Props = $props();
-  const clock = $derived(formatClock(printerState.now, timeZone));
+  const { store } = app();
+  const printerState = store.state;
+  const clock = $derived(formatClock(printerState.now));
 </script>
 
 <header class="bar">
   <div class="identity">
     <h1 class="name" title={printerState.printerName}>{printerState.printerName}</h1>
     {#if printerState.hostname && printerState.hostname !== printerState.printerName}
-      <span class="host">{printerState.hostname}</span>
+      <span class="host" title={printerState.hostname}>{printerState.hostname}</span>
     {/if}
   </div>
 
   <div class="right">
-    {#if demo}
-      <span class="demo" title="Sample data. No printer is connected and no actions can run.">Demo</span>
-    {/if}
     <StatusPill status={printerState.status} />
     <time class="clock num" aria-label={`Time ${clock}`}>{clock}</time>
+    {#if store.configured}
+      <EStopButton />
+    {/if}
   </div>
 </header>
 
@@ -74,26 +70,17 @@
     flex: none;
   }
 
-  .demo {
-    display: inline-flex;
-    align-items: center;
-    height: 30px;
-    padding: 0 12px;
-    border-radius: 999px;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--purple);
-    background: var(--purple-soft);
-    border: 1px dashed color-mix(in srgb, var(--purple) 60%, transparent);
-  }
-
   .clock {
     font-size: var(--fs-lg);
     font-weight: 600;
     color: var(--text-2);
     min-width: 3.2em;
     text-align: right;
+  }
+
+  @media (max-width: 900px) {
+    .host {
+      display: none;
+    }
   }
 </style>

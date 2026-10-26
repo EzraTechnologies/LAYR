@@ -1,7 +1,7 @@
 {
   "name": "layr",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Touch-first Klipper interface for Raspberry Pi displays, powered by Moonraker.",
   "type": "module",
   "engines": {
@@ -9,7 +9,6 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:demo": "vite --open /?demo=printing",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",

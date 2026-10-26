@@ -1,6 +1,6 @@
 /**
- * Spoolman integration contract — NOT IMPLEMENTED in v0.1. Defined so the Filament screen and printer
- * profiles can be built against a stable interface later.
+ * Spoolman integration contract — NOT IMPLEMENTED yet (planned after the Trident MVP). Defined so the Extrude
+ * screen and printer profiles can be built against a stable interface later.
  *
  * Planned workflow:
  *  1. Browse available spools (Moonraker `server.spoolman.proxy` → Spoolman `GET /v1/spool`).
@@ -8,8 +8,9 @@
  *  3. Clear the active spool only after an unload that the user has confirmed completed successfully
  *     (`server.spoolman.post_spool_id` with `spool_id: null`). A failed or cancelled unload keeps the spool.
  *
- * All of these are write operations and must go through a confirmed `CommandGateway` path, never run in
- * demo mode, and be scoped per `PrinterProfile.id`.
+ * All of these are write operations and must go through a confirmed `CommandGateway` path and be scoped per
+ * `PrinterProfile.id`. The unload outcome maps to the gateway result: only `status: 'ok'` (Klipper replied
+ * "ok" to the unload macro) counts as `confirmed-success`; `failed` and `unconfirmed` must keep the spool.
  */
 
 export interface SpoolSummary {

@@ -1,18 +1,14 @@
 <script lang="ts">
-  import type { CommandGateway } from '../lib/actions/commands';
+  import { app } from '../lib/context';
   import { displayFilename, formatClock, formatDuration, formatFilament } from '../lib/format';
-  import type { PrinterState } from '../lib/printer/model';
+  import { navigate } from '../lib/routes';
   import { headline } from '../lib/statusMeta';
   import Icon from './Icon.svelte';
   import ProgressRing from './ProgressRing.svelte';
 
-  interface Props {
-    printerState: PrinterState;
-    commands: CommandGateway;
-    timeZone?: string;
-  }
-
-  let { printerState, commands, timeZone }: Props = $props();
+  const { store, ui } = app();
+  const printerState = store.state;
+  const timeZone: string | undefined = undefined;
 
   const job = $derived(printerState.job);
   const title = $derived(headline(printerState));
@@ -31,8 +27,10 @@
         ? String(job.currentLayer)
         : '—',
   );
-  const pauseBlock = $derived(commands.availability({ kind: printerState.status === 'paused' ? 'resume' : 'pause' }));
-  const blockedMessage = $derived(pauseBlock.allowed ? '' : pauseBlock.message);
+  const paused = $derived(printerState.status === 'paused');
+  const toggleCommand = $derived(paused ? ({ kind: 'resume' } as const) : ({ kind: 'pause' } as const));
+  const toggleBusy = $derived(ui.isBusy(toggleCommand));
+  const printBusy = $derived(ui.busyGroups.includes('print'));
 </script>
 
 <section class="card job" aria-labelledby="job-title">
@@ -81,22 +79,46 @@
 
     {#if active}
       <footer class="controls">
-        <button type="button" class="ctl" disabled aria-describedby="ctl-note">
-          <Icon name={printerState.status === 'paused' ? 'play' : 'pause'} size={20} />
-          {printerState.status === 'paused' ? 'Resume' : 'Pause'}
+        <button
+          type="button"
+          class="btn {paused ? 'cyan' : ''} ctl"
+          aria-busy={toggleBusy}
+          disabled={printBusy && !toggleBusy}
+          onclick={() => ui.run(toggleCommand)}
+        >
+          <Icon name={paused ? 'play' : 'pause'} size={20} />
+          {paused ? 'Resume' : 'Pause'}
         </button>
-        <button type="button" class="ctl danger" disabled aria-describedby="ctl-note">
+        <button
+          type="button"
+          class="btn danger ctl"
+          disabled={printBusy}
+          onclick={() => ui.run({ kind: 'cancel' })}
+        >
           <Icon name="stop" size={20} />
           Cancel
         </button>
-        <p id="ctl-note" class="note"><Icon name="lock" size={15} />{blockedMessage}</p>
+        {#if printerState.toolhead?.zOffset != null}
+          <button type="button" class="btn ghost ctl zoff" onclick={() => navigate('move')} title="Adjust Z offset">
+            <span class="num">Z {printerState.toolhead.zOffset >= 0 ? '+' : ''}{printerState.toolhead.zOffset.toFixed(3)}</span>
+          </button>
+        {/if}
+      </footer>
+    {:else if job.state === 'complete' || job.state === 'cancelled' || job.state === 'error'}
+      <footer class="controls">
+        <button type="button" class="btn ghost ctl" onclick={() => navigate('files')}>
+          <Icon name="files" size={20} />Files
+        </button>
       </footer>
     {/if}
   {:else}
     <div class="idle">
       <div class="idle-icon" aria-hidden="true"><Icon name="check" size={34} strokeWidth={2} /></div>
       <h2 id="job-title">Ready to print</h2>
-      <p>No job is loaded. File browsing and print start will arrive in a later release.</p>
+      <p>No job is loaded. Choose a file to start a print.</p>
+      <button type="button" class="btn primary" onclick={() => navigate('files')}>
+        <Icon name="files" size={20} />Browse files
+      </button>
     </div>
   {/if}
 </section>
@@ -229,32 +251,14 @@
   }
 
   .ctl {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: var(--touch);
-    min-width: 116px;
-    padding: 0 16px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--surface-3);
-    font-weight: 600;
+    min-width: 120px;
+    min-height: 52px;
   }
 
-  .ctl:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
-  }
-
-  .note {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
+  .zoff {
+    margin-left: auto;
     min-width: 0;
+    font-size: var(--fs-sm);
   }
 
   .idle {
@@ -292,6 +296,7 @@
   @media (max-width: 900px), (max-height: 540px) {
     .ctl {
       min-width: 0;
+      min-height: var(--touch);
       padding: 0 12px;
     }
     .body {

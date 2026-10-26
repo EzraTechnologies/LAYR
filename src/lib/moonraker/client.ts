@@ -3,6 +3,7 @@ import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
 import { planSubscription } from './objects';
 import type {
+  ConfigSettings,
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcResponse,
@@ -15,35 +16,86 @@ import type {
 } from './types';
 import { WS_OPEN } from './types';
 
-/**
- * JSON-RPC methods LAYR v0.1 is allowed to call. All of them are read-only (or subscription management).
- * Anything that moves, heats or reconfigures the printer — `printer.gcode.script`, `printer.print.*`,
- * `printer.emergency_stop`, `machine.*`, file writes — is deliberately absent and rejected by `query()`.
- */
-export const READ_ONLY_METHODS: ReadonlySet<string> = new Set([
+/** JSON-RPC methods that only read state or manage LAYR's own subscription. */
+export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.connection.identify',
   'server.info',
+  'server.gcode_store',
   'printer.info',
   'printer.objects.list',
   'printer.objects.query',
   'printer.objects.subscribe',
+  'server.files.list',
+  'server.files.get_directory',
   'server.files.metadata',
+  'server.files.thumbnails',
 ]);
+
+/**
+ * JSON-RPC methods that change the printer. They are only called by the command gateway
+ * (`src/lib/actions/gateway.ts`), which validates and, where needed, confirms every command first.
+ * Host-level methods (`machine.*`, `server.restart`, updates, config/file writes other than deleting a G-code
+ * file) are deliberately absent.
+ */
+export const CONTROL_METHODS: ReadonlySet<string> = new Set([
+  'printer.gcode.script',
+  'printer.print.start',
+  'printer.print.pause',
+  'printer.print.resume',
+  'printer.print.cancel',
+  'printer.emergency_stop',
+  'printer.restart',
+  'printer.firmware_restart',
+  'server.files.delete_file',
+]);
+
+export function isAllowedMethod(method: string): boolean {
+  return READ_METHODS.has(method) || CONTROL_METHODS.has(method);
+}
 
 export class MethodNotAllowedError extends Error {
   constructor(method: string) {
-    super(`Moonraker method "${method}" is not permitted in LAYR v0.1 (read-only client)`);
+    super(`Moonraker method "${method}" is not permitted by LAYR`);
     this.name = 'MethodNotAllowedError';
+  }
+}
+
+/** A JSON-RPC error returned by Moonraker or Klipper (for example "Must home axis first"). */
+export class RpcError extends Error {
+  readonly code: number;
+  constructor(message: string, code: number) {
+    super(message);
+    this.name = 'RpcError';
+    this.code = code;
+  }
+}
+
+/** The request may or may not have run: the connection dropped or no reply arrived in time. */
+export class RpcUnconfirmedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RpcUnconfirmedError';
   }
 }
 
 export type ClientEvent =
   | { type: 'transport'; state: TransportState; attempt: number; nextRetryAt: number | null; reason: string | null }
   | { type: 'klippy'; state: KlippyState; message: string | null }
+  /** Host name learned while Klipper is not ready (the snapshot carries it once ready). */
+  | { type: 'host'; hostname: string }
   /** Full status after (re)subscribing. Replaces any previously accumulated status. */
-  | { type: 'snapshot'; status: RawStatus; missing: string[]; hostname: string | null }
+  | {
+      type: 'snapshot';
+      status: RawStatus;
+      missing: string[];
+      hostname: string | null;
+      objects: string[];
+      settings: ConfigSettings;
+    }
   /** Incremental `notify_status_update` diff. */
-  | { type: 'status'; diff: RawStatus };
+  | { type: 'status'; diff: RawStatus }
+  | { type: 'gcode_response'; message: string }
+  | { type: 'filelist_changed'; action: string; path: string | null; root: string | null };
 
 export interface MoonrakerClientOptions {
   /** Moonraker base URL, e.g. `http://printer.local:7125`. `ws(s)://` URLs are accepted too. */
@@ -54,14 +106,20 @@ export interface MoonrakerClientOptions {
   createSocket?: (url: string) => WebSocketLike;
   fetch?: typeof globalThis.fetch;
   backoff?: Backoff;
-  /** Timeout for individual JSON-RPC requests. */
+  /** Default timeout for individual JSON-RPC requests. */
   requestTimeoutMs?: number;
   /** Interval for polling `server.info` while Klipper is not ready. */
   klippyPollMs?: number;
   now?: () => number;
 }
 
+export interface CallOptions {
+  /** Overrides the default request timeout, e.g. for long-running G-code such as homing or load macros. */
+  timeoutMs?: number;
+}
+
 interface Pending {
+  method: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -83,17 +141,20 @@ export function toWebSocketUrl(baseUrl: string): string {
   return url.toString();
 }
 
+/** Joins a Moonraker base URL and an already-encoded path, which may carry a query string. */
 export function toHttpUrl(baseUrl: string, path: string): string {
   const url = new URL(normaliseBaseUrl(baseUrl));
   if (url.protocol === 'ws:') url.protocol = 'http:';
   else if (url.protocol === 'wss:') url.protocol = 'https:';
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}`;
+  const queryAt = path.indexOf('?');
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}${queryAt === -1 ? path : path.slice(0, queryAt)}`;
+  url.search = queryAt === -1 ? '' : path.slice(queryAt);
   return url.toString();
 }
 
 /**
- * Read-only Moonraker client: connects over WebSocket, identifies, queries and subscribes to printer
- * objects, follows Klippy state changes and reconnects with bounded exponential backoff.
+ * Moonraker client: connects over WebSocket, identifies, queries and subscribes to printer objects, follows
+ * Klippy state changes and reconnects with bounded exponential backoff. Only allow-listed methods can be called.
  */
 export class MoonrakerClient {
   readonly #opts: Required<Omit<MoonrakerClientOptions, 'apiKey'>> & { apiKey: string | null };
@@ -110,7 +171,7 @@ export class MoonrakerClient {
 
   constructor(options: MoonrakerClientOptions) {
     this.#opts = {
-      clientVersion: '0.1.0',
+      clientVersion: '0.2.0',
       createSocket: (url) => new WebSocket(url) as unknown as WebSocketLike,
       fetch: (...args) => globalThis.fetch(...args),
       backoff: new Backoff(),
@@ -124,6 +185,14 @@ export class MoonrakerClient {
 
   get running(): boolean {
     return this.#running;
+  }
+
+  get connected(): boolean {
+    return this.#socket?.readyState === WS_OPEN;
+  }
+
+  get hasApiKey(): boolean {
+    return this.#opts.apiKey !== null;
   }
 
   start(): void {
@@ -141,9 +210,32 @@ export class MoonrakerClient {
     this.#emit({ type: 'transport', state: 'idle', attempt: 0, nextRetryAt: null, reason: null });
   }
 
-  /** Calls a read-only JSON-RPC method on the current connection. */
-  query<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-    return this.#call<T>(method, params);
+  /** Drops the current connection (if any) and connects again immediately with a fresh backoff. */
+  reconnect(): void {
+    this.stop();
+    this.start();
+  }
+
+  /** Calls an allow-listed JSON-RPC method on the current connection. */
+  call<T = unknown>(method: string, params?: Record<string, unknown>, options: CallOptions = {}): Promise<T> {
+    return this.#call<T>(method, params, options.timeoutMs);
+  }
+
+  /** Absolute HTTP URL for a Moonraker path such as `/server/files/gcodes/a.png`. */
+  httpUrl(path: string): string {
+    return toHttpUrl(this.#opts.baseUrl, path);
+  }
+
+  /**
+   * GET request that carries the API key header when one is configured. Used for thumbnails, because an
+   * `<img src>` cannot send headers; trusted clients can use `httpUrl` directly.
+   */
+  async fetchHttp(path: string): Promise<Response> {
+    const headers: Record<string, string> = {};
+    if (this.#opts.apiKey) headers['X-Api-Key'] = this.#opts.apiKey;
+    const response = await this.#opts.fetch(this.httpUrl(path), { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response;
   }
 
   #emit(event: ClientEvent): void {
@@ -208,6 +300,9 @@ export class MoonrakerClient {
     const response = await this.#opts.fetch(toHttpUrl(this.#opts.baseUrl, '/access/oneshot_token'), {
       headers: { 'X-Api-Key': this.#opts.apiKey ?? '' },
     });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Authentication failed (HTTP ${response.status}). Check the API key or trusted_clients`);
+    }
     if (!response.ok) throw new Error(`Authentication failed (HTTP ${response.status})`);
     const body = (await response.json()) as { result?: unknown };
     if (typeof body.result !== 'string') throw new Error('Unexpected oneshot token response');
@@ -256,6 +351,8 @@ export class MoonrakerClient {
   async #printerMessage(): Promise<string | null> {
     try {
       const printer = await this.#call<PrinterInfo>('printer.info');
+      const hostname = printer.hostname?.trim();
+      if (hostname) this.#emit({ type: 'host', hostname });
       return printer.state_message?.trim() || null;
     } catch {
       return null;
@@ -269,19 +366,35 @@ export class MoonrakerClient {
       const printer = await this.#call<PrinterInfo>('printer.info');
       const list = await this.#call<ObjectsListResult>('printer.objects.list');
       if (generation !== this.#generation) return;
-      const plan = planSubscription(Array.isArray(list.objects) ? list.objects : []);
+      const objects = Array.isArray(list.objects) ? list.objects.filter((o) => typeof o === 'string') : [];
+      const plan = planSubscription(objects);
       const result = await this.#call<SubscribeResult>('printer.objects.subscribe', { objects: plan.objects });
+      if (generation !== this.#generation) return;
+      const settings = objects.includes('configfile') ? await this.#configSettings() : {};
       if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
         status: result.status ?? {},
         missing: plan.missing,
         hostname: printer.hostname?.trim() || null,
+        objects,
+        settings,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);
     } finally {
       this.#initializing = false;
+    }
+  }
+
+  /** Reads the parsed printer configuration once per Klippy start. It is large, so it is not subscribed. */
+  async #configSettings(): Promise<ConfigSettings> {
+    try {
+      const result = await this.#call<SubscribeResult>('printer.objects.query', { objects: { configfile: ['settings'] } });
+      const settings = result.status?.configfile?.settings;
+      return typeof settings === 'object' && settings !== null ? (settings as ConfigSettings) : {};
+    } catch {
+      return {};
     }
   }
 
@@ -319,8 +432,9 @@ export class MoonrakerClient {
       if (!pending) return;
       this.#pending.delete(message.id);
       clearTimeout(pending.timer);
-      if (message.error) pending.reject(new Error(message.error.message || `RPC error ${message.error.code}`));
-      else pending.resolve(message.result);
+      if (message.error) {
+        pending.reject(new RpcError(message.error.message || `RPC error ${message.error.code}`, message.error.code));
+      } else pending.resolve(message.result);
       return;
     }
 
@@ -346,6 +460,21 @@ export class MoonrakerClient {
         }
         return;
       }
+      case 'notify_gcode_response': {
+        const text = message.params?.[0];
+        if (typeof text === 'string') this.#emit({ type: 'gcode_response', message: text });
+        return;
+      }
+      case 'notify_filelist_changed': {
+        const info = message.params?.[0] as { action?: unknown; item?: { path?: unknown; root?: unknown } } | undefined;
+        this.#emit({
+          type: 'filelist_changed',
+          action: typeof info?.action === 'string' ? info.action : 'unknown',
+          path: typeof info?.item?.path === 'string' ? info.item.path : null,
+          root: typeof info?.item?.root === 'string' ? info.item.root : null,
+        });
+        return;
+      }
       case 'notify_klippy_ready':
         this.#initPrinter(generation).catch(() => this.#scheduleKlippyPoll(generation));
         return;
@@ -363,8 +492,8 @@ export class MoonrakerClient {
     }
   }
 
-  #call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
-    if (!READ_ONLY_METHODS.has(method)) return Promise.reject(new MethodNotAllowedError(method));
+  #call<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+    if (!isAllowedMethod(method)) return Promise.reject(new MethodNotAllowedError(method));
     const socket = this.#socket;
     if (!socket || socket.readyState !== WS_OPEN) {
       return Promise.reject(new Error('Not connected to Moonraker'));
@@ -376,9 +505,9 @@ export class MoonrakerClient {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`Moonraker request "${method}" timed out`));
-      }, this.#opts.requestTimeoutMs);
-      this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+        reject(new RpcUnconfirmedError(`No reply from Moonraker for "${method}"`));
+      }, timeoutMs ?? this.#opts.requestTimeoutMs);
+      this.#pending.set(id, { method, resolve: resolve as (v: unknown) => void, reject, timer });
       try {
         socket.send(JSON.stringify(request));
       } catch (error) {
@@ -434,10 +563,11 @@ export class MoonrakerClient {
     }
   }
 
+  /** Requests in flight when a connection drops may or may not have been executed by Klipper. */
   #rejectPending(reason: string): void {
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
-      pending.reject(new Error(reason));
+      pending.reject(new RpcUnconfirmedError(`${reason} before Moonraker replied`));
     }
     this.#pending.clear();
   }
@@ -450,6 +580,6 @@ export class MoonrakerClient {
   }
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

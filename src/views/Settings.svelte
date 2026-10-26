@@ -1,112 +1,163 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
-  import { isValidMoonrakerUrl, type AppConfig, type PrinterProfile } from '../lib/config';
-  import { DEMO_SCENARIOS, DEMO_SCENARIO_LABELS, type DemoScenarioId } from '../lib/demo/scenarios';
+  import { isValidMoonrakerUrl, type AppConfig } from '../lib/config';
+  import { app } from '../lib/context';
   import { formatTemp } from '../lib/format';
-  import type { PrinterState } from '../lib/printer/model';
+  import { DIM_OPTIONS } from '../lib/settings.svelte';
 
   interface Props {
-    printerState: PrinterState;
-    config: AppConfig;
-    printer: PrinterProfile;
-    demoScenario: DemoScenarioId | null;
-    onScenario: (id: DemoScenarioId) => void;
     onSaveUrl: (url: string | null) => void;
-    onDemoMode: (enabled: boolean) => void;
   }
 
-  let { printerState, config, printer, demoScenario, onScenario, onSaveUrl, onDemoMode }: Props = $props();
+  let { onSaveUrl }: Props = $props();
+  const { store, ui, config, printer, settings } = app();
+  const printerState = store.state;
 
   // svelte-ignore state_referenced_locally
-  let urlDraft = $state(printer.moonrakerUrl);
+  let urlDraft = $state(printer.moonrakerUrl ?? '');
   const urlValid = $derived(isValidMoonrakerUrl(urlDraft));
+  const changed = $derived(urlDraft.trim() !== (printer.moonrakerUrl ?? ''));
 
   const SOURCE_LABEL: Record<AppConfig['urlSource'], string> = {
     query: 'URL parameter',
     storage: 'Saved on this device',
     env: 'Build configuration',
-    default: 'Default (this host, port 7125)',
+    none: 'Not set up',
   };
 
-  function save(event: SubmitEvent) {
-    event.preventDefault();
-    if (urlValid) onSaveUrl(urlDraft.trim());
+  async function editUrl() {
+    const value = await ui.prompt({
+      title: 'Moonraker URL',
+      value: urlDraft || config.suggestedUrl,
+      mode: 'url',
+      placeholder: 'http://printer.local:7125',
+      hint: 'Usually http://localhost:7125 on the printer’s own screen.',
+      submitLabel: 'Done',
+      validate: (v) => (isValidMoonrakerUrl(v) ? null : 'Enter an http:// or https:// address'),
+    });
+    if (value !== null) urlDraft = value.trim();
   }
 
   const allSensors = $derived(
     [printerState.extruder, printerState.bed, printerState.chamber, ...printerState.sensors].filter((s) => s !== null),
   );
+  const klippyReachable = $derived(
+    printerState.transport === 'connected' && printerState.klippy !== 'disconnected' && printerState.klippy !== 'unknown',
+  );
 </script>
 
-<div class="settings">
+<div class="settings page scroll">
   <section class="card panel" aria-labelledby="set-conn">
     <h2 id="set-conn" class="eyebrow">Connection</h2>
     <dl>
-      <div><dt>Moonraker</dt><dd title={printer.moonrakerUrl}>{printer.moonrakerUrl}</dd></div>
-      <div><dt>Source</dt><dd>{demoScenario ? 'Demo (not connected)' : SOURCE_LABEL[config.urlSource]}</dd></div>
+      <div><dt>Moonraker</dt><dd title={printer.moonrakerUrl ?? ''}>{printer.moonrakerUrl ?? 'Not set up'}</dd></div>
+      <div><dt>Source</dt><dd>{SOURCE_LABEL[config.urlSource]}</dd></div>
       <div><dt>Transport</dt><dd>{printerState.transport}</dd></div>
       <div><dt>Klipper</dt><dd>{printerState.klippy}</dd></div>
       <div><dt>Host</dt><dd>{printerState.hostname ?? '—'}</dd></div>
-      <div><dt>API key</dt><dd>{printer.apiKey ? 'Configured' : 'Not set (trusted client)'}</dd></div>
+      <div><dt>Auth</dt><dd>{printer.apiKey ? 'API key (build setting)' : 'Trusted client'}</dd></div>
       {#if printerState.missingObjects.length > 0}
         <div><dt>Missing</dt><dd title={printerState.missingObjects.join(', ')}>{printerState.missingObjects.join(', ')}</dd></div>
       {/if}
     </dl>
 
-    <form class="url-form" onsubmit={save}>
-      <label for="moonraker-url">Moonraker URL</label>
+    <div class="url">
+      <span class="label" id="url-label">Moonraker URL</span>
+      <button type="button" class="btn ghost url-field" aria-labelledby="url-label" onclick={editUrl}>
+        <span class="url-text" class:placeholder={!urlDraft} title={urlDraft}>{urlDraft || 'Tap to enter an address'}</span>
+      </button>
       <div class="row">
-        <input
-          id="moonraker-url"
-          type="url"
-          inputmode="url"
-          autocomplete="off"
-          spellcheck="false"
-          bind:value={urlDraft}
-          aria-invalid={!urlValid}
-        />
-        <button type="submit" class="btn primary" disabled={!urlValid}>Save</button>
+        <button type="button" class="btn primary" disabled={!urlValid || !changed} onclick={() => onSaveUrl(urlDraft.trim())}>
+          Save &amp; connect
+        </button>
+        {#if urlDraft !== config.suggestedUrl}
+          <button type="button" class="btn" onclick={() => (urlDraft = config.suggestedUrl)} title={config.suggestedUrl}>
+            Use this device
+          </button>
+        {/if}
         {#if config.urlSource === 'storage'}
-          <button type="button" class="btn" onclick={() => onSaveUrl(null)}>Reset</button>
+          <button type="button" class="btn ghost" onclick={() => onSaveUrl(null)}>Forget</button>
         {/if}
       </div>
-    </form>
+      {#if store.configured}
+        <button type="button" class="btn ghost" onclick={() => store.source.connection?.reconnect()}>
+          <Icon name="refresh" size={18} />Reconnect now
+        </button>
+      {/if}
+    </div>
   </section>
 
   <div class="col">
-    <section class="card panel" aria-labelledby="set-demo">
-      <h2 id="set-demo" class="eyebrow">Demo mode</h2>
-      {#if demoScenario}
-        <p class="note">Showing sample data. No connection is made and printer actions are disabled.</p>
-        <div class="scenarios" role="radiogroup" aria-label="Demo scenario">
-          {#each DEMO_SCENARIOS as id (id)}
-            <button
-              type="button"
-              role="radio"
-              class="chip"
-              aria-checked={demoScenario === id}
-              onclick={() => onScenario(id)}
-            >
-              {DEMO_SCENARIO_LABELS[id]}
-            </button>
-          {/each}
-        </div>
-        <button type="button" class="btn" onclick={() => onDemoMode(false)}>
-          <Icon name="refresh" size={18} />Exit demo
+    <section class="card panel" aria-labelledby="set-display">
+      <h2 id="set-display" class="eyebrow">Display</h2>
+      <span class="label">Dim screen after</span>
+      <div class="seg" role="radiogroup" aria-label="Dim screen after">
+        {#each DIM_OPTIONS as minutes (minutes)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={settings.value.dimAfterMinutes === minutes}
+            onclick={() => settings.update({ dimAfterMinutes: minutes })}
+          >
+            {minutes === 0 ? 'Never' : `${minutes} min`}
+          </button>
+        {/each}
+      </div>
+      <span class="label">Theme</span>
+      <div class="seg" role="radiogroup" aria-label="Theme">
+        <button type="button" role="radio" aria-checked={settings.value.theme === 'midnight'} onclick={() => settings.update({ theme: 'midnight' })}
+          >Midnight</button
+        >
+        <button type="button" role="radio" aria-checked={settings.value.theme === 'black'} onclick={() => settings.update({ theme: 'black' })}
+          >True black</button
+        >
+      </div>
+      <div class="toggles">
+        <button
+          type="button"
+          class="btn ghost toggle"
+          role="switch"
+          aria-checked={settings.value.onScreenKeyboard}
+          onclick={() => settings.update({ onScreenKeyboard: !settings.value.onScreenKeyboard })}
+        >
+          <span class="switch" aria-hidden="true"></span>Touch keyboard
         </button>
-      {:else}
-        <p class="note">Preview LAYR with sample print data. No commands are sent in demo mode.</p>
-        <button type="button" class="btn" onclick={() => onDemoMode(true)}>
-          <Icon name="play" size={18} />Open demo
+        <button
+          type="button"
+          class="btn ghost toggle"
+          role="switch"
+          aria-checked={settings.value.hideCursor}
+          onclick={() => settings.update({ hideCursor: !settings.value.hideCursor })}
+        >
+          <span class="switch" aria-hidden="true"></span>Hide pointer
         </button>
-      {/if}
+      </div>
+      <p class="hint">Dimming darkens the screen; it does not switch the backlight off. The first tap only wakes it.</p>
     </section>
 
-    <section class="card panel" aria-labelledby="set-sensors">
-      <h2 id="set-sensors" class="eyebrow">Temperature sources</h2>
-      {#if allSensors.length === 0}
-        <p class="note">No temperature data.</p>
-      {:else}
+    <section class="card panel" aria-labelledby="set-printer">
+      <h2 id="set-printer" class="eyebrow">Klipper</h2>
+      <div class="row">
+        <button
+          type="button"
+          class="btn warn"
+          disabled={!klippyReachable}
+          aria-busy={ui.isBusy({ kind: 'restart' })}
+          onclick={() => ui.run({ kind: 'restart' })}
+        >
+          <Icon name="power" size={18} />Restart
+        </button>
+        <button
+          type="button"
+          class="btn warn"
+          disabled={!klippyReachable}
+          aria-busy={ui.isBusy({ kind: 'firmware_restart' })}
+          onclick={() => ui.run({ kind: 'firmware_restart' })}
+        >
+          <Icon name="refresh" size={18} />Firmware restart
+        </button>
+      </div>
+      {#if allSensors.length > 0}
         <ul class="sensors">
           {#each allSensors as sensor (sensor.object)}
             <li>
@@ -116,18 +167,16 @@
           {/each}
         </ul>
       {/if}
-      <p class="about">LAYR v{__LAYR_VERSION__} · read-only preview</p>
+      <p class="about">LAYR v{__LAYR_VERSION__}</p>
     </section>
   </div>
 </div>
 
 <style>
   .settings {
-    height: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     gap: var(--gap);
-    overflow: auto;
     align-items: start;
   }
 
@@ -135,13 +184,6 @@
     display: grid;
     gap: var(--gap);
     min-width: 0;
-  }
-
-  .panel {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: var(--pad) calc(var(--pad) + 2px);
   }
 
   h2 {
@@ -158,7 +200,7 @@
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    padding: 5px 0;
+    padding: 4px 0;
     border-bottom: 1px solid var(--border);
     font-size: var(--fs-sm);
     min-width: 0;
@@ -178,97 +220,83 @@
     min-width: 0;
   }
 
-  .url-form {
+  .url {
     display: grid;
-    gap: 6px;
+    gap: 8px;
   }
 
-  label {
+  .label {
     font-size: var(--fs-sm);
     color: var(--text-2);
     font-weight: 600;
+  }
+
+  .url-field {
+    justify-content: flex-start;
+    min-width: 0;
+    background: var(--bg);
+  }
+
+  .url-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .url-text.placeholder {
+    color: var(--text-dim);
   }
 
   .row {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
-  input {
-    flex: 1;
-    min-width: 0;
-    min-height: var(--touch);
-    padding: 0 12px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--bg);
-    user-select: text;
-    -webkit-user-select: text;
-  }
-
-  input[aria-invalid='true'] {
-    border-color: var(--danger);
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: var(--touch);
-    padding: 0 16px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--surface-3);
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .btn.primary {
-    border-color: transparent;
-    background: var(--accent-gradient);
-    color: #06080c;
-  }
-
-  .btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .col .btn {
-    align-self: flex-start;
-  }
-
-  .note {
-    margin: 0;
-    color: var(--text-dim);
-    font-size: var(--fs-sm);
-  }
-
-  .scenarios {
+  .toggles {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 8px;
   }
 
-  .chip {
-    min-height: var(--touch);
-    padding: 0 6px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .toggle {
+    justify-content: flex-start;
+    min-width: 0;
+    padding: 0 10px;
   }
 
-  .chip[aria-checked='true'] {
-    color: var(--text);
-    border-color: color-mix(in srgb, var(--purple) 60%, transparent);
-    background: var(--purple-soft);
+  .switch {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+  }
+
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 120ms ease;
+  }
+
+  .toggle[aria-checked='true'] .switch {
+    background: var(--cyan-soft);
+    border-color: color-mix(in srgb, var(--cyan) 50%, transparent);
+  }
+
+  .toggle[aria-checked='true'] .switch::after {
+    transform: translateX(14px);
+    background: var(--cyan);
   }
 
   .sensors {
@@ -283,7 +311,7 @@
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    padding: 5px 0;
+    padding: 4px 0;
     border-bottom: 1px solid var(--border);
     font-size: var(--fs-sm);
     color: var(--text-2);

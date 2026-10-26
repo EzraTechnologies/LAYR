@@ -7,6 +7,7 @@ export interface StatusMeta {
 }
 
 export const STATUS_META: Record<PrinterStatus, StatusMeta> = {
+  unconfigured: { label: 'Not set up', tone: 'dim' },
   disconnected: { label: 'Offline', tone: 'dim' },
   connecting: { label: 'Connecting', tone: 'purple' },
   ready: { label: 'Ready', tone: 'ok' },

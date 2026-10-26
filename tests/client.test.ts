@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Backoff } from '../src/lib/moonraker/backoff';
 import {
+  CONTROL_METHODS,
   MethodNotAllowedError,
   MoonrakerClient,
-  READ_ONLY_METHODS,
+  READ_METHODS,
   toHttpUrl,
   toWebSocketUrl,
   type ClientEvent,
@@ -215,17 +216,37 @@ describe('MoonrakerClient', () => {
     client.stop();
   });
 
-  it('rejects methods that could change the printer without sending them', async () => {
+  it('rejects host and file-write methods, and keeps reads separate from controls', async () => {
     const server = new FakeMoonraker();
     const { client } = setup(server);
     client.start();
     await flush();
     const before = server.calls.length;
-    for (const method of ['printer.gcode.script', 'printer.print.cancel', 'printer.emergency_stop', 'machine.reboot']) {
-      await expect(client.query(method, { script: 'G28' })).rejects.toBeInstanceOf(MethodNotAllowedError);
+    for (const method of [
+      'machine.reboot',
+      'machine.shutdown',
+      'server.restart',
+      'server.files.write',
+      'server.files.upload',
+      'server.config.write',
+    ]) {
+      await expect(client.call(method, { script: 'G28' })).rejects.toBeInstanceOf(MethodNotAllowedError);
     }
     expect(server.calls.length).toBe(before);
-    expect([...READ_ONLY_METHODS].some((m) => /gcode|print\.|emergency|machine|write|delete|upload/.test(m))).toBe(false);
+    expect([...READ_METHODS].some((m) => /gcode\.script|print\.|emergency|machine\.|write|delete|upload/.test(m))).toBe(false);
+    expect([...CONTROL_METHODS].sort()).toEqual(
+      [
+        'printer.emergency_stop',
+        'printer.firmware_restart',
+        'printer.gcode.script',
+        'printer.print.cancel',
+        'printer.print.pause',
+        'printer.print.resume',
+        'printer.print.start',
+        'printer.restart',
+        'server.files.delete_file',
+      ].sort(),
+    );
     client.stop();
   });
 
@@ -249,7 +270,11 @@ describe('MoonrakerClient', () => {
     client.start();
     await flush();
     expect(server.sockets.length).toBe(0);
-    expect(events.at(-1)).toMatchObject({ type: 'transport', state: 'waiting', reason: 'Authentication failed (HTTP 401)' });
+    expect(events.at(-1)).toMatchObject({
+      type: 'transport',
+      state: 'waiting',
+      reason: 'Authentication failed (HTTP 401). Check the API key or trusted_clients',
+    });
     client.stop();
   });
 });

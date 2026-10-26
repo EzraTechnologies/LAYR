@@ -75,6 +75,45 @@ describe('LiveSource', () => {
     source.stop();
   });
 
+  it('resubscribes after a reconnect and replaces stale values with a fresh snapshot', async () => {
+    const server = new FakeMoonraker();
+    const { source, states } = start(server);
+    const ready: number[] = [];
+    source.onReady(() => ready.push(states.length));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ready).toHaveLength(1);
+
+    server.last.notify('notify_status_update', [{ extruder: { temperature: 180, target: 200 } }, 1]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(states.at(-1)!.extruder?.temperature).toBe(180);
+
+    server.last.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toMatchObject({ status: 'disconnected', extruder: null, toolhead: null, macros: [] });
+
+    // While offline the printer cooled down; the next snapshot must win over the cached diff.
+    server.status.extruder = { temperature: 40, target: 0, power: 0 };
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(states.at(-1)).toMatchObject({ status: 'ready', extruder: { temperature: 40, target: 0 } });
+    expect(server.calls.filter((c) => c === 'printer.objects.subscribe')).toHaveLength(2);
+    expect(ready).toHaveLength(2);
+    source.stop();
+  });
+
+  it('forwards G-code responses and exposes an allow-listed call()', async () => {
+    const server = new FakeMoonraker();
+    const { source } = start(server);
+    await vi.advanceTimersByTimeAsync(0);
+    const lines: string[] = [];
+    source.onGcodeResponse((l) => lines.push(l));
+    server.last.notify('notify_gcode_response', ['// hello']);
+    expect(lines).toEqual(['// hello']);
+    await expect(source.call('printer.gcode.script', { script: 'G28' })).resolves.toBe('ok');
+    await expect(source.call('machine.reboot')).rejects.toThrow(/not permitted/);
+    source.stop();
+    await expect(source.call('printer.gcode.script', { script: 'G28' })).rejects.toThrow('Not connected to Moonraker');
+  });
+
   it('stops all timers on stop()', async () => {
     const server = new FakeMoonraker();
     const { source } = start(server);

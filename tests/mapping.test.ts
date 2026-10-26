@@ -147,7 +147,15 @@ describe('planSubscription', () => {
   it('reports missing core objects and caps optional sensors, keeping the chamber', () => {
     const sensors = Array.from({ length: 12 }, (_, i) => `temperature_sensor probe_${i}`);
     const plan = planSubscription(['extruder', 'print_stats', ...sensors, 'temperature_fan chamber']);
-    expect(plan.missing).toEqual(['webhooks', 'display_status', 'virtual_sdcard', 'heater_bed']);
+    expect(plan.missing).toEqual([
+      'webhooks',
+      'display_status',
+      'virtual_sdcard',
+      'heater_bed',
+      'toolhead',
+      'gcode_move',
+      'idle_timeout',
+    ]);
     const optional = Object.keys(plan.objects).filter((k) => k.includes(' '));
     expect(optional).toHaveLength(MAX_OPTIONAL_SENSORS);
     expect(optional).toContain('temperature_fan chamber');
@@ -171,6 +179,8 @@ describe('assembleState', () => {
     },
     slicerEstimate: null,
     missingObjects: ['heater_bed'],
+    objects: ['extruder', 'print_stats'],
+    settings: {},
     now: 0,
   };
 

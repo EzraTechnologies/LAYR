@@ -5,7 +5,6 @@ interface ImportMetaEnv {
   readonly VITE_LAYR_MOONRAKER_URL?: string;
   readonly VITE_LAYR_PRINTER_NAME?: string;
   readonly VITE_LAYR_API_KEY?: string;
-  readonly VITE_LAYR_DEMO?: string;
 }
 
 interface ImportMeta {

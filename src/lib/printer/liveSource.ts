@@ -1,10 +1,10 @@
 import type { PrinterProfile } from '../config';
-import { MoonrakerClient, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
+import { MoonrakerClient, type CallOptions, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
 import { mergeStatus, toNumber } from '../moonraker/mapping';
 import type { FileMetadata } from '../moonraker/types';
 import { assembleState, type AssembleInputs } from './assemble';
 import type { PrinterState } from './model';
-import type { PrinterSource } from './source';
+import type { PrinterConnection, PrinterSource } from './source';
 
 export interface LiveSourceOptions {
   /** Minimum interval between UI updates. Moonraker can push status several times per second. */
@@ -15,11 +15,30 @@ export interface LiveSourceOptions {
   client?: Partial<Omit<MoonrakerClientOptions, 'baseUrl' | 'apiKey' | 'onEvent'>>;
 }
 
+type FileChange = { action: string; path: string | null; root: string | null };
+
+class Listeners<T> {
+  readonly #set = new Set<(value: T) => void>();
+  add(listener: (value: T) => void): () => void {
+    this.#set.add(listener);
+    return () => this.#set.delete(listener);
+  }
+  emit(value: T): void {
+    for (const listener of this.#set) {
+      try {
+        listener(value);
+      } catch (error) {
+        console.error('[LAYR] listener failed', error);
+      }
+    }
+  }
+}
+
 /** Live Moonraker-backed source. Coalesces status diffs and emits at most once per `flushIntervalMs`. */
-export class LiveSource implements PrinterSource {
+export class LiveSource implements PrinterSource, PrinterConnection {
   readonly kind = 'live' as const;
   readonly printerId: string;
-  readonly #profile: PrinterProfile;
+  readonly #profile: PrinterProfile & { moonrakerUrl: string };
   readonly #options: Required<Omit<LiveSourceOptions, 'client'>> & Pick<LiveSourceOptions, 'client'>;
   #client: MoonrakerClient | null = null;
   #onState: ((state: PrinterState) => void) | null = null;
@@ -28,8 +47,11 @@ export class LiveSource implements PrinterSource {
   #lastFlush = 0;
   #inputs: AssembleInputs;
   #metadataFor: string | null = null;
+  readonly #ready = new Listeners<void>();
+  readonly #gcode = new Listeners<string>();
+  readonly #files = new Listeners<FileChange>();
 
-  constructor(profile: PrinterProfile, options: LiveSourceOptions = {}) {
+  constructor(profile: PrinterProfile & { moonrakerUrl: string }, options: LiveSourceOptions = {}) {
     this.printerId = profile.id;
     this.#profile = profile;
     this.#options = { flushIntervalMs: 250, clockIntervalMs: 15_000, ...options };
@@ -46,8 +68,22 @@ export class LiveSource implements PrinterSource {
       raw: {},
       slicerEstimate: null,
       missingObjects: [],
+      objects: [],
+      settings: {},
       now: this.#now(),
     };
+  }
+
+  get connection(): PrinterConnection {
+    return this;
+  }
+
+  get hasApiKey(): boolean {
+    return !!this.#profile.apiKey;
+  }
+
+  get connected(): boolean {
+    return this.#client?.connected ?? false;
   }
 
   start(onState: (state: PrinterState) => void): void {
@@ -72,6 +108,37 @@ export class LiveSource implements PrinterSource {
     this.#flushTimer = null;
     this.#clockTimer = null;
     this.#onState = null;
+  }
+
+  call<T = unknown>(method: string, params?: Record<string, unknown>, options?: CallOptions): Promise<T> {
+    if (!this.#client) return Promise.reject(new Error('Not connected to Moonraker'));
+    return this.#client.call<T>(method, params, options);
+  }
+
+  httpUrl(path: string): string {
+    if (!this.#client) throw new Error('Not connected to Moonraker');
+    return this.#client.httpUrl(path);
+  }
+
+  fetchHttp(path: string): Promise<Response> {
+    if (!this.#client) return Promise.reject(new Error('Not connected to Moonraker'));
+    return this.#client.fetchHttp(path);
+  }
+
+  reconnect(): void {
+    this.#client?.reconnect();
+  }
+
+  onReady(listener: () => void): () => void {
+    return this.#ready.add(listener);
+  }
+
+  onGcodeResponse(listener: (message: string) => void): () => void {
+    return this.#gcode.add(listener);
+  }
+
+  onFilelistChanged(listener: (change: FileChange) => void): () => void {
+    return this.#files.add(listener);
   }
 
   #now(): number {
@@ -99,13 +166,26 @@ export class LiveSource implements PrinterSource {
         inputs.raw = mergeStatus({}, event.status);
         inputs.missingObjects = event.missing;
         inputs.hostname = event.hostname;
+        inputs.objects = event.objects;
+        inputs.settings = event.settings;
+        this.#metadataFor = null;
         this.#maybeFetchMetadata();
         this.#emitNow();
+        this.#ready.emit();
         return;
       case 'status':
         mergeStatus(inputs.raw, event.diff);
         this.#maybeFetchMetadata();
         this.#schedule();
+        return;
+      case 'host':
+        inputs.hostname = event.hostname;
+        return;
+      case 'gcode_response':
+        this.#gcode.emit(event.message);
+        return;
+      case 'filelist_changed':
+        this.#files.emit({ action: event.action, path: event.path, root: event.root });
         return;
     }
   }
@@ -119,7 +199,7 @@ export class LiveSource implements PrinterSource {
     this.#inputs.slicerEstimate = null;
     if (!name || !this.#client) return;
     this.#client
-      .query<FileMetadata>('server.files.metadata', { filename: name })
+      .call<FileMetadata>('server.files.metadata', { filename: name })
       .then((meta) => {
         if (this.#metadataFor !== name) return;
         this.#inputs.slicerEstimate = toNumber(meta.estimated_time);

@@ -77,6 +77,13 @@ export class FakeMoonraker {
   /** When false, new sockets fail to connect (closed immediately). */
   online = true;
   subscribeParams: Record<string, unknown> | undefined;
+  settings: Record<string, Record<string, unknown>> = {};
+  gcodeStore: Array<{ message: string; time: number; type: string }> = [];
+  readonly scripts: string[] = [];
+  /** Scripts that fail with the given Klipper error message. */
+  scriptErrors: Record<string, string> = {};
+  /** When true, `printer.gcode.script` never replies (to test unconfirmed outcomes). */
+  silentScripts = false;
 
   constructor(opts: FakeMoonrakerOptions = {}) {
     this.klippyState = opts.klippyState ?? 'ready';
@@ -86,7 +93,7 @@ export class FakeMoonraker {
       extruder: { temperature: 25, target: 0, power: 0 },
       heater_bed: { temperature: 24, target: 0, power: 0 },
     };
-    this.objects = opts.objects ?? Object.keys(this.status);
+    this.objects = opts.objects ?? [...Object.keys(this.status), 'configfile'];
     this.hostname = opts.hostname ?? 'fake-host';
     this.autoOpen = opts.autoOpen ?? true;
     this.silent = new Set(opts.silent ?? []);
@@ -133,6 +140,29 @@ export class FakeMoonraker {
       }
       case 'server.files.metadata':
         return reply({ estimated_time: 3600 });
+      case 'printer.objects.query':
+        return reply({ eventtime: 1, status: { configfile: { settings: this.settings } } });
+      case 'server.gcode_store':
+        return reply({ gcode_store: this.gcodeStore });
+      case 'printer.gcode.script': {
+        const script = String(msg.params?.script);
+        this.scripts.push(script);
+        if (this.silentScripts) return;
+        const error = this.scriptErrors[script];
+        if (error) {
+          return queueMicrotask(() => socket.push({ jsonrpc: '2.0', id: msg.id, error: { code: 400, message: error } }));
+        }
+        return reply('ok');
+      }
+      case 'printer.print.start':
+      case 'printer.print.pause':
+      case 'printer.print.resume':
+      case 'printer.print.cancel':
+      case 'printer.emergency_stop':
+      case 'printer.restart':
+      case 'printer.firmware_restart':
+      case 'server.files.delete_file':
+        return reply('ok');
       default:
         queueMicrotask(() =>
           socket.push({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } }),

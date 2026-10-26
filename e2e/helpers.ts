@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { FIXED_NOW, MOONRAKER, MockMoonraker, type MockOptions } from './mockMoonraker';
 
 export const VIEWPORTS = [
   { name: '1024x600', width: 1024, height: 600 },
@@ -11,6 +12,20 @@ export interface LayoutProblem {
   kind: string;
   element: string;
   detail: string;
+}
+
+/** Opens LAYR connected to a fresh mock Moonraker. */
+export async function openWithMock(
+  page: Page,
+  route: string,
+  options: MockOptions & { fixedClock?: boolean } = {},
+): Promise<MockMoonraker> {
+  const mock = new MockMoonraker(options);
+  await mock.install(page);
+  if (options.fixedClock) await page.clock.setFixedTime(FIXED_NOW);
+  await page.goto(`/?moonraker=${encodeURIComponent(MOONRAKER)}#/${route}`);
+  await expect(page.getByRole('status', { name: /Printer status/ })).not.toHaveText(/Connecting|Offline|Not set up/);
+  return mock;
 }
 
 /**
@@ -48,8 +63,8 @@ export async function findLayoutProblems(page: Page): Promise<LayoutProblem[]> {
       return false;
     };
 
-    for (const el of Array.from(document.querySelectorAll('#app *'))) {
-      if (!visible(el) || el.closest('svg')) continue;
+    for (const el of Array.from(document.querySelectorAll('body *'))) {
+      if (!visible(el) || el.closest('svg') || el.closest('.sr-only')) continue;
       const r = el.getBoundingClientRect();
       const style = getComputedStyle(el);
 
@@ -66,16 +81,12 @@ export async function findLayoutProblems(page: Page): Promise<LayoutProblem[]> {
         }
       }
 
-      if (
-        el.classList.contains('card') &&
-        style.overflowY === 'hidden' &&
-        el.scrollHeight > el.clientHeight + 1
-      ) {
+      if (el.classList.contains('card') && style.overflowY === 'hidden' && el.scrollHeight > el.clientHeight + 1) {
         problems.push({ kind: 'card-overflow', element: describe(el), detail: `${el.scrollHeight}>${el.clientHeight}` });
       }
 
-      if (el.matches('a[href], button, input, select, [role="radio"]')) {
-        if (r.width < minTouch || r.height < minTouch) {
+      if (el.matches('a[href], button, input, select, [role="radio"], [role="switch"]')) {
+        if (r.width < minTouch - 0.5 || r.height < minTouch - 0.5) {
           problems.push({ kind: 'small-target', element: describe(el), detail: `${r.width}x${r.height}` });
         }
       }

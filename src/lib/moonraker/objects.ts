@@ -8,12 +8,21 @@ export const CORE_OBJECTS: Record<string, string[]> = {
   print_stats: ['filename', 'state', 'message', 'print_duration', 'total_duration', 'filament_used', 'info'],
   display_status: ['progress', 'message'],
   virtual_sdcard: ['progress', 'is_active', 'file_path'],
-  extruder: ['temperature', 'target', 'power'],
+  extruder: ['temperature', 'target', 'power', 'can_extrude'],
   heater_bed: ['temperature', 'target', 'power'],
+  toolhead: ['homed_axes', 'position', 'axis_minimum', 'axis_maximum', 'max_velocity', 'extruder'],
+  gcode_move: ['homing_origin', 'speed_factor', 'extrude_factor'],
+  idle_timeout: ['state'],
+};
+
+/** Objects that are subscribed when present but are not reported as missing. */
+const OPTIONAL_OBJECTS: Record<string, string[]> = {
+  fan: ['speed', 'rpm'],
 };
 
 const HEATER_FIELDS = ['temperature', 'target', 'power'];
 const SENSOR_FIELDS = ['temperature'];
+const FAN_FIELDS = ['speed', 'rpm'];
 
 /** Object name prefixes for optional temperature sources discovered via `printer.objects.list`. */
 export const OPTIONAL_PREFIXES: Record<string, string[]> = {
@@ -22,13 +31,43 @@ export const OPTIONAL_PREFIXES: Record<string, string[]> = {
   'heater_generic ': HEATER_FIELDS,
 };
 
+export const FAN_PREFIXES: Record<string, { controllable: boolean }> = {
+  'fan_generic ': { controllable: true },
+  'heater_fan ': { controllable: false },
+  'controller_fan ': { controllable: false },
+};
+
+export const LED_PREFIXES = ['led ', 'neopixel ', 'dotstar ', 'pca9533 ', 'pca9632 '] as const;
+export const FILAMENT_SENSOR_PREFIXES = ['filament_switch_sensor ', 'filament_motion_sensor '] as const;
+
+/**
+ * `output_pin` objects can drive anything (beepers, relays, heaters on some machines), so only pins whose names
+ * look like lighting are offered as light controls.
+ */
+export const LIGHT_PIN_RE = /(light|led|lamp|lighting|lights)/i;
+
 /** Cap optional sensors so a printer with many probes cannot flood the display. */
 export const MAX_OPTIONAL_SENSORS = 8;
+const MAX_FANS = 8;
+const MAX_LIGHTS = 6;
 
 export interface SubscriptionPlan {
   objects: Record<string, string[]>;
   /** Core objects that this printer does not provide. */
   missing: string[];
+}
+
+function startsWithAny(name: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((p) => name.startsWith(p));
+}
+
+export function isLightObject(name: string): boolean {
+  if (startsWithAny(name, LED_PREFIXES)) return true;
+  return name.startsWith('output_pin ') && LIGHT_PIN_RE.test(objectSuffix(name));
+}
+
+export function isFanObject(name: string): boolean {
+  return name === 'fan' || Object.keys(FAN_PREFIXES).some((p) => name.startsWith(p));
 }
 
 /**
@@ -44,6 +83,9 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     if (availableSet.has(name)) objects[name] = fields;
     else missing.push(name);
   }
+  for (const [name, fields] of Object.entries(OPTIONAL_OBJECTS)) {
+    if (availableSet.has(name)) objects[name] = fields;
+  }
 
   const optional: Array<[string, string[]]> = [];
   for (const name of available) {
@@ -56,7 +98,20 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     objects[name] = fields;
   }
 
+  available.filter((n) => n !== 'fan' && isFanObject(n)).slice(0, MAX_FANS).forEach((n) => (objects[n] = FAN_FIELDS));
+  for (const name of available.filter(isLightObject).slice(0, MAX_LIGHTS)) {
+    objects[name] = name.startsWith('output_pin ') ? ['value'] : ['color_data'];
+  }
+  for (const name of available.filter((n) => startsWithAny(n, FILAMENT_SENSOR_PREFIXES))) {
+    objects[name] = ['filament_detected', 'enabled'];
+  }
+
   return { objects, missing };
+}
+
+/** `gcode_macro NAME` objects, as listed by `printer.objects.list`. */
+export function macroObjects(available: readonly string[]): string[] {
+  return available.filter((n) => n.startsWith('gcode_macro '));
 }
 
 /** Returns the user-facing part of an object name: `temperature_sensor chamber` → `chamber`. */
@@ -67,4 +122,10 @@ export function objectSuffix(name: string): string {
 
 export function isChamberObject(name: string): boolean {
   return name.includes(' ') && objectSuffix(name).toLowerCase().includes('chamber');
+}
+
+/** Turns `nevermore_fan` / `case-light` into `Nevermore fan` / `Case light`. */
+export function humanize(name: string): string {
+  const words = name.replace(/[_-]+/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }

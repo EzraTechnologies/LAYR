@@ -1,4 +1,4 @@
-import type { CommandGateway } from '../actions/commands';
+import { CommandGateway } from '../actions/gateway';
 import { createInitialState, type PrinterState } from './model';
 import { patchInPlace } from './patch';
 import type { PrinterSource } from './source';
@@ -10,14 +10,14 @@ export class PrinterStore {
   readonly commands: CommandGateway;
   #started = false;
 
-  constructor(source: PrinterSource, commands: CommandGateway, printerName = '') {
+  constructor(source: PrinterSource, printerName = '') {
     this.source = source;
-    this.commands = commands;
-    this.state = $state(createInitialState(source.printerId, printerName, Date.now()));
+    this.state = $state(createInitialState(source.printerId, printerName, Date.now(), source.kind === 'live'));
+    this.commands = new CommandGateway(source.connection, () => this.state);
   }
 
-  get isDemo(): boolean {
-    return this.source.kind === 'demo';
+  get configured(): boolean {
+    return this.source.kind === 'live';
   }
 
   start(): void {

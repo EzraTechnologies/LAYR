@@ -1,6 +1,5 @@
 /**
- * Source-agnostic printer view model. Both the live Moonraker source and the demo source
- * produce `PrinterState`; UI components only ever read this shape.
+ * Printer view model. The live Moonraker source produces `PrinterState`; UI components only ever read this shape.
  */
 
 /** Low-level WebSocket transport state. */
@@ -20,8 +19,11 @@ export type KlippyState = 'ready' | 'startup' | 'shutdown' | 'error' | 'disconne
 /** `print_stats.state` values reported by Klipper. */
 export type JobState = 'standby' | 'printing' | 'paused' | 'complete' | 'cancelled' | 'error' | 'unknown';
 
-/** Top-level status shown to the user. */
-export type PrinterStatus = 'disconnected' | 'connecting' | 'ready' | 'printing' | 'paused' | 'error';
+/** Top-level status shown to the user. `unconfigured` means no Moonraker endpoint has been set up yet. */
+export type PrinterStatus = 'unconfigured' | 'disconnected' | 'connecting' | 'ready' | 'printing' | 'paused' | 'error';
+
+export type Axis = 'x' | 'y' | 'z';
+export const AXES: readonly Axis[] = ['x', 'y', 'z'];
 
 export interface HeaterReading {
   /** Klipper object name, e.g. `extruder`, `heater_bed`, `temperature_sensor chamber`. */
@@ -57,6 +59,81 @@ export interface JobInfo {
   message: string | null;
 }
 
+export interface ToolheadInfo {
+  /** Homed axes as reported by `toolhead.homed_axes`, e.g. `"xyz"`. */
+  homedAxes: string;
+  /** Last commanded position (x, y, z, e) in the config coordinate system. */
+  position: [number, number, number, number] | null;
+  axisMin: [number, number, number] | null;
+  axisMax: [number, number, number] | null;
+  maxVelocity: number | null;
+  /** Current `SET_GCODE_OFFSET` Z (`gcode_move.homing_origin[2]`). */
+  zOffset: number | null;
+  speedFactor: number | null;
+  extrudeFactor: number | null;
+}
+
+export interface FanReading {
+  object: string;
+  label: string;
+  /** 0..1 */
+  speed: number | null;
+  rpm: number | null;
+  /** True for `fan` (M106) and `fan_generic` (SET_FAN_SPEED); heater/controller fans are automatic. */
+  controllable: boolean;
+}
+
+export interface LightControl {
+  object: string;
+  label: string;
+  kind: 'pin' | 'led';
+  /** 0..1 brightness, or null when unknown. */
+  value: number | null;
+  dimmable: boolean;
+  /** `output_pin` `scale` option; `SET_PIN VALUE` is expressed in this unit. */
+  scale: number;
+}
+
+export interface MacroInfo {
+  /** Command name as typed in the console, upper case. */
+  name: string;
+  description: string | null;
+  /** Parameter names referenced as `params.X` in the macro template. */
+  params: string[];
+  /** Parameters without a default; the macro must not be run without them. */
+  requiredParams: string[];
+  /** Macros prefixed with `_` are treated as internal. */
+  hidden: boolean;
+}
+
+export interface FilamentSensor {
+  object: string;
+  label: string;
+  detected: boolean | null;
+  enabled: boolean | null;
+}
+
+export interface HeaterLimits {
+  minTemp: number;
+  maxTemp: number;
+}
+
+/** Limits read from Klipper's `configfile.settings`, or conservative fallbacks when unavailable. */
+export interface PrinterLimits {
+  /** True when the values below come from the printer's configuration. */
+  fromConfig: boolean;
+  extruder: HeaterLimits & {
+    minExtrudeTemp: number;
+    maxExtrudeOnlyDistance: number;
+    maxExtrudeOnlyVelocity: number | null;
+  };
+  bed: HeaterLimits | null;
+  /** Additional heaters (`heater_generic`), keyed by object name. */
+  heaters: Record<string, HeaterLimits>;
+  maxVelocity: number | null;
+  maxZVelocity: number | null;
+}
+
 export interface PrinterState {
   /** Stable id of the printer profile this state belongs to. */
   printerId: string;
@@ -78,18 +155,37 @@ export interface PrinterState {
   chamber: HeaterReading | null;
   /** Additional temperature sensors / generic heaters, excluding the chamber. */
   sensors: HeaterReading[];
+  /** `extruder.can_extrude`: false while below `min_extrude_temp`. */
+  canExtrude: boolean | null;
+  toolhead: ToolheadInfo | null;
+  fans: FanReading[];
+  lights: LightControl[];
+  macros: MacroInfo[];
+  filamentSensors: FilamentSensor[];
+  limits: PrinterLimits;
+  /** `idle_timeout.state`: `Idle`, `Ready` or `Printing` (Klipper is busy executing G-code). */
+  idleState: string | null;
   /** Requested Klipper objects that this printer does not provide. */
   missingObjects: string[];
-  /** Epoch ms "now" used for clock/ETA rendering. Frozen in demo mode for deterministic output. */
+  /** Epoch ms "now" used for clock/ETA rendering. */
   now: number;
 }
 
-export function createInitialState(printerId: string, printerName: string, now: number): PrinterState {
+export const FALLBACK_LIMITS: PrinterLimits = {
+  fromConfig: false,
+  extruder: { minTemp: 0, maxTemp: 280, minExtrudeTemp: 170, maxExtrudeOnlyDistance: 50, maxExtrudeOnlyVelocity: null },
+  bed: { minTemp: 0, maxTemp: 110 },
+  heaters: {},
+  maxVelocity: null,
+  maxZVelocity: null,
+};
+
+export function createInitialState(printerId: string, printerName: string, now: number, configured = true): PrinterState {
   return {
     printerId,
     printerName,
     hostname: null,
-    status: 'disconnected',
+    status: configured ? 'disconnected' : 'unconfigured',
     statusDetail: null,
     transport: 'idle',
     klippy: 'unknown',
@@ -100,6 +196,14 @@ export function createInitialState(printerId: string, printerName: string, now: 
     bed: null,
     chamber: null,
     sensors: [],
+    canExtrude: null,
+    toolhead: null,
+    fans: [],
+    lights: [],
+    macros: [],
+    filamentSensors: [],
+    limits: structuredClone(FALLBACK_LIMITS),
+    idleState: null,
     missingObjects: [],
     now,
   };
@@ -156,4 +260,16 @@ export function deriveStatus(input: StatusInputs): { status: PrinterStatus; deta
 /** Statuses during which the job card should show live job details. */
 export function isJobActive(status: PrinterStatus): boolean {
   return status === 'printing' || status === 'paused';
+}
+
+/**
+ * True when Klipper is connected and accepting commands. Note a `print_stats` error (status `error` with
+ * Klippy `ready`) still accepts commands, so this is based on Klippy, not on the derived status.
+ */
+export function isKlippyReady(state: Pick<PrinterState, 'transport' | 'klippy'>): boolean {
+  return state.transport === 'connected' && state.klippy === 'ready';
+}
+
+export function isHomed(state: Pick<PrinterState, 'toolhead'>, axis: Axis): boolean {
+  return !!state.toolhead && state.toolhead.homedAxes.includes(axis);
 }

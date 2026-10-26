@@ -36,7 +36,7 @@
           class:active={current === route.id}
           aria-current={current === route.id ? 'page' : undefined}
         >
-          <Icon name={route.icon} size={24} />
+          <Icon name={route.icon} size={22} />
           <span>{route.label}</span>
         </a>
       </li>
@@ -77,11 +77,15 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    display: grid;
+    grid-auto-rows: minmax(var(--touch), 1fr);
+    gap: 3px;
     flex: 1;
-    justify-content: space-evenly;
+    min-height: 0;
+  }
+
+  li {
+    display: grid;
     min-height: 0;
   }
 
@@ -91,9 +95,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    min-height: max(var(--touch), 58px);
-    padding: 6px 2px;
+    gap: 2px;
+    min-height: var(--touch);
+    padding: 4px 2px;
     border-radius: var(--radius-sm);
     color: var(--text-dim);
     text-decoration: none;
@@ -128,14 +132,23 @@
     color: var(--cyan);
   }
 
-  @media (max-height: 540px) {
+  @media (max-height: 640px) {
     .wordmark {
       display: none;
     }
+  }
+
+  @media (max-height: 540px) {
+    .brand {
+      display: none;
+    }
+    .rail {
+      padding: 8px 6px;
+      gap: 0;
+    }
     a {
-      min-height: var(--touch);
-      gap: 1px;
-      padding: 4px 2px;
+      gap: 0;
+      padding: 2px;
     }
   }
 </style>
