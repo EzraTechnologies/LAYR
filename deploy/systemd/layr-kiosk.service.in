@@ -1,0 +1,33 @@
+# LAYR kiosk: Chromium in the cage Wayland compositor on its own VT (tty7), as a separate session from
+# KlipperScreen. install.sh installs this unit but never enables or starts it; use deploy/layr-display.sh.
+# @VARS@ are replaced at install time.
+[Unit]
+Description=LAYR kiosk display (Chromium in cage on tty7)
+After=systemd-user-sessions.service network-online.target @WEB_UNIT@
+Wants=@WEB_UNIT@ network-online.target
+Conflicts=getty@tty7.service
+ConditionPathExists=/dev/tty7
+
+[Service]
+Type=simple
+User=@USER@
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+EnvironmentFile=@LAYR_HOME@/layr.env
+# Never fight KlipperScreen for the display: refuse to start while it is running.
+ExecStartPre=/bin/sh -c 'if systemctl is-active --quiet @KS_UNIT@; then echo "@KS_UNIT@ is running. Use layr-display.sh to switch." >&2; exit 1; fi'
+ExecStartPre=/usr/bin/chvt 7
+ExecStart=@LAYR_HOME@/bin/layr-kiosk.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+# LAYR static web server. Serves the built UI on the loopback interface only, so other machines on the
+# network cannot load this copy of LAYR. Installed by deploy/install.sh; @VARS@ are replaced at install time.
+[Unit]
+Description=LAYR touch UI (static files on 127.0.0.1:@PORT@)
+After=network.target
+
+[Service]
+Type=simple
+User=@USER@
+ExecStart=/usr/bin/python3 -m http.server @PORT@ --bind 127.0.0.1 --directory @LAYR_HOME@/current
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
