@@ -1,0 +1,33 @@
+/**
+ * Spoolman integration contract — NOT IMPLEMENTED in v0.1. Defined so the Filament screen and printer
+ * profiles can be built against a stable interface later.
+ *
+ * Planned workflow:
+ *  1. Browse available spools (Moonraker `server.spoolman.proxy` → Spoolman `GET /v1/spool`).
+ *  2. Select the active spool for a printer (`server.spoolman.post_spool_id`), with confirmation.
+ *  3. Clear the active spool only after an unload that the user has confirmed completed successfully
+ *     (`server.spoolman.post_spool_id` with `spool_id: null`). A failed or cancelled unload keeps the spool.
+ *
+ * All of these are write operations and must go through a confirmed `CommandGateway` path, never run in
+ * demo mode, and be scoped per `PrinterProfile.id`.
+ */
+
+export interface SpoolSummary {
+  id: number;
+  name: string;
+  material: string | null;
+  vendor: string | null;
+  /** Hex colour without `#`, as stored by Spoolman. */
+  colorHex: string | null;
+  remainingWeightG: number | null;
+}
+
+export type UnloadOutcome = { kind: 'confirmed-success' } | { kind: 'failed'; reason: string } | { kind: 'cancelled' };
+
+export interface SpoolmanService {
+  listSpools(printerId: string): Promise<SpoolSummary[]>;
+  getActiveSpool(printerId: string): Promise<SpoolSummary | null>;
+  setActiveSpool(printerId: string, spoolId: number): Promise<void>;
+  /** Must only clear when `outcome.kind === 'confirmed-success'`. */
+  clearActiveSpoolAfterUnload(printerId: string, outcome: UnloadOutcome): Promise<void>;
+}
