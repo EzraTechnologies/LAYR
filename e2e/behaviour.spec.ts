@@ -122,6 +122,9 @@ test('live mode maps Moonraker data from a mocked socket', async ({ page }) => {
   await expect(page.getByText('mock-host')).toBeVisible();
   await expect(page.getByText('Printer control is not available in LAYR v0.1')).toBeVisible();
   await expectCleanLayout(page);
+  await page.waitForTimeout(700);
+  // Live clock makes this capture non-deterministic, so it is kept out of docs/.
+  await page.screenshot({ path: 'test-results/live-mocked-1024x600.png' });
 
   const allowed = new Set([
     'server.connection.identify',
