@@ -20,7 +20,10 @@
   const ringTone = $derived(
     printerState.status === 'paused' ? 'warn' : job?.state === 'complete' ? 'ok' : active ? 'cyan' : 'dim',
   );
-  const eta = $derived(job?.remaining != null ? printerState.now + job.remaining * 1000 : null);
+  // A wall-clock ETA is meaningless while paused; only the remaining duration is shown then.
+  const eta = $derived(
+    printerState.status === 'printing' && job?.remaining != null ? printerState.now + job.remaining * 1000 : null,
+  );
   const layerText = $derived(
     job?.currentLayer != null && job.totalLayers != null && job.totalLayers > 0
       ? `${job.currentLayer} / ${job.totalLayers}`

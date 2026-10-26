@@ -1,4 +1,7 @@
-/** Formats seconds as `1h 07m`, `12m 05s` or `45s`. */
+/**
+ * Formats seconds as `1h 07m`, `42m` or `4m 05s`. Seconds are only shown under 10 minutes so live values
+ * do not change (and re-render) every second for most of a print.
+ */
 export function formatDuration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return '—';
   const s = Math.round(seconds);
@@ -6,6 +9,7 @@ export function formatDuration(seconds: number | null | undefined): string {
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m >= 10) return `${m}m`;
   if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
   return `${sec}s`;
 }

@@ -37,6 +37,7 @@
       cooling: 'Cooling',
     }[phase],
   );
+  const powerPct = $derived(reading?.power == null ? null : Math.round(reading.power * 100));
   const fill = $derived(heating && temp !== null && target ? Math.min(1, Math.max(0, temp / target)) : 0);
   const ariaText = $derived(
     !reading || temp === null
@@ -56,21 +57,31 @@
     {/if}
   </header>
 
-  {#if !reading || temp === null}
-    <p class="unavailable">{unavailableText}</p>
-  {:else}
-    <div class="values" aria-hidden="true">
-      <span class="current num">{formatTemp(temp)}<span class="unit">°C</span></span>
-      {#if target !== null}
-        <span class="target num">/ {heating ? `${formatTemp(target)}°` : 'off'}</span>
-      {/if}
-    </div>
-    {#if target !== null}
-      <div class="meter" aria-hidden="true">
-        <div class="meter-fill" style:transform={`scaleX(${fill})`}></div>
+  <div class="readout">
+    {#if !reading || temp === null}
+      <div class="values muted" aria-hidden="true">
+        <span class="current num">—<span class="unit">°C</span></span>
       </div>
+      <p class="foot">{unavailableText}</p>
+    {:else}
+      <div class="values" aria-hidden="true">
+        <span class="current num">{formatTemp(temp)}<span class="unit">°C</span></span>
+        {#if target !== null}
+          <span class="target num">/ {heating ? `${formatTemp(target)}°` : 'off'}</span>
+        {/if}
+        {#if powerPct !== null && heating}
+          <span class="power num">{powerPct}%</span>
+        {/if}
+      </div>
+      {#if target !== null}
+        <div class="meter" aria-hidden="true">
+          <div class="meter-fill" style:transform={`scaleX(${fill})`}></div>
+        </div>
+      {:else}
+        <p class="foot">Read-only sensor</p>
+      {/if}
     {/if}
-  {/if}
+  </div>
 </section>
 
 <style>
@@ -118,11 +129,31 @@
     white-space: nowrap;
   }
 
+  .readout {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   .values {
     display: flex;
     align-items: baseline;
     gap: 8px;
     white-space: nowrap;
+  }
+
+  .values.muted .current {
+    color: var(--text-dim);
+  }
+
+  .power {
+    margin-left: auto;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-dim);
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .current {
@@ -162,9 +193,11 @@
     transition: transform 400ms ease-out;
   }
 
-  .unavailable {
+  .foot {
     margin: 0;
     color: var(--text-dim);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
+    line-height: 1.1;
+    white-space: nowrap;
   }
 </style>

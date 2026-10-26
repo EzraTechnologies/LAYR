@@ -13,9 +13,10 @@
   <div class="brand" aria-label="LAYR">
     <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
       <defs>
-        <linearGradient id="layr-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="var(--cyan)" />
-          <stop offset="1" stop-color="var(--purple)" />
+        <!-- userSpaceOnUse: bounding-box gradients do not render on zero-height horizontal strokes. -->
+        <linearGradient id="layr-mark" gradientUnits="userSpaceOnUse" x1="6" y1="9" x2="26" y2="23">
+          <stop offset="0" style:stop-color="var(--cyan)" />
+          <stop offset="1" style:stop-color="var(--purple)" />
         </linearGradient>
       </defs>
       <g fill="none" stroke="url(#layr-mark)" stroke-width="3" stroke-linecap="round">
