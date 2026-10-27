@@ -77,7 +77,7 @@ test.describe('dashboard', () => {
     await expect(page.getByLabel(/Nozzle: 255 degrees, target 255 degrees/)).toBeVisible();
     await expect(page.getByLabel(/Chamber: 51 degrees/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Fans' }).last()).toContainText('Part cooling');
-    await expect(page.getByText('trident', { exact: true })).toBeVisible();
+    await expect(page.locator('header.bar').getByText('trident', { exact: true })).toHaveCount(0);
 
     const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
     await expect(motion).toContainText('48');
