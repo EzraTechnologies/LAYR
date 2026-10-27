@@ -39,6 +39,7 @@ Item {
         anchors.margins: page.compact ? 10 : 14
         contentWidth: width
         contentHeight: Math.max(height, form.implicitHeight)
+        anchors.bottomMargin: keyboard.visible ? keyboard.height + 8 : (page.compact ? 10 : 14)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height + 1
@@ -259,7 +260,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: page.compact ? 188 : 210
+        // Five 40px key rows, four 6px gaps, plus 16px vertical margins.
+        // The previous 188/210px height clipped the final Space/Delete/Done row.
+        height: 240
         color: "#f0101218"
         border.color: Style.border
 
