@@ -12,6 +12,7 @@ Item {
     property bool draftHide: true
     property int draftDim: 0
     property Item keyboardTarget: null
+    property bool shiftActive: false
     readonly property int controlHeight: page.compact ? 44 : 48
     readonly property bool split: width >= 680
 
@@ -286,12 +287,13 @@ Item {
                             radius: 8
                             color: Style.surface3
                             property string glyph: keyRow.modelData.charAt(index)
-                            Text { anchors.centerIn: parent; text: glyph; color: Style.text; font.bold: true }
+                            Text { anchors.centerIn: parent; text: page.shiftActive ? glyph.toUpperCase() : glyph; color: Style.text; font.bold: true }
                             MouseArea {
                                 anchors.fill: parent
                                 onClicked: {
                                     if (page.keyboardTarget)
-                                        page.keyboardTarget.insert(page.keyboardTarget.cursorPosition, glyph)
+                                        page.keyboardTarget.insert(page.keyboardTarget.cursorPosition, page.shiftActive ? glyph.toUpperCase() : glyph)
+                                    page.shiftActive = false
                                 }
                             }
                         }
@@ -301,6 +303,14 @@ Item {
             Row {
                 spacing: 8
                 anchors.horizontalCenter: parent.horizontalCenter
+                Rectangle {
+                    width: 100
+                    height: 40
+                    radius: 8
+                    color: page.shiftActive ? Style.purple : Style.surface3
+                    Text { anchors.centerIn: parent; text: "Shift ↑"; color: page.shiftActive ? "#061016" : Style.text; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: page.shiftActive = !page.shiftActive }
+                }
                 Rectangle {
                     width: 120
                     height: 40
