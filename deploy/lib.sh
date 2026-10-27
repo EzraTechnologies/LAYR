@@ -58,3 +58,43 @@ unit_enabled() {
 browser_bin() {
   command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null || true
 }
+
+# Resolve a --dist path.
+# Empty means <script dir>/../dist (the repo build). Absolute paths stay absolute.
+# Anything else is relative to the directory the user ran the script from, not to deploy/.
+resolve_dist() {
+  local caller_pwd="$1" script_dir="$2" dist="${3-}"
+  if [ -z "$dist" ]; then
+    dist="$script_dir/../dist"
+  else
+    case "$dist" in
+      /*) ;;
+      *) dist="$caller_pwd/$dist" ;;
+    esac
+  fi
+  (cd "$dist" 2>/dev/null && pwd)
+}
+
+# Rewrite port and Moonraker URL. Every other KEY=VALUE line is kept, including
+# LAYR_KIOSK_ENGINE and LAYR_HIDE_CURSOR, so an upgrade does not drop them.
+write_layr_env() {
+  local dest="$1" port="$2" moonraker="$3" tmp line
+  tmp=$(mktemp)
+  if [ -f "$dest" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        LAYR_PORT=* | LAYR_MOONRAKER_URL=* | '') ;;
+        *) printf '%s\n' "$line" >>"$tmp" ;;
+      esac
+    done <"$dest"
+  fi
+  {
+    printf 'LAYR_PORT=%s\n' "$port"
+    printf 'LAYR_MOONRAKER_URL=%s\n' "$moonraker"
+    if [ -s "$tmp" ]; then
+      cat "$tmp"
+    fi
+  } >"$dest"
+  rm -f "$tmp"
+  chmod 600 "$dest"
+}

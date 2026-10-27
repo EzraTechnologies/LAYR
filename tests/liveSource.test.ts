@@ -114,6 +114,62 @@ describe('LiveSource', () => {
     await expect(source.call('printer.gcode.script', { script: 'G28' })).rejects.toThrow('Not connected to Moonraker');
   });
 
+  it('shows Klipper live speed and volumetric flow, not the percentage overrides', async () => {
+    const server = new FakeMoonraker();
+    server.status.motion_report = { live_velocity: 48.2, live_extruder_velocity: 5 };
+    server.status.gcode_move = { speed_factor: 1.5, extrude_factor: 1.2 };
+    server.status.toolhead = { extruder: 'extruder' };
+    server.objects = [...Object.keys(server.status), 'configfile'];
+    server.settings = { extruder: { filament_diameter: '1.75' } };
+    const { source, states } = start(server);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)!.motion).toMatchObject({ speedMmS: 48, flowMm3S: 12, filamentDiameterMm: 1.75, flowGap: null });
+    expect(states.at(-1)!.toolhead?.speedFactor).toBe(1.5);
+    source.stop();
+  });
+
+  it('drops a stale thumbnail when the file changes, including nested paths', async () => {
+    const server = new FakeMoonraker();
+    server.status.print_stats = { filename: 'a.gcode', state: 'printing', print_duration: 30, total_duration: 30 };
+    server.metadata['a.gcode'] = { thumbnails: [{ width: 300, height: 300, relative_path: '.thumbs/a.png' }] };
+    server.metadata['nested/b.gcode'] = { thumbnails: [{ width: 32, height: 32, relative_path: '.thumbs/b.png' }] };
+    const { source, states } = start(server);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(states.at(-1)!.job?.thumbnailPath).toBe('.thumbs/a.png');
+
+    server.last.notify('notify_status_update', [{ print_stats: { filename: 'nested/b.gcode' } }, 1]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(states.at(-1)!.job?.thumbnailPath).toBe('nested/.thumbs/b.png');
+
+    server.last.notify('notify_status_update', [{ print_stats: { filename: 'gone.gcode' } }, 2]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(states.at(-1)!.job?.thumbnailPath).toBeNull();
+    source.stop();
+  });
+
+  it('coalesces motion_report bursts and clears them on disconnect', async () => {
+    const server = new FakeMoonraker();
+    server.status.motion_report = { live_velocity: 10, live_extruder_velocity: 0 };
+    server.objects = [...Object.keys(server.status), 'configfile'];
+    server.settings = { extruder: { filament_diameter: '1.75' } };
+    const { source, states } = start(server);
+    await vi.advanceTimersByTimeAsync(300);
+    const before = states.length;
+    for (let i = 0; i < 20; i++) {
+      server.last.notify('notify_status_update', [{ motion_report: { live_velocity: 10.2 + i * 0.01, live_extruder_velocity: 0 } }, i]);
+    }
+    expect(states.length).toBe(before);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(states.length).toBe(before + 1);
+    expect(states.at(-1)!.motion.speedMmS).toBe(10);
+
+    server.online = false;
+    server.last.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)!.motion).toMatchObject({ speedMmS: null, flowMm3S: null });
+    source.stop();
+  });
+
   it('stops all timers on stop()', async () => {
     const server = new FakeMoonraker();
     const { source } = start(server);

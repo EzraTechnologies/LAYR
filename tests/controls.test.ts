@@ -27,7 +27,8 @@ describe('subscription plan for controls', () => {
     );
     expect(plan.objects).not.toHaveProperty('output_pin beeper');
     expect(plan.objects).not.toHaveProperty('gcode_macro PRINT_START');
-    expect(plan.objects).not.toHaveProperty('configfile');
+    expect(plan.objects.configfile).toEqual(['settings']);
+    expect(plan.objects).not.toHaveProperty('motion_report');
     expect(plan.objects.toolhead).toContain('homed_axes');
   });
 });
@@ -150,6 +151,7 @@ describe('assembleState with controls', () => {
     missingObjects: [],
     objects: ['gcode_macro PARK'],
     settings: { extruder: { max_temp: 290 } },
+    thumbnailPath: null,
     now: 0,
     ...over,
   });

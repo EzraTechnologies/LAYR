@@ -16,18 +16,25 @@
 # Build on a workstation first (`npm ci && npm run build`), copy the repo or dist/ to the Pi,
 # then run this script as the printer user (the same user that owns printer_data). Test in a
 # normal browser before switching the display with deploy/layr-display.sh.
+#
+# --dist is resolved from the directory you ran the script in (or as an absolute path).
+# The default is the dist/ directory next to deploy/. Re-running this script refreshes
+# ~/layr/bin (the kiosk launcher). It does not restart Klipper or Moonraker.
 set -euo pipefail
-cd "$(dirname "$0")" || exit 1
+CALLER_PWD=$(pwd)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$SCRIPT_DIR" || exit 1
 # shellcheck source=deploy/lib.sh
 . ./lib.sh
 
-DIST="../dist"
+# Empty means "the dist directory next to this script", resolved after the caller cwd is known.
+DIST_ARG=""
 PORT=7180
 MOONRAKER="http://localhost:7125"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dist) DIST="$2"; shift 2 ;;
+    --dist) DIST_ARG="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --moonraker) MOONRAKER="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -53,7 +60,7 @@ case "$MOONRAKER" in
   *@*) die "Do not put a username or password in the Moonraker URL" ;;
 esac
 
-DIST=$(cd "$DIST" 2>/dev/null && pwd) || die "Build directory not found. Run 'npm run build' and pass --dist."
+DIST=$(resolve_dist "$CALLER_PWD" "$SCRIPT_DIR" "$DIST_ARG") || die "Build directory not found. Run 'npm run build' and pass --dist."
 [ -f "$DIST/index.html" ] || die "No index.html in $DIST. Run 'npm run build' first."
 
 USER_NAME=$(id -un)
@@ -73,8 +80,11 @@ fi
 
 run mkdir -p "$LAYR_HOME/releases" "$LAYR_HOME/bin" "$LAYR_STATE"
 run cp -a "$DIST" "$RELEASE"
-run cp -a ./layr-kiosk.sh "$LAYR_HOME/bin/layr-kiosk.sh"
-run chmod 755 "$LAYR_HOME/bin/layr-kiosk.sh"
+# Every install refreshes the launcher. rollback.sh only moves the web symlink, not these files.
+for launcher in layr-kiosk.sh kiosk-lib.sh layr-engine.sh read-hide-cursor.py blank-cursor.py; do
+  run cp -a "./$launcher" "$LAYR_HOME/bin/$launcher"
+  run chmod 755 "$LAYR_HOME/bin/$launcher"
+done
 
 if [ -L "$LAYR_HOME/current" ] || [ -d "$LAYR_HOME/current" ]; then
   previous=$(readlink -f "$LAYR_HOME/current" || true)
@@ -88,12 +98,10 @@ if [ -L "$LAYR_HOME/current" ] || [ -d "$LAYR_HOME/current" ]; then
 fi
 run ln -sfn "$RELEASE" "$LAYR_HOME/current"
 
-env_body=$(printf 'LAYR_PORT=%s\nLAYR_MOONRAKER_URL=%s\n' "$PORT" "$MOONRAKER")
 if [ "$DRY_RUN" = 1 ]; then
-  printf '   [dry-run] write %s\n' "$LAYR_ENV"
+  printf '   [dry-run] write %s (keep every key except LAYR_PORT and LAYR_MOONRAKER_URL)\n' "$LAYR_ENV"
 else
-  printf '%s\n' "$env_body" >"$LAYR_ENV"
-  chmod 600 "$LAYR_ENV"
+  write_layr_env "$LAYR_ENV" "$PORT" "$MOONRAKER"
 fi
 
 render_unit() {
@@ -114,9 +122,21 @@ render_unit() {
 render_unit ./systemd/layr-web.service.in "$UNIT_DIR/$WEB_UNIT"
 render_unit ./systemd/layr-kiosk.service.in "$UNIT_DIR/$KIOSK_UNIT"
 run sudo systemctl daemon-reload
-run sudo systemctl enable --now "$WEB_UNIT"
-# The kiosk unit is installed so it can be switched on later. It stays disabled.
-run sudo systemctl disable "$KIOSK_UNIT" || true
+run sudo systemctl enable "$WEB_UNIT"
+# Restart only the static file server so an upgrade is what the browser loads.
+# This does not restart Klipper, Moonraker, or the kiosk.
+if unit_active "$WEB_UNIT"; then
+  run sudo systemctl restart "$WEB_UNIT"
+else
+  run sudo systemctl start "$WEB_UNIT"
+fi
+# A first install leaves the kiosk disabled. An upgrade must not disable a kiosk
+# that layr-display.sh already turned on, and it does not start or stop that unit.
+if unit_enabled "$KIOSK_UNIT"; then
+  info "layr-kiosk.service is already enabled. It is left enabled and is not restarted."
+else
+  run sudo systemctl disable "$KIOSK_UNIT" || true
+fi
 
 info "Web UI is (or would be) at http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}#/home"
 echo "Open that address in Chromium on this Pi before using the kiosk."

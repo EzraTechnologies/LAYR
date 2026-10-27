@@ -57,6 +57,26 @@ export interface JobInfo {
   filamentUsed: number | null;
   /** `print_stats.message` / `display_status.message`, if any. */
   message: string | null;
+  /** G-code thumbnail path relative to the gcodes root, or null when metadata has none. */
+  thumbnailPath: string | null;
+}
+
+/**
+ * Live motion from Klipper `motion_report`, not from `speed_factor` / `extrude_factor`.
+ * Values are quantized so tiny changes do not re-render the dashboard.
+ */
+export interface MotionTelemetry {
+  /** `motion_report.live_velocity` in mm/s, or null when Klipper did not report it. */
+  speedMmS: number | null;
+  /**
+   * Volumetric flow in mm³/s: live extruder velocity × filament area.
+   * Negative means retraction. Null when velocity or filament diameter is unavailable.
+   */
+  flowMm3S: number | null;
+  /** Diameter used for the area, in mm, or null when the config does not provide a usable one. */
+  filamentDiameterMm: number | null;
+  /** Why `flowMm3S` is null. Null when a flow number (including 0) was calculated. */
+  flowGap: 'velocity' | 'diameter' | null;
 }
 
 export interface ToolheadInfo {
@@ -157,6 +177,8 @@ export interface PrinterState {
   sensors: HeaterReading[];
   /** `extruder.can_extrude`: false while below `min_extrude_temp`. */
   canExtrude: boolean | null;
+  /** Klipper-reported live speed and volumetric flow. Empty when disconnected or unreported. */
+  motion: MotionTelemetry;
   toolhead: ToolheadInfo | null;
   fans: FanReading[];
   lights: LightControl[];
@@ -197,6 +219,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     chamber: null,
     sensors: [],
     canExtrude: null,
+    motion: { speedMmS: null, flowMm3S: null, filamentDiameterMm: null, flowGap: 'velocity' },
     toolhead: null,
     fans: [],
     lights: [],

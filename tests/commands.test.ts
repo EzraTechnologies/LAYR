@@ -238,6 +238,16 @@ describe('print, files and macros', () => {
     });
   });
 
+  it('adjusts M220 and M221 percentages without treating them as live speed or flow', () => {
+    const printing = withJob(readyState(), 'printing');
+    expect(script(prepareCommand({ kind: 'set_speed_factor', percent: 160 }, printing))).toBe('M220 S160');
+    expect(script(prepareCommand({ kind: 'set_extrude_factor', percent: 90 }, printing))).toBe('M221 S90');
+    expect(script(prepareCommand({ kind: 'set_speed_factor', percent: 5 }, printing))).toBe('M220 S10');
+    expect(plan(prepareCommand({ kind: 'set_speed_factor', percent: 5 }, printing)).note).toMatch(/10%/);
+    expect(script(prepareCommand({ kind: 'set_extrude_factor', percent: 900 }, printing))).toBe('M221 S200');
+    expect(blocked(prepareCommand({ kind: 'set_speed_factor', percent: Number.NaN }, printing))).toBe('Enter a percentage');
+  });
+
   it('keeps pause/resume state consistent', () => {
     expect(blocked(prepareCommand({ kind: 'pause' }, readyState()))).toBe('No print is running');
     expect(blocked(prepareCommand({ kind: 'resume' }, withJob(readyState(), 'printing')))).toBe('The print is not paused');

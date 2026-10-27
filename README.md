@@ -25,8 +25,11 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
 
 ## What v0.2 does
 
-- **Home**: printer name, connection and print state, progress, filename, layer, elapsed and remaining
-  time, nozzle, bed and chamber (when that sensor exists), fans, and the latest console alert.
+- **Home**: printer display name, connection and print state, progress, filename, the active
+  G-code thumbnail, layer, elapsed and remaining time, live toolhead speed (mm/s) and live
+  volumetric flow (mm³/s), nozzle, bed and chamber (when that sensor exists), fans, and the
+  latest console alert. Speed and flow are Klipper `motion_report` values, not the M220/M221
+  percentages. Those percentages sit behind the speed and flow readouts.
 - **Files**: G-code folders, sort, metadata, thumbnails (including nested paths), start and delete.
   Both ask before acting. Files without a thumbnail show a placeholder.
 - **Move**: home X, Y, Z or all; jog with step size and speed; position and homed state; motors off;
@@ -41,8 +44,9 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
   A macro that needs parameters opens the console instead of being sent empty.
 - **Console**: recent Moonraker G-code history, an on-screen keyboard, and a confirmation before every
   line. Nothing in a file is executed just by being displayed.
-- **Settings**: Moonraker URL, reconnect, theme, hide cursor, and a dim timeout. Restart and firmware
-  restart are confirmed. Emergency stop is a press-and-hold in the top bar.
+- **Settings**: Moonraker URL, display name, reconnect, theme, hide cursor, and a dim timeout.
+  The display name is stored on this screen and does not change the Linux hostname. Restart and
+  firmware restart are confirmed. Emergency stop is a press-and-hold in the top bar.
 
 There is no Demo mode. With no Moonraker URL, the UI stays on "not set up" and does not invent
 temperatures or positions. A dropped connection shows Offline and keeps retrying; it never substitutes
@@ -131,9 +135,14 @@ This has **not** been run on a Pi. Test on a spare card first, and test in a bro
 
 1. On a workstation: `npm ci && npm run build`.
 2. Copy the repo (or at least `dist/` and `deploy/`) to the Pi.
-3. As the printer user, not root: `./deploy/install.sh --dist /path/to/dist`.
+3. As the printer user, not root: `./deploy/install.sh --dist ./dist` from the repo directory,
+   or `./deploy/install.sh --dist /absolute/path/to/dist`. A relative `--dist` is resolved from the
+   directory you ran the command in. The default, with no `--dist`, is the `dist/` next to `deploy/`.
    This installs `layr-web.service` on `127.0.0.1:7180` and installs `layr-kiosk.service` **disabled**.
-   KlipperScreen is not touched. No printer file is edited.
+   It copies the launcher into `~/layr/bin/` and refreshes that copy on every later install.
+   KlipperScreen is not touched. No printer file is edited. Klipper and Moonraker are not restarted.
+   If the web server was already running, only `layr-web.service` is restarted so the new files are served.
+   A later install does not disable or restart a kiosk you already enabled with `to-layr`.
 4. Open `http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home` in Chromium and work through
    [docs/trident-checklist.md](docs/trident-checklist.md).
 5. Only then, if you want LAYR on the panel: `./deploy/layr-display.sh to-layr`.
@@ -144,6 +153,18 @@ This has **not** been run on a Pi. Test on a spare card first, and test in a bro
 
 The kiosk does not force a resolution. cage uses the connector's preferred mode. The Pi model and the
 panel's native mode are read by `check-device.sh` because they are not known in this repository.
+
+Chromium is the default renderer. An optional Cog / WPE WebKit path exists and is not enabled unless
+you run `deploy/layr-engine.sh use wpe` after `check` succeeds. It does not install packages and does
+not change boot. `deploy/layr-engine.sh rollback` saves Chromium again. See
+[docs/pi-test.md](docs/pi-test.md). That procedure has not been run on a Pi.
+
+Hide pointer asks the page to use a transparent cursor. On Cage, the BTT HDMI7's touch device is also
+a pointer, so the compositor can keep drawing an arrow after CSS `cursor: none`. When the setting is
+on, the kiosk starts Cage with a blank cursor theme (`WLR_NO_HARDWARE_CURSORS=1`). Touch is not
+disabled, and a physical mouse still clicks. With the setting off, the normal cursor theme is left
+alone. This has not been confirmed on the HDMI7. Restarting `layr-kiosk.service` applies the theme;
+that does not restart Klipper.
 
 ## Architecture
 
@@ -178,7 +199,12 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 
 ## Known limitations
 
-- Not yet run on a Raspberry Pi, a BTT panel, or a Voron Trident.
+- Not yet run on a Raspberry Pi, a BTT panel, or a Voron Trident. Live speed and flow are
+  Klipper's reported `motion_report` values (interpolated by Klipper), not a separate sensor.
+- The Cage pointer workaround (blank cursor theme) is not confirmed on the BTT HDMI7. CSS hiding
+  works in a normal browser. The kiosk path is what still needs a hardware check.
+- WPE / Cog is optional, off by default, and was not launched on Bookworm hardware here. Debian
+  Bookworm's `wpewebkit` package has no security support. WebKitGTK is a different port and is not used.
 - One printer per instance.
 - Progress comes from `display_status.progress` (falling back to `virtual_sdcard.progress`) and can
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.

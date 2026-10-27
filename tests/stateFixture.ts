@@ -70,6 +70,7 @@ export function withJob(state: PrinterState, jobState: JobInfo['state'], filenam
       totalLayers: 10,
       filamentUsed: 100,
       message: null,
+      thumbnailPath: null,
     },
   };
 }

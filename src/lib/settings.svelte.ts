@@ -7,6 +7,11 @@ export interface UiSettings {
   theme: 'midnight' | 'black';
   /** Hides the mouse pointer for touch-only kiosks. */
   hideCursor: boolean;
+  /**
+   * Name shown in the top bar. Empty means the Klipper host name.
+   * This never changes the Linux hostname.
+   */
+  displayName: string;
   showHiddenMacros: boolean;
   /** Shows LAYR's on-screen keyboard for text fields. */
   onScreenKeyboard: boolean;
@@ -22,6 +27,7 @@ export const DEFAULT_SETTINGS: UiSettings = {
   hideCursor: false,
   showHiddenMacros: false,
   onScreenKeyboard: true,
+  displayName: '',
 };
 
 export function parseSettings(raw: string | null): UiSettings {
@@ -34,6 +40,10 @@ export function parseSettings(raw: string | null): UiSettings {
     if (value.theme === 'midnight' || value.theme === 'black') s.theme = value.theme;
     for (const key of ['hideCursor', 'showHiddenMacros', 'onScreenKeyboard'] as const) {
       if (typeof value[key] === 'boolean') s[key] = value[key];
+    }
+    if (typeof value.displayName === 'string') {
+      const name = value.displayName.replace(/[\u0000-\u001f]/g, '').trim();
+      if (name.length <= 32) s.displayName = name;
     }
     return s;
   } catch {

@@ -37,7 +37,8 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 
 - [ ] The file list matches Moonraker, including a folder. Sort by name and modified time.
 - [ ] A file with a thumbnail shows it, including a file in a subfolder. A file without one shows the placeholder icon.
-- [ ] Start asks for confirmation, then the dashboard shows filename, progress, layer (when the slicer reports it), fans, and time remaining.
+- [ ] Start asks for confirmation, then the dashboard shows filename, the G-code thumbnail (including a file in a subfolder; a placeholder when there is none), progress, layer (when the slicer reports it), fans, and time remaining.
+- [ ] While printing, Speed is Klipper's live mm/s (`motion_report.live_velocity`) and Flow is live mm³/s from extruder velocity × the configured filament diameter. They are not the M220/M221 percentages. Pause or a stopped extruder shows about 0, not the last percentage. A retract shows a negative flow. Tapping Speed or Flow adjusts the percentage behind that readout. Z offset is still the Z button, which opens Move. There is no Fine Tuning page.
 - [ ] Pause, resume, and cancel work. Cancel asks for confirmation and cannot be tapped twice into a second request.
 - [ ] Emergency stop needs a press-and-hold, heaters turn off, and the printer shows the Klipper error until firmware restart (which itself asks for confirmation).
 
@@ -50,8 +51,10 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 
 ## Display and rollback
 
-- [ ] At the panel's real resolution, no control is cut off and every button is easy to hit. Turn on the black theme and cursor hiding in Settings if this Pi is a kiosk.
+- [ ] Settings can set a display name such as "Voron Trident". The top bar uses it. The Linux hostname (often `mainsailos`) is unchanged. Clearing the name shows the Klipper host name again.
+- [ ] At the panel's real resolution, no control is cut off and every button is easy to hit. Turn on the black theme and cursor hiding in Settings if this Pi is a kiosk. After Hide pointer, restart only `layr-kiosk` (`sudo systemctl restart layr-kiosk`) and confirm the arrow is gone, touch still works, and a real mouse still clicks. With Hide pointer off, the mouse cursor is visible. Do not restart Klipper for this check.
 - [ ] Dim-after-idle blanks the screen and a tap wakes it. There is no animated screensaver.
 - [ ] Only after the checks above: `./deploy/layr-display.sh to-layr`. The LAYR kiosk owns the display and KlipperScreen is stopped but still installed.
 - [ ] `./deploy/layr-display.sh to-klipperscreen` brings KlipperScreen back.
+- [ ] Optional, and only after the browser checks: follow [docs/pi-test.md](pi-test.md) for the WPE experiment. `./deploy/layr-engine.sh check` must be honest about missing packages. `rollback` returns the saved engine to Chromium. None of these commands restart Klipper.
 - [ ] `./deploy/rollback.sh` returns the previous UI build. `./deploy/uninstall.sh` removes the LAYR units and, if LAYR had disabled KlipperScreen, turns KlipperScreen back on. `printer.cfg` and `moonraker.conf` are unchanged.

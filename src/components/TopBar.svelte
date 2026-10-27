@@ -4,15 +4,17 @@
   import EStopButton from './EStopButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
-  const { store } = app();
+  const { store, settings } = app();
   const printerState = store.state;
   const clock = $derived(formatClock(printerState.now));
+  const name = $derived(settings.value.displayName.trim() || printerState.printerName);
+  const showHost = $derived(!!printerState.hostname && printerState.hostname !== name);
 </script>
 
 <header class="bar">
   <div class="identity">
-    <h1 class="name" title={printerState.printerName}>{printerState.printerName}</h1>
-    {#if printerState.hostname && printerState.hostname !== printerState.printerName}
+    <h1 class="name" title={name}>{name}</h1>
+    {#if showHost}
       <span class="host" title={printerState.hostname}>{printerState.hostname}</span>
     {/if}
   </div>

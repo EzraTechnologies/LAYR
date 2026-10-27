@@ -1,10 +1,11 @@
 <script lang="ts">
   import { app } from '../lib/context';
-  import { displayFilename, formatClock, formatDuration, formatFilament } from '../lib/format';
+  import { displayFilename, formatClock, formatDuration, formatFilament, formatFlow, formatSpeed } from '../lib/format';
   import { navigate } from '../lib/routes';
   import { headline } from '../lib/statusMeta';
   import Icon from './Icon.svelte';
   import ProgressRing from './ProgressRing.svelte';
+  import Thumb from './Thumb.svelte';
 
   const { store, ui } = app();
   const printerState = store.state;
@@ -31,11 +32,50 @@
   const toggleCommand = $derived(paused ? ({ kind: 'resume' } as const) : ({ kind: 'pause' } as const));
   const toggleBusy = $derived(ui.isBusy(toggleCommand));
   const printBusy = $derived(ui.busyGroups.includes('print'));
+  const feedBusy = $derived(ui.busyGroups.includes('feedrate'));
+
+  const motion = $derived(printerState.motion);
+  const speedText = $derived(formatSpeed(motion.speedMmS));
+  const flowText = $derived(formatFlow(motion.flowMm3S));
+  const speedTitle = $derived(
+    motion.speedMmS === null
+      ? 'Klipper did not report motion_report.live_velocity.'
+      : 'Klipper motion_report.live_velocity, in mm/s. Not the M220 speed override.',
+  );
+  const flowTitle = $derived(
+    motion.flowGap === 'diameter'
+      ? 'Klipper reported extruder velocity, but filament_diameter is missing, so volumetric flow cannot be calculated.'
+      : motion.flowGap === 'velocity'
+        ? 'Klipper did not report motion_report.live_extruder_velocity.'
+        : motion.flowMm3S !== null && motion.flowMm3S < 0
+          ? 'Filament is retracting. Negative mm³/s is live_extruder_velocity × filament area, not the M221 override.'
+          : 'Volumetric flow from Klipper live_extruder_velocity × filament cross-section. Not the M221 flow override.',
+  );
+
+  let rates = $state<null | 'speed' | 'flow'>(null);
+
+  function percentOf(factor: number | null | undefined): number {
+    if (factor === null || factor === undefined || !Number.isFinite(factor)) return 100;
+    return Math.round(factor * 100);
+  }
+
+  function openRates(which: 'speed' | 'flow') {
+    rates = rates === which ? null : which;
+  }
+
+  function nudge(which: 'speed' | 'flow', delta: number) {
+    if (which === 'speed') {
+      void ui.run({ kind: 'set_speed_factor', percent: percentOf(printerState.toolhead?.speedFactor) + delta });
+    } else {
+      void ui.run({ kind: 'set_extrude_factor', percent: percentOf(printerState.toolhead?.extrudeFactor) + delta });
+    }
+  }
 </script>
 
 <section class="card job" aria-labelledby="job-title">
   {#if job}
     <header class="head">
+      <Thumb path={job.thumbnailPath} cacheKey={null} size={56} alt={displayFilename(job.filename)} />
       <div class="title-block">
         <span class="eyebrow">Current job</span>
         <h2 id="job-title" class="filename" title={job.filename}>{displayFilename(job.filename)}</h2>
@@ -46,31 +86,55 @@
     <div class="body">
       <ProgressRing progress={job.progress} tone={ringTone} label={`Print progress for ${displayFilename(job.filename)}`} />
 
-      <dl class="stats">
-        <div>
-          <dt><Icon name="clock" size={16} />Elapsed</dt>
-          <dd class="num">{formatDuration(job.totalDuration)}</dd>
+      <div class="stats-wrap">
+        <dl class="stats">
+          <div>
+            <dt><Icon name="clock" size={16} />Elapsed</dt>
+            <dd class="num">{formatDuration(job.totalDuration)}</dd>
+          </div>
+          <div>
+            <dt><Icon name="hourglass" size={16} />Remaining</dt>
+            <dd class="num">
+              {active ? formatDuration(job.remaining) : '—'}
+              {#if active && job.remainingSource === 'slicer'}<small title="Based on slicer estimate">est.</small>{/if}
+            </dd>
+          </div>
+          <div>
+            <dt><Icon name="flag" size={16} />ETA</dt>
+            <dd class="num">{active && eta !== null ? formatClock(eta, timeZone) : '—'}</dd>
+          </div>
+          <div>
+            <dt><Icon name="layers" size={16} />Layer</dt>
+            <dd class="num">{layerText}</dd>
+          </div>
+        </dl>
+
+        <div class="motion" role="region" aria-label="Live motion reported by Klipper">
+          {#if active}
+            <button type="button" class="hit" title={speedTitle} aria-label={`Live speed ${speedText} millimetres per second. Adjust speed override.`} onclick={() => openRates('speed')}>
+              <span class="k"><Icon name="bolt" size={16} />Speed</span>
+              <span class="v num">{speedText}<small>mm/s</small></span>
+            </button>
+            <button type="button" class="hit" title={flowTitle} aria-label={`Live flow ${flowText} cubic millimetres per second. Adjust flow override.`} onclick={() => openRates('flow')}>
+              <span class="k"><Icon name="filament" size={16} />Flow</span>
+              <span class="v num">
+                {flowText}<small>mm³/s</small>
+                {#if motion.flowMm3S !== null && motion.flowMm3S < 0}<em>retract</em>{/if}
+              </span>
+            </button>
+          {:else}
+            <div class="hit static" title={speedTitle}>
+              <span class="k"><Icon name="bolt" size={16} />Speed</span>
+              <span class="v num">{speedText}<small>mm/s</small></span>
+            </div>
+            <div class="hit static" title={flowTitle}>
+              <span class="k"><Icon name="filament" size={16} />Flow</span>
+              <span class="v num">{flowText}<small>mm³/s</small></span>
+            </div>
+          {/if}
         </div>
-        <div>
-          <dt><Icon name="hourglass" size={16} />Remaining</dt>
-          <dd class="num">
-            {active ? formatDuration(job.remaining) : '—'}
-            {#if active && job.remainingSource === 'slicer'}<small title="Based on slicer estimate">est.</small>{/if}
-          </dd>
-        </div>
-        <div>
-          <dt><Icon name="flag" size={16} />ETA</dt>
-          <dd class="num">{active && eta !== null ? formatClock(eta, timeZone) : '—'}</dd>
-        </div>
-        <div>
-          <dt><Icon name="layers" size={16} />Layer</dt>
-          <dd class="num">{layerText}</dd>
-        </div>
-        <div class="wide">
-          <dt><Icon name="ruler" size={16} />Filament</dt>
-          <dd class="num">{formatFilament(job.filamentUsed)}</dd>
-        </div>
-      </dl>
+        <p class="filament" title="Filament used for this job">Filament {formatFilament(job.filamentUsed)}</p>
+      </div>
     </div>
 
     {#if job.message}
@@ -123,6 +187,23 @@
   {/if}
 </section>
 
+{#if rates && job && active}
+  {@const which = rates}
+  {@const current = which === 'speed' ? percentOf(printerState.toolhead?.speedFactor) : percentOf(printerState.toolhead?.extrudeFactor)}
+  <div class="popover" role="dialog" aria-label={which === 'speed' ? 'Speed override' : 'Flow override'}>
+    <div class="pop-copy">
+      <strong>{which === 'speed' ? 'Speed override' : 'Flow override'}</strong>
+      <span class="num">{current}%</span>
+      <p>{which === 'speed' ? 'M220 multiplier. The number on the dashboard is live mm/s.' : 'M221 multiplier. The number on the dashboard is live mm³/s.'}</p>
+    </div>
+    <div class="pop-actions">
+      <button type="button" class="btn" disabled={feedBusy} onclick={() => nudge(which, -10)} aria-label={which === 'speed' ? 'Decrease speed override' : 'Decrease flow override'}>−10%</button>
+      <button type="button" class="btn" disabled={feedBusy} onclick={() => nudge(which, 10)} aria-label={which === 'speed' ? 'Increase speed override' : 'Increase flow override'}>+10%</button>
+      <button type="button" class="btn ghost" onclick={() => (rates = null)} aria-label={which === 'speed' ? 'Close speed override' : 'Close flow override'}>Done</button>
+    </div>
+  </div>
+{/if}
+
 <style>
   .job {
     display: flex;
@@ -134,9 +215,9 @@
 
   .head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: var(--gap);
+    gap: 10px;
     min-width: 0;
   }
 
@@ -145,11 +226,12 @@
     flex-direction: column;
     gap: 2px;
     min-width: 0;
+    flex: 1;
   }
 
   .filename {
     margin: 0;
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lg);
     font-weight: 650;
     letter-spacing: -0.015em;
     white-space: nowrap;
@@ -184,28 +266,32 @@
     flex: 1;
     display: flex;
     align-items: center;
-    gap: calc(var(--gap) * 2);
+    gap: calc(var(--gap) * 1.5);
     min-height: 0;
   }
 
-  .stats {
+  .stats-wrap {
     flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--gap) calc(var(--gap) * 1.5);
-    margin: 0;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .stats .wide {
-    grid-column: 1 / -1;
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px calc(var(--gap) * 1.25);
+    margin: 0;
+    min-width: 0;
   }
 
   .stats div {
     min-width: 0;
   }
 
-  dt {
+  dt,
+  .k {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -216,19 +302,69 @@
     color: var(--text-dim);
   }
 
-  dd {
-    margin: 3px 0 0;
-    font-size: var(--fs-xl);
+  dd,
+  .v {
+    margin: 2px 0 0;
+    font-size: var(--fs-lg);
     font-weight: 600;
     letter-spacing: -0.01em;
     white-space: nowrap;
   }
 
-  dd small {
+  dd small,
+  .v small,
+  .v em {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    font-style: normal;
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+
+  .v em {
+    color: var(--warn);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .motion {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .hit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: 0;
+    min-height: 44px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+
+  button.hit {
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+  }
+
+  button.hit:active {
+    background: var(--surface-3);
+  }
+
+  .filament {
+    margin: 0;
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-dim);
-    margin-left: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .message {
@@ -251,14 +387,61 @@
   }
 
   .ctl {
-    min-width: 120px;
-    min-height: 52px;
+    min-width: 108px;
+    min-height: 48px;
   }
 
   .zoff {
     margin-left: auto;
     min-width: 0;
     font-size: var(--fs-sm);
+  }
+
+  .popover {
+    position: fixed;
+    z-index: 30;
+    left: calc(var(--rail-w) + var(--pad));
+    right: var(--pad);
+    bottom: var(--pad);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  }
+
+  .pop-copy {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .pop-copy strong {
+    font-size: var(--fs-sm);
+  }
+
+  .pop-copy .num {
+    font-size: var(--fs-lg);
+    font-weight: 650;
+  }
+
+  .pop-copy p {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--text-dim);
+    font-size: var(--fs-xs);
+  }
+
+  .pop-actions {
+    display: flex;
+    gap: 8px;
+    flex: none;
   }
 
   .idle {
@@ -301,6 +484,13 @@
     }
     .body {
       gap: var(--gap);
+    }
+    .popover {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .pop-actions .btn {
+      flex: 1;
     }
   }
 </style>

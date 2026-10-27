@@ -87,6 +87,7 @@ export function mapJob(raw: RawStatus, slicerEstimate: number | null = null): Jo
     totalLayers: toNumber(info.total_layer),
     filamentUsed: toNumber(stats.filament_used),
     message: toText(stats.message) ?? toText(display.message),
+    thumbnailPath: null,
   };
 }
 

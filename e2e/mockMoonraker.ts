@@ -118,7 +118,12 @@ function baseStatus(scenario: Scenario, homed: boolean): Status {
       max_velocity: 300,
       extruder: 'extruder',
     },
-    gcode_move: { homing_origin: [0, 0, active ? -0.02 : 0, 0], speed_factor: 1, extrude_factor: 1 },
+    // Factors are intentionally not 1. The dashboard must show live mm/s and mm³/s, not these percentages.
+    gcode_move: { homing_origin: [0, 0, active ? -0.02 : 0, 0], speed_factor: 1.5, extrude_factor: 1.2 },
+    motion_report: {
+      live_velocity: scenario === 'printing' ? 48.2 : 0,
+      live_extruder_velocity: scenario === 'printing' ? 5 : 0,
+    },
     idle_timeout: { state: active ? 'Printing' : 'Idle' },
     fan: { speed: active ? 0.4 : 0, rpm: null },
     'fan_generic nevermore': { speed: active ? 1 : 0, rpm: null },
@@ -133,7 +138,7 @@ function baseStatus(scenario: Scenario, homed: boolean): Status {
 function settings(): Record<string, Record<string, unknown>> {
   const s: Record<string, Record<string, unknown>> = {
     printer: { kinematics: 'corexy', max_velocity: 300, max_accel: 4000, max_z_velocity: 15 },
-    extruder: { min_temp: 10, max_temp: 300, min_extrude_temp: 170, max_extrude_only_distance: 150, max_extrude_only_velocity: 50 },
+    extruder: { min_temp: 10, max_temp: 300, min_extrude_temp: 170, max_extrude_only_distance: 150, max_extrude_only_velocity: 50, filament_diameter: '1.75' },
     heater_bed: { min_temp: 0, max_temp: 120 },
     'output_pin caselight': { pwm: true, scale: 1 },
     'neopixel sb_leds': { chain_count: 3 },
@@ -451,6 +456,12 @@ export class MockMoonraker {
           this.update({ [`neopixel ${arg('LED')}`]: { color_data: [[v, v, v, v], [v, v, v, v], [v, v, v, v]] } });
           break;
         }
+        case 'M220':
+          this.update({ gcode_move: { speed_factor: Number(arg('S')) / 100 } });
+          break;
+        case 'M221':
+          this.update({ gcode_move: { extrude_factor: Number(arg('S')) / 100 } });
+          break;
         case 'SET_GCODE_OFFSET': {
           const origin = [...(this.status.gcode_move!.homing_origin as number[])];
           origin[2] = Math.round((origin[2]! + Number(arg('Z_ADJUST') ?? 0)) * 1000) / 1000;

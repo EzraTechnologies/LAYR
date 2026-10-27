@@ -70,7 +70,7 @@ test.describe('release safety', () => {
 
 test.describe('dashboard', () => {
   test('maps live Moonraker data', async ({ page }) => {
-    await openWithMock(page, 'home', { scenario: 'printing' });
+    const mock = await openWithMock(page, 'home', { scenario: 'printing' });
     await expect(page.getByRole('heading', { name: 'SB_main_body_ASA_0.2mm_3h41m' })).toBeVisible();
     await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '62');
     await expect(page.getByText('130 / 210')).toBeVisible();
@@ -78,6 +78,84 @@ test.describe('dashboard', () => {
     await expect(page.getByLabel(/Chamber: 51 degrees/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Fans' }).last()).toContainText('Part cooling');
     await expect(page.getByText('trident', { exact: true })).toBeVisible();
+
+    const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
+    await expect(motion).toContainText('48');
+    await expect(motion).toContainText('12.0');
+    await expect(motion).toContainText('mm/s');
+    await expect(motion).not.toContainText('%');
+    await expect(motion).not.toContainText('150');
+    await expect(motion).not.toContainText('120');
+    await expect(page.locator('img[alt="SB_main_body_ASA_0.2mm_3h41m"]')).toBeVisible();
+    await expect.poll(() => mock.thumbnailRequests).toContain(
+      '/server/files/gcodes/stealthburner/.thumbs/SB_main_body_ASA_0.2mm_3h41m-300x300.png',
+    );
+    const subscribed = mock.calls.find((call) => call.method === 'printer.objects.subscribe');
+    expect(subscribed?.params?.objects).toMatchObject({
+      motion_report: ['live_velocity', 'live_extruder_velocity'],
+      configfile: ['settings'],
+    });
+  });
+
+  test('pause shows halted motion, not the speed or flow percentage', async ({ page }) => {
+    await openWithMock(page, 'home', { scenario: 'paused' });
+    const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
+    await expect(motion).toContainText('0');
+    await expect(motion).toContainText('0.0');
+    await expect(motion).not.toContainText('%');
+    await expect(motion).not.toContainText('150');
+  });
+
+  test('does not invent a percentage when motion_report is absent', async ({ page }) => {
+    const mock = new (await import('./mockMoonraker')).MockMoonraker({ scenario: 'printing' });
+    delete mock.status.motion_report;
+    await mock.install(page);
+    await page.goto(`/?moonraker=${encodeURIComponent(MOONRAKER)}#/home`);
+    await expect(page.getByRole('status', { name: /Printer status/ })).not.toHaveText(/Connecting|Offline|Not set up/);
+    const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
+    await expect(motion).toContainText('—');
+    await expect(motion).not.toContainText('%');
+    await expect(motion).not.toContainText('150');
+  });
+
+  test('a speed override does not replace the live mm/s readout', async ({ page }) => {
+    const mock = await openWithMock(page, 'home', { scenario: 'printing' });
+    await page.getByRole('button', { name: /Live speed/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Speed override' });
+    await expect(dialog).toContainText('150%');
+    await dialog.getByRole('button', { name: 'Increase speed override' }).click();
+    await expect.poll(() => mock.scripts.at(-1)).toBe('M220 S160');
+    const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
+    await expect(motion).toContainText('48');
+    await expect(motion).not.toContainText('160');
+    await expect(page).toHaveURL(/#\/home$/);
+  });
+
+  test('uses a saved display name and leaves the host name alone', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('layr.ui', JSON.stringify({ displayName: 'Voron Trident' }));
+    });
+    await openWithMock(page, 'home', { scenario: 'ready' });
+    await expect(page.getByRole('heading', { name: 'Voron Trident' })).toBeVisible();
+    await expect(page.getByText('trident', { exact: true })).toBeVisible();
+  });
+
+  test('shows a placeholder thumbnail when the file has no preview', async ({ page }) => {
+    await openWithMock(page, 'home', {
+      scenario: 'printing',
+      status: {
+        print_stats: {
+          filename: 'no_preview_bracket.gcode',
+          state: 'printing',
+          message: '',
+          print_duration: 10,
+          total_duration: 12,
+          filament_used: 10,
+          info: { current_layer: 1, total_layer: 4 },
+        },
+      },
+    });
+    await expect(page.getByRole('img', { name: 'no_preview_bracket (no preview)' })).toBeVisible();
   });
 
   test('shows Klipper errors from the console as alerts', async ({ page }) => {

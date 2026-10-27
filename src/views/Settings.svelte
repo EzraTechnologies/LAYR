@@ -38,6 +38,27 @@
     if (value !== null) urlDraft = value.trim();
   }
 
+  const effectiveName = $derived(settings.value.displayName.trim() || printerState.hostname || printerState.printerName);
+
+  async function editName() {
+    const value = await ui.prompt({
+      title: 'Printer display name',
+      value: settings.value.displayName,
+      mode: 'text',
+      placeholder: printerState.hostname || 'Voron Trident',
+      hint: 'Shown in the top bar. This does not change the Linux hostname.',
+      submitLabel: 'Save',
+      validate: (v) => {
+        const name = v.trim();
+        if (name.length > 32) return 'Use 32 characters or fewer';
+        if (/[\u0000-\u001f]/.test(name)) return 'Remove line breaks';
+        return null;
+      },
+    });
+    if (value === null) return;
+    settings.update({ displayName: value.trim() });
+  }
+
   const allSensors = $derived(
     [printerState.extruder, printerState.bed, printerState.chamber, ...printerState.sensors].filter((s) => s !== null),
   );
@@ -112,6 +133,16 @@
           >True black</button
         >
       </div>
+      <span class="label" id="name-label">Display name</span>
+      <button type="button" class="btn ghost url-field" aria-labelledby="name-label" onclick={editName}>
+        <span class="url-text" class:placeholder={!settings.value.displayName} title={effectiveName}>
+          {settings.value.displayName || effectiveName}
+        </span>
+      </button>
+      <p class="hint">Shown in the top bar. Empty uses the Klipper host name. This does not rename the Linux host.</p>
+      {#if settings.value.displayName}
+        <button type="button" class="btn ghost" onclick={() => settings.update({ displayName: '' })}>Use host name</button>
+      {/if}
       <div class="toggles">
         <button
           type="button"
@@ -133,6 +164,7 @@
         </button>
       </div>
       <p class="hint">Dimming darkens the screen; it does not switch the backlight off. The first tap only wakes it.</p>
+      <p class="hint">Hide pointer clears the arrow in this browser immediately. On the Cage kiosk it also applies the next time the display starts, without restarting Klipper. A mouse still clicks.</p>
     </section>
 
     <section class="card panel" aria-labelledby="set-printer">
