@@ -11,9 +11,11 @@ Rectangle {
 
     readonly property var entries: [
         { "id": "home", "label": "Home" },
+        { "id": "move", "label": "Move" },
+        { "id": "heat", "label": "Heat" },
         { "id": "files", "label": "Files" },
-        { "id": "controls", "label": "Controls" },
-        { "id": "settings", "label": "Settings" }
+        { "id": "more", "label": "More" },
+        { "id": "settings", "label": "Setup" }
     ]
 
     Column {
@@ -45,7 +47,7 @@ Rectangle {
             delegate: Rectangle {
                 required property var modelData
                 width: rail.width - 12
-                height: Math.max(48, (rail.height - 150) / 4)
+                height: Math.max(44, (rail.height - 92) / rail.entries.length)
                 anchors.horizontalCenter: parent.horizontalCenter
                 radius: 12
                 color: (rail.view.page || "home") === modelData.id ? "#223ee0f0" : "transparent"

@@ -149,8 +149,10 @@ Item {
                         color: Style.text2
                         font.pixelSize: page.compact ? 13 : 15
                         text: page.view.status === "ready"
-                              ? "No job is loaded. Open Files to look at G-code. This prototype cannot start a print."
-                              : "Live temperatures and motion stay blank until Moonraker and Klipper are both up. Nothing here is sample data."
+                              ? "No job is loaded. Open Files to choose a G-code file. Starting a print asks first."
+                              : (page.view.fixture
+                                 ? "Fixture data only. This screen is not connected to a printer."
+                                 : "Live temperatures and motion stay blank until Moonraker and Klipper are both up. Nothing here is sample data.")
                     }
                     Rectangle {
                         visible: page.view.status === "ready"
@@ -164,6 +166,32 @@ Item {
                             cursorShape: page.view.hideCursor ? Qt.BlankCursor : Qt.PointingHandCursor
                             onClicked: bridge.openPage("files")
                         }
+                    }
+                }
+
+                Row {
+                    visible: page.job().active === true
+                    width: parent.width
+                    spacing: 8
+                    Tap {
+                        width: (parent.width - 16) / 3
+                        label: "Pause"
+                        enabled: page.view.status === "printing" && page.view.gate && page.view.gate.ready === true && (page.view.gate.busy || []).indexOf("print") < 0
+                        onTapped: bridge.pausePrint()
+                    }
+                    Tap {
+                        width: (parent.width - 16) / 3
+                        label: "Resume"
+                        enabled: page.view.status === "paused" && page.view.gate && page.view.gate.ready === true && (page.view.gate.busy || []).indexOf("print") < 0
+                        onTapped: bridge.resumePrint()
+                    }
+                    Tap {
+                        width: (parent.width - 16) / 3
+                        label: "Cancel"
+                        fill: "#33fb7185"
+                        ink: Style.danger
+                        enabled: page.job().active === true && page.view.gate && page.view.gate.ready === true && (page.view.gate.busy || []).indexOf("print") < 0
+                        onTapped: bridge.cancelPrint()
                     }
                 }
 

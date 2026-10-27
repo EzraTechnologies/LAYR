@@ -23,10 +23,19 @@ from layr_qt.moonraker.status import (
     parse_job_state,
 )
 from layr_qt.moonraker.telemetry import js_round, map_motion
+from layr_qt.actions.panel import attach_panel, file_flags
 from layr_qt.preferences import resolve_printer_name
 from layr_qt.store import PrinterStore
 
-PAGES = ("home", "files", "controls", "settings")
+PAGES = ("home", "move", "heat", "files", "more", "settings")
+
+
+def canonical_page(page: str) -> str | None:
+    if page == "controls":
+        return "move"
+    if page in PAGES:
+        return page
+    return None
 
 
 def _temp_card(reading: dict | None, label: str, missing: str) -> dict:
@@ -170,7 +179,9 @@ def _selected(store: PrinterStore, now_ms: float, utc: bool) -> dict | None:
         "filament": format_filament(filament),
         "slicer": (meta.get("slicer") if isinstance(meta, dict) else None) or "—",
         "thumb": thumb,
-        "note": "Starting a print is not available in this read-only prototype.",
+        "note": "",
+        "canStart": False,
+        "canDelete": False,
     }
 
 
@@ -185,6 +196,7 @@ def build_view(
     settings_error: str = "",
     fixture: bool = False,
     utc: bool = False,
+    ui: dict | None = None,
 ) -> dict:
     live = store.transport == "connected" and store.klippy == "ready"
     raw = store.raw if live else {}
@@ -225,8 +237,11 @@ def build_view(
             }
         )
     hostname_hint = f"Klipper host name: {store.hostname}" if store.hostname else "Klipper host name: —"
-    return {
-        "page": page if page in PAGES else "home",
+    shown_page = canonical_page(page) or "home"
+    speed_number = None if toolhead is None or toolhead.get("speedFactor") is None else js_round(toolhead["speedFactor"] * 100)
+    flow_number = None if toolhead is None or toolhead.get("extrudeFactor") is None else js_round(toolhead["extrudeFactor"] * 100)
+    view = {
+        "page": shown_page,
         "theme": prefs.get("theme") or "midnight",
         "hideCursor": bool(prefs.get("hideCursor", True)),
         "dimmed": dimmed,
@@ -258,6 +273,8 @@ def build_view(
         "overrides": {
             "speed": _factor_percent(None if toolhead is None else toolhead.get("speedFactor")),
             "flow": _factor_percent(None if toolhead is None else toolhead.get("extrudeFactor")),
+            "speedNumber": speed_number,
+            "flowNumber": flow_number,
             "note": "M220 and M221 multipliers. They are not the live mm/s or mm³/s on Home.",
         },
         "files": {
@@ -279,6 +296,14 @@ def build_view(
         "perf": perf,
         "connectionTitle": _connection_title(status, store.klippy),
     }
+    state, panel = attach_panel(store, prefs, fixture=fixture, ui=ui)
+    view.update(panel)
+    selected = view["files"]["selected"]
+    if selected:
+        selected.update(file_flags(state, selected.get("path") or "", fixture=fixture))
+        if not selected.get("note"):
+            selected["note"] = "Check the bed and filament before starting."
+    return view
 
 
 def _connection_title(status: str, klippy: str) -> str:

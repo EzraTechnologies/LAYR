@@ -110,6 +110,112 @@ class Bridge(QObject):
         if self.runtime:
             self.runtime.wake()
 
+    @pyqtSlot(str)
+    def home(self, axes: str) -> None:
+        self._command(lambda io: self.runtime.controller.home(axes, io))
+
+    @pyqtSlot(str, float, float)
+    def jog(self, axis: str, distance: float, speed: float) -> None:
+        self._command(lambda io: self.runtime.controller.jog(axis, distance, speed, io))
+
+    @pyqtSlot(float)
+    def babyStep(self, delta: float) -> None:  # noqa: N802 - QML name
+        self._command(lambda io: self.runtime.controller.baby_step(delta, io))
+
+    @pyqtSlot()
+    def motorsOff(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.motors_off(io))
+
+    @pyqtSlot(str, float)
+    def setHeater(self, heater: str, target: float) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_heater(heater, target, io))
+
+    @pyqtSlot(str, float)
+    def setFan(self, fan: str, speed: float) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_fan(fan, speed, io))
+
+    @pyqtSlot(str, float)
+    def setLight(self, light: str, value: float) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_light(light, value, io))
+
+    @pyqtSlot(float, float)
+    def extrude(self, length: float, speed: float) -> None:
+        self._command(lambda io: self.runtime.controller.extrude(length, speed, io))
+
+    @pyqtSlot(str)
+    def runMacro(self, name: str) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.run_macro(name, io))
+
+    @pyqtSlot(str)
+    def consoleSend(self, script: str) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.console_send(script, io))
+
+    @pyqtSlot()
+    def pausePrint(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.pause(io))
+
+    @pyqtSlot()
+    def resumePrint(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.resume(io))
+
+    @pyqtSlot()
+    def cancelPrint(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.cancel(io))
+
+    @pyqtSlot(str)
+    def startPrint(self, filename: str) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.start_print(filename, io))
+
+    @pyqtSlot(str)
+    def deleteFile(self, path: str) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.delete_file(path, io))
+
+    @pyqtSlot()
+    def emergencyStop(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.emergency_stop(io))
+
+    @pyqtSlot()
+    def restartKlipper(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.restart_klipper(io))
+
+    @pyqtSlot()
+    def firmwareRestart(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.firmware_restart(io))
+
+    @pyqtSlot(float)
+    def setSpeedFactor(self, percent: float) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_speed_factor(percent, io))
+
+    @pyqtSlot(float)
+    def setExtrudeFactor(self, percent: float) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_extrude_factor(percent, io))
+
+    @pyqtSlot()
+    def confirmPending(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.confirm_pending(io))
+
+    @pyqtSlot()
+    def dismissPending(self) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.dismiss_pending()
+            self.runtime.publish()
+
+    @pyqtSlot()
+    def dismissToast(self) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.dismiss_toast()
+            self.runtime.publish()
+
+    @pyqtSlot()
+    def toggleHidden(self) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.toggle_hidden()
+            self.runtime.publish()
+
+    def _command(self, fn) -> None:
+        if self.runtime:
+            self.runtime.command(fn)
+
 
 class PressFilter(QObject):
     def __init__(self, runtime) -> None:
@@ -177,6 +283,7 @@ class QtRuntime(QObject):
             dimmed=self.controller.dimmed,
             settings_error=self.controller.settings_error,
             fixture=self.controller.fixture,
+            ui=self.controller.ui_state(),
         )
         self._apply_cursor(bool(view["hideCursor"]))
         self.bridge.set_view(json.dumps(view, separators=(",", ":")))
@@ -219,6 +326,9 @@ class QtRuntime(QObject):
         self.controller.wake()
         self._arm_idle()
         self.publish()
+
+    def command(self, fn) -> None:
+        self._wrap(lambda: fn(self._io))
 
     def note_pointer(self) -> None:
         self.perf.note_press(time.monotonic())

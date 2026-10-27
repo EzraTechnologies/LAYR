@@ -1,7 +1,7 @@
-"""Read-only native Qt Quick prototype of LAYR.
+"""Native Qt Quick controller for LAYR.
 
-This package is a comparison candidate. It is not the Svelte/Chromium UI and it
-does not install, stop, or replace layr-web, layr-kiosk, or KlipperScreen.
+The Svelte app remains the Chromium kiosk. This package does not edit Klipper
+or Moonraker configuration. Its file installer does not start a display service.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

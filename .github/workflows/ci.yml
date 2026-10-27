@@ -62,7 +62,7 @@ jobs:
           retention-days: 7
 
   native-qt:
-    name: Native Qt prototype
+    name: Native Qt controller
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

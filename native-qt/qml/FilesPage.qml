@@ -164,6 +164,20 @@ Item {
                     text: page.files().selected ? page.files().selected.note : ""
                     color: Style.warn
                 }
+                Tap {
+                    width: parent.width
+                    label: "Start print"
+                    enabled: page.files().selected && page.files().selected.canStart === true
+                    fill: Style.cyan
+                    ink: "#061016"
+                    onTapped: bridge.startPrint(page.files().selected.path)
+                }
+                Tap {
+                    width: parent.width
+                    label: "Delete"
+                    enabled: page.files().selected && page.files().selected.canDelete === true
+                    onTapped: bridge.deleteFile(page.files().selected.path)
+                }
             }
         }
     }

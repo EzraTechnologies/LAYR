@@ -16,6 +16,7 @@ from layr_qt.fixture import apply_fixture, fixture_preferences
 from layr_qt.moonraker.session import MoonrakerSession
 from layr_qt.moonraker.urls import validate_moonraker_url
 from layr_qt.preferences import default_preferences_path, load_preferences, parse_preferences
+from layr_qt.viewmodel import canonical_page
 from layr_qt.store import PrinterStore
 
 QML_DIR = Path(__file__).resolve().parent.parent / "qml"
@@ -23,13 +24,13 @@ FIXTURES = ("printing", "ready", "offline", "files", "controls", "settings")
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="layr-qt", description="Read-only native Qt Quick LAYR prototype.")
+    parser = argparse.ArgumentParser(prog="layr-qt", description="Native Qt Quick LAYR touchscreen controller.")
     parser.add_argument("--geometry", default="1024x600", help="Window size, for example 1024x600 or 800x480")
     parser.add_argument("--fullscreen", action="store_true", help="Fullscreen in the current session. Does not stop another display.")
     parser.add_argument("--platform", default="", help="Qt platform plugin name, for example wayland or xcb")
     parser.add_argument("--moonraker", default="", help="Session Moonraker URL. Not written until you tap Save.")
     parser.add_argument("--config", default="", help="Preferences JSON path")
-    parser.add_argument("--page", default="", choices=["", "home", "files", "controls", "settings"])
+    parser.add_argument("--page", default="", choices=["", "home", "move", "heat", "files", "more", "settings", "controls"])
     parser.add_argument("--fixture", default="", choices=["", *FIXTURES], help="Show canned data and do not connect")
     parser.add_argument("--screenshot", default="", help="Grab the window and exit. Implies offscreen unless a platform is set.")
     parser.add_argument("--self-check", action="store_true", help="Load QML offscreen and exit")
@@ -101,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     store = PrinterStore()
     controller = Controller(MoonrakerSession(), store, prefs)
-    controller.page = args.page or "home"
+    controller.page = canonical_page(args.page) or "home" if args.page else "home"
     if fixture_name:
         if fixture_name not in FIXTURES and fixture_name != "offline":
             print("Unknown fixture", file=sys.stderr)
@@ -110,7 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         controller.prefs = parse_preferences(fixture_preferences())
         apply_fixture(store, fixture_name if fixture_name in ("offline", "ready", "files") else "printing")
         if not args.page:
-            controller.page = fixture_name if fixture_name in ("files", "controls", "settings") else "home"
+            controller.page = {"files": "files", "controls": "move", "settings": "settings"}.get(fixture_name, "home")
+    if args.page:
+        controller.page = canonical_page(args.page) or "home"
 
     bridge = Bridge(font)
     provider = ThumbProvider()
@@ -157,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not headless:
         print(
-            f"LAYR Qt prototype {__version__}. Read only. Moonraker {controller.prefs['moonrakerUrl']}. Not replacing the current display.",
+            f"LAYR Qt {__version__}. Moonraker {controller.prefs['moonrakerUrl']}. Fixture mode does not connect. Not replacing the current display.",
             file=sys.stderr,
         )
         return qt_app.exec()
