@@ -13,6 +13,10 @@ deploy it over KlipperScreen until you have checked it in a browser. See
 Spoolman (browse spools, set the active spool, clear it only after a confirmed unload) is defined
 in `src/lib/spoolman/types.ts` and is **not implemented**.
 
+`native-qt/` is a separate Qt Quick proof of concept for comparison on a Pi. It is not the UI
+that `deploy/` installs, and its scripts do not switch the display. See
+[native-qt/README.md](native-qt/README.md). Spoolman stays on the Svelte side first.
+
 | 1024×600 | 800×480 |
 | --- | --- |
 | ![Printing, 1024×600](docs/screenshots/1024x600-home-printing.png) | ![Printing, 800×480](docs/screenshots/800x480-home-printing.png) |

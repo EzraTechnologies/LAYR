@@ -33,6 +33,15 @@ jobs:
           path: dist
           retention-days: 7
 
+  native-qt:
+    name: Native Qt unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -v
+        working-directory: native-qt
+
   e2e:
     name: Layout & behaviour (Playwright)
     runs-on: ubuntu-latest
