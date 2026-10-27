@@ -84,6 +84,8 @@ export class FakeMoonraker {
   scriptErrors: Record<string, string> = {};
   /** When true, `printer.gcode.script` never replies (to test unconfirmed outcomes). */
   silentScripts = false;
+  /** Extra fields merged into `server.files.metadata`, keyed by filename. */
+  metadata: Record<string, Record<string, unknown>> = {};
 
   constructor(opts: FakeMoonrakerOptions = {}) {
     this.klippyState = opts.klippyState ?? 'ready';
@@ -138,8 +140,10 @@ export class FakeMoonraker {
         for (const name of requested) if (this.status[name]) status[name] = this.status[name];
         return reply({ eventtime: 1, status });
       }
-      case 'server.files.metadata':
-        return reply({ estimated_time: 3600 });
+      case 'server.files.metadata': {
+        const filename = String(msg.params?.filename ?? '');
+        return reply({ estimated_time: 3600, ...(this.metadata[filename] ?? {}) });
+      }
       case 'printer.objects.query':
         return reply({ eventtime: 1, status: { configfile: { settings: this.settings } } });
       case 'server.gcode_store':

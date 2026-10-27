@@ -92,6 +92,30 @@ describe('MoonrakerClient', () => {
     client.stop();
   });
 
+  it('subscribes to motion_report and configfile and skips the settings query when the snapshot has them', async () => {
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'print_stats', 'extruder', 'motion_report', 'configfile', 'toolhead'],
+      status: {
+        webhooks: { state: 'ready' },
+        print_stats: { state: 'standby', filename: '' },
+        extruder: { temperature: 30, target: 0, power: 0 },
+        motion_report: { live_velocity: 12, live_extruder_velocity: 1 },
+        configfile: { settings: { extruder: { filament_diameter: '1.75' } } },
+      },
+    });
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).toMatchObject({
+      motion_report: ['live_velocity', 'live_extruder_velocity'],
+      configfile: ['settings'],
+    });
+    expect(server.calls).not.toContain('printer.objects.query');
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } } });
+    client.stop();
+  });
+
   it('reconnects with bounded exponential backoff and resets after success', async () => {
     const server = new FakeMoonraker();
     server.online = false;

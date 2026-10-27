@@ -31,6 +31,16 @@ export type PrinterCommand =
   /** Positive `length` extrudes, negative retracts (mm of filament at `speed` mm/s). */
   | { kind: 'extrude'; length: number; speed: number }
   | { kind: 'set_temperature'; heater: string; target: number }
+  /**
+   * M220 speed override, in percent (100 = no change). This is not the live mm/s readout.
+   * Clamped to 10–200.
+   */
+  | { kind: 'set_speed_factor'; percent: number }
+  /**
+   * M221 extrude override, in percent (100 = no change). This is not the live mm³/s readout.
+   * Clamped to 10–200.
+   */
+  | { kind: 'set_extrude_factor'; percent: number }
   /** `speed` is 0..1. */
   | { kind: 'set_fan'; fan: string; speed: number }
   /** `value` is 0..1. */
@@ -112,6 +122,19 @@ function fmt(value: number, digits = 3): string {
 
 function gcodeScript(lines: string[], summary: string, group: string, timeoutMs: number, extra: Partial<CommandPlan> = {}): Prepared {
   return ok({ method: 'printer.gcode.script', params: { script: lines.join('\n') }, summary, group, timeoutMs, ...extra });
+}
+
+/** M220 / M221 percentage. Separate from the live mm/s and mm³/s dashboard values. */
+const MIN_FEEDRATE_PERCENT = 10;
+const MAX_FEEDRATE_PERCENT = 200;
+
+function feedrateOverride(code: 'M220' | 'M221', label: string, percent: number): Prepared {
+  if (!Number.isFinite(percent)) return fail('Enter a percentage');
+  const rounded = Math.round(percent);
+  const clamped = Math.min(MAX_FEEDRATE_PERCENT, Math.max(MIN_FEEDRATE_PERCENT, rounded));
+  return gcodeScript([`${code} S${clamped}`], `${label} ${clamped}%`, 'feedrate', 10 * SECOND, {
+    note: clamped === rounded ? null : `Limited to ${clamped}%`,
+  });
 }
 
 /** Klipper must be connected and ready. Returns an explanation when it is not. */
@@ -481,6 +504,10 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
           tone: 'warn',
         },
       });
+    case 'set_speed_factor':
+      return feedrateOverride('M220', 'Speed override', command.percent);
+    case 'set_extrude_factor':
+      return feedrateOverride('M221', 'Flow override', command.percent);
     case 'z_offset': {
       const delta = command.delta;
       if (!Number.isFinite(delta) || delta === 0) return fail('Choose a step');

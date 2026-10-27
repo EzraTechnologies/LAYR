@@ -69,6 +69,7 @@ describe('mapJob', () => {
       totalLayers: 50,
       filamentUsed: 1234.5,
       message: null,
+      thumbnailPath: null,
     });
   });
 
@@ -160,6 +161,14 @@ describe('planSubscription', () => {
     expect(optional).toHaveLength(MAX_OPTIONAL_SENSORS);
     expect(optional).toContain('temperature_fan chamber');
   });
+
+  it('subscribes to motion_report velocities and configfile settings when the printer has them', () => {
+    const plan = planSubscription(['motion_report', 'configfile', 'extruder', 'webhooks', 'print_stats', 'display_status', 'virtual_sdcard', 'heater_bed', 'toolhead', 'gcode_move', 'idle_timeout']);
+    expect(plan.objects.motion_report).toEqual(['live_velocity', 'live_extruder_velocity']);
+    expect(plan.objects.configfile).toEqual(['settings']);
+    expect(plan.missing).toEqual([]);
+    expect(plan.objects.motion_report).not.toContain('trapq');
+  });
 });
 
 describe('assembleState', () => {
@@ -181,6 +190,7 @@ describe('assembleState', () => {
     missingObjects: ['heater_bed'],
     objects: ['extruder', 'print_stats'],
     settings: {},
+    thumbnailPath: null,
     now: 0,
   };
 
@@ -194,8 +204,25 @@ describe('assembleState', () => {
   });
 
   it('hides stale object data when Klipper is not ready', () => {
-    const state = assembleState({ ...base, klippy: 'shutdown', klippyMessage: 'MCU shutdown' });
-    expect(state).toMatchObject({ status: 'error', statusDetail: 'MCU shutdown', job: null, extruder: null, missingObjects: [] });
+    const state = assembleState({
+      ...base,
+      klippy: 'shutdown',
+      klippyMessage: 'MCU shutdown',
+      raw: {
+        ...base.raw,
+        motion_report: { live_velocity: 80, live_extruder_velocity: 4 },
+        gcode_move: { speed_factor: 2, extrude_factor: 1.5 },
+      },
+      settings: { extruder: { filament_diameter: '1.75' } },
+    });
+    expect(state).toMatchObject({
+      status: 'error',
+      statusDetail: 'MCU shutdown',
+      job: null,
+      extruder: null,
+      missingObjects: [],
+      motion: { speedMmS: null, flowMm3S: null },
+    });
   });
 
   it('describes a pending retry', () => {

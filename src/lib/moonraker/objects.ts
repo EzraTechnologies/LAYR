@@ -20,6 +20,17 @@ const OPTIONAL_OBJECTS: Record<string, string[]> = {
   fan: ['speed', 'rpm'],
 };
 
+/**
+ * Live speed/flow and the parsed printer config.
+ * `configfile.settings` is large, but filament diameter lives there and the subscription has to
+ * include it (a separate query remains only as a fallback when the snapshot omits the field).
+ * `motion_report` is limited to the two live velocities so stepper/trapq dumps are not streamed.
+ */
+const TELEMETRY_OBJECTS: Record<string, string[]> = {
+  motion_report: ['live_velocity', 'live_extruder_velocity'],
+  configfile: ['settings'],
+};
+
 const HEATER_FIELDS = ['temperature', 'target', 'power'];
 const SENSOR_FIELDS = ['temperature'];
 const FAN_FIELDS = ['speed', 'rpm'];
@@ -84,6 +95,9 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     else missing.push(name);
   }
   for (const [name, fields] of Object.entries(OPTIONAL_OBJECTS)) {
+    if (availableSet.has(name)) objects[name] = fields;
+  }
+  for (const [name, fields] of Object.entries(TELEMETRY_OBJECTS)) {
     if (availableSet.has(name)) objects[name] = fields;
   }
 

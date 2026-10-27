@@ -16,6 +16,13 @@ import type {
 } from './types';
 import { WS_OPEN } from './types';
 
+/** `configfile.settings` from a subscribe/query status payload, or null when it is absent or empty. */
+function configSettingsFrom(status: RawStatus | undefined): ConfigSettings | null {
+  const settings = status?.configfile?.settings;
+  if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) return null;
+  return Object.keys(settings).length > 0 ? (settings as ConfigSettings) : null;
+}
+
 /** JSON-RPC methods that only read state or manage LAYR's own subscription. */
 export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.connection.identify',
@@ -370,7 +377,9 @@ export class MoonrakerClient {
       const plan = planSubscription(objects);
       const result = await this.#call<SubscribeResult>('printer.objects.subscribe', { objects: plan.objects });
       if (generation !== this.#generation) return;
-      const settings = objects.includes('configfile') ? await this.#configSettings() : {};
+      // Prefer settings carried by the subscription. Query only when that field was omitted.
+      const settings =
+        configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
@@ -387,7 +396,10 @@ export class MoonrakerClient {
     }
   }
 
-  /** Reads the parsed printer configuration once per Klippy start. It is large, so it is not subscribed. */
+  /**
+   * Fallback when the `configfile` subscription snapshot did not include `settings`
+   * (the object is still subscribed; this only fills a hole).
+   */
   async #configSettings(): Promise<ConfigSettings> {
     try {
       const result = await this.#call<SubscribeResult>('printer.objects.query', { objects: { configfile: ['settings'] } });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayFilename, formatClock, formatDuration, formatFilament, formatPercent, formatTemp } from '../src/lib/format';
+import { displayFilename, formatClock, formatDuration, formatFilament, formatFlow, formatPercent, formatSpeed, formatTemp } from '../src/lib/format';
 import { parseRoute } from '../src/lib/routes';
 
 describe('format', () => {
@@ -21,6 +21,11 @@ describe('format', () => {
     expect(formatFilament(950)).toBe('950 mm');
     expect(formatFilament(12345)).toBe('12.35 m');
     expect(displayFilename('a/b/part_v2.gcode')).toBe('part_v2');
+    expect(formatSpeed(48.2)).toBe('48');
+    expect(formatSpeed(null)).toBe('—');
+    expect(formatFlow(12)).toBe('12.0');
+    expect(formatFlow(-1.26)).toBe('-1.3');
+    expect(formatFlow(null)).toBe('—');
   });
 
   it('parses hash routes', () => {

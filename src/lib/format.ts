@@ -48,6 +48,19 @@ export function formatDate(unixSeconds: number | null | undefined, now = Date.no
     : { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
 }
 
+/** Live toolhead speed in mm/s. Never a percentage. */
+export function formatSpeed(mmPerS: number | null | undefined): string {
+  if (mmPerS === null || mmPerS === undefined || !Number.isFinite(mmPerS)) return '—';
+  return String(Math.round(mmPerS));
+}
+
+/** Live volumetric flow in mm³/s, one decimal. Negative is retraction. */
+export function formatFlow(mm3PerS: number | null | undefined): string {
+  if (mm3PerS === null || mm3PerS === undefined || !Number.isFinite(mm3PerS)) return '—';
+  const quantized = Math.round(mm3PerS * 10) / 10;
+  return (Object.is(quantized, -0) ? 0 : quantized).toFixed(1);
+}
+
 export function formatFilament(mm: number | null | undefined): string {
   if (mm === null || mm === undefined || !Number.isFinite(mm) || mm <= 0) return '—';
   return mm >= 1000 ? `${(mm / 1000).toFixed(2)} m` : `${Math.round(mm)} mm`;

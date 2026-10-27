@@ -2,6 +2,7 @@ import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhe
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
 import type { ConfigSettings, RawStatus } from '../moonraker/types';
 import { deriveStatus, FALLBACK_LIMITS, type KlippyState, type PrinterState, type TransportState } from './model';
+import { mapMotion } from './telemetry';
 
 export interface AssembleInputs {
   printerId: string;
@@ -19,8 +20,10 @@ export interface AssembleInputs {
   missingObjects: string[];
   /** Object names from `printer.objects.list`. */
   objects: string[];
-  /** `configfile.settings`, read once per Klippy start. */
+  /** `configfile.settings`, from the subscription snapshot (query is only a fallback). */
   settings: ConfigSettings;
+  /** Thumbnail for the current job file, or null. Cleared when the filename changes. */
+  thumbnailPath: string | null;
   now: number;
 }
 
@@ -41,6 +44,7 @@ export function assembleState(input: AssembleInputs): PrinterState {
   // Object data is only trustworthy while Klipper is ready; otherwise show no live values.
   const raw = connected ? input.raw : {};
   const job = mapJob(raw, input.slicerEstimate);
+  if (job) job.thumbnailPath = input.thumbnailPath;
   const temps = mapTemperatures(raw);
   const jobState = raw.print_stats ? parseJobState(raw.print_stats.state) : null;
   const info = connected ? staticInfo(input.objects, input.settings) : { macros: [], limits: FALLBACK_LIMITS };
@@ -75,6 +79,7 @@ export function assembleState(input: AssembleInputs): PrinterState {
     chamber: temps.chamber,
     sensors: temps.sensors,
     canExtrude: typeof canExtrude === 'boolean' ? canExtrude : null,
+    motion: mapMotion(raw, connected ? input.settings : {}),
     toolhead: mapToolhead(raw),
     fans: mapFans(raw),
     lights: mapLights(raw, input.settings),

@@ -1,7 +1,8 @@
 import type { PrinterProfile } from '../config';
+import { mapThumbnails, pickThumbnail } from '../files/files';
 import { MoonrakerClient, type CallOptions, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
 import { mergeStatus, toNumber } from '../moonraker/mapping';
-import type { FileMetadata } from '../moonraker/types';
+import type { ConfigSettings, FileMetadata } from '../moonraker/types';
 import { assembleState, type AssembleInputs } from './assemble';
 import type { PrinterState } from './model';
 import type { PrinterConnection, PrinterSource } from './source';
@@ -70,6 +71,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
       missingObjects: [],
       objects: [],
       settings: {},
+      thumbnailPath: null,
       now: this.#now(),
     };
   }
@@ -175,6 +177,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         return;
       case 'status':
         mergeStatus(inputs.raw, event.diff);
+        this.#mergeSettings(event.diff.configfile?.settings);
         this.#maybeFetchMetadata();
         this.#schedule();
         return;
@@ -197,17 +200,26 @@ export class LiveSource implements PrinterSource, PrinterConnection {
     if (name === this.#metadataFor) return;
     this.#metadataFor = name;
     this.#inputs.slicerEstimate = null;
+    // Drop the previous file's thumbnail immediately so a slow metadata reply cannot leave it on screen.
+    this.#inputs.thumbnailPath = null;
     if (!name || !this.#client) return;
     this.#client
       .call<FileMetadata>('server.files.metadata', { filename: name })
       .then((meta) => {
         if (this.#metadataFor !== name) return;
         this.#inputs.slicerEstimate = toNumber(meta.estimated_time);
+        this.#inputs.thumbnailPath = pickThumbnail(mapThumbnails(name, meta.thumbnails), 96)?.path ?? null;
         this.#schedule();
       })
       .catch(() => {
         // Metadata is optional (file may have been deleted or never scanned).
       });
+  }
+
+  /** Section-level merge. A partial `configfile.settings` diff must not wipe unrelated sections. */
+  #mergeSettings(settings: unknown): void {
+    if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) return;
+    this.#inputs.settings = { ...this.#inputs.settings, ...(settings as ConfigSettings) };
   }
 
   #schedule(): void {
