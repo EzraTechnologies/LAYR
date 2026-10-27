@@ -60,3 +60,20 @@ jobs:
             playwright-report
             test-results
           retention-days: 7
+
+  native-qt:
+    name: Native Qt prototype
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt Quick from apt (no WebEngine)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-pyqt6 python3-pyqt6.qtqml python3-pyqt6.qtquick python3-pyqt6.qtwebsockets \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates qml6-module-qtquick-window \
+            qml6-module-qtqml qml6-module-qtqml-workerscript \
+            qt6-wayland python3-pytest fonts-dejavu-core
+      - run: ./native-qt/scripts/verify.sh
