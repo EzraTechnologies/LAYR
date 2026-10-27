@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function run(command: string, options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): string {
-  return execFileSync('bash', ['-lc', command], {
+  return execFileSync('bash', ['-c', command], {
     cwd: options.cwd ?? repo,
     env: { ...process.env, ...options.env },
     encoding: 'utf8',
