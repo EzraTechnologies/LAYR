@@ -8,15 +8,11 @@
   const printerState = store.state;
   const clock = $derived(formatClock(printerState.now));
   const name = $derived(settings.value.displayName.trim() || printerState.printerName);
-  const showHost = $derived(!!printerState.hostname && printerState.hostname !== name);
 </script>
 
 <header class="bar">
   <div class="identity">
     <h1 class="name" title={name}>{name}</h1>
-    {#if showHost}
-      <span class="host" title={printerState.hostname}>{printerState.hostname}</span>
-    {/if}
   </div>
 
   <div class="right">
@@ -57,14 +53,6 @@
     text-overflow: ellipsis;
   }
 
-  .host {
-    color: var(--text-dim);
-    font-size: var(--fs-sm);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .right {
     display: flex;
     align-items: center;
@@ -80,9 +68,4 @@
     text-align: right;
   }
 
-  @media (max-width: 900px) {
-    .host {
-      display: none;
-    }
-  }
 </style>
