@@ -1,4 +1,7 @@
 node_modules/
+__pycache__/
+.pytest_cache/
+*.py[cod]
 dist/
 coverage/
 test-results/

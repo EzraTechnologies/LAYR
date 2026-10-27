@@ -166,6 +166,10 @@ disabled, and a physical mouse still clicks. With the setting off, the normal cu
 alone. This has not been confirmed on the HDMI7. Restarting `layr-kiosk.service` applies the theme;
 that does not restart Klipper.
 
+## Native Qt prototype
+
+`native-qt/` is a separate read-only Qt Quick / QML comparison build. It is not the kiosk. It does not replace this Svelte app, and its installer does not stop `layr-web`, `layr-kiosk`, or KlipperScreen. See [native-qt/README.md](native-qt/README.md). Spoolman is still the next product feature; the Qt shell does not implement it.
+
 ## Architecture
 
 ```

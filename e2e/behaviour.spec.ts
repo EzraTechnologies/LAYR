@@ -77,7 +77,7 @@ test.describe('dashboard', () => {
     await expect(page.getByLabel(/Nozzle: 255 degrees, target 255 degrees/)).toBeVisible();
     await expect(page.getByLabel(/Chamber: 51 degrees/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Fans' }).last()).toContainText('Part cooling');
-    await expect(page.locator('header.bar').getByText('trident', { exact: true })).toHaveCount(0);
+    await expect(page.locator('header.bar').getByRole('heading', { name: 'trident', exact: true })).toBeVisible();
 
     const motion = page.getByRole('region', { name: 'Live motion reported by Klipper' });
     await expect(motion).toContainText('48');
@@ -137,7 +137,7 @@ test.describe('dashboard', () => {
     });
     await openWithMock(page, 'home', { scenario: 'ready' });
     await expect(page.getByRole('heading', { name: 'Voron Trident' })).toBeVisible();
-    await expect(page.getByText('trident', { exact: true })).toBeVisible();
+    await expect(page.locator('header.bar').getByText('trident', { exact: true })).toHaveCount(0);
   });
 
   test('shows a placeholder thumbnail when the file has no preview', async ({ page }) => {
