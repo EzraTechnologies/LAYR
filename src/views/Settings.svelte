@@ -42,7 +42,7 @@
 
   async function editName() {
     const value = await ui.prompt({
-      title: 'Printer display name',
+      title: 'Printer Name',
       value: settings.value.displayName,
       mode: 'text',
       placeholder: printerState.hostname || 'Voron Trident',
@@ -133,7 +133,7 @@
           >True black</button
         >
       </div>
-      <span class="label" id="name-label">Display name</span>
+      <span class="label" id="name-label">Printer Name</span>
       <button type="button" class="btn ghost url-field" aria-labelledby="name-label" onclick={editName}>
         <span class="url-text" class:placeholder={!settings.value.displayName} title={effectiveName}>
           {settings.value.displayName || effectiveName}
