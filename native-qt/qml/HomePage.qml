@@ -12,6 +12,12 @@ Item {
     function job() {
         return page.view.job || ({})
     }
+    function spool() {
+        return page.view.spool || ({})
+    }
+    function spoolExtra() {
+        return page.spool().visible === true ? (page.compact ? 44 : 52) : 0
+    }
 
     Row {
         anchors.fill: parent
@@ -87,9 +93,47 @@ Item {
                     }
                 }
 
+                Rectangle {
+                    visible: page.spool().visible === true
+                    width: parent.width
+                    height: page.compact ? 36 : 44
+                    radius: 10
+                    color: Style.surface3
+                    border.color: Style.border
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 8
+                        Rectangle {
+                            visible: page.spool().color && page.spool().color.length > 0
+                            width: 16
+                            height: 16
+                            radius: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: page.spool().color || "transparent"
+                            border.color: Style.border
+                        }
+                        Text {
+                            width: parent.width - (page.spool().color ? 28 : 0)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: page.spool().text || ""
+                            color: Style.text
+                            font.bold: true
+                            font.pixelSize: page.compact ? 13 : 14
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: page.view.hideCursor ? Qt.BlankCursor : Qt.PointingHandCursor
+                        onClicked: bridge.openPage("filament")
+                    }
+                }
+
                 Item {
                     width: parent.width
-                    height: Math.max(96, parent.height - (page.compact ? 176 : 210))
+                    height: Math.max(72, parent.height - (page.compact ? 176 : 210) - page.spoolExtra())
                     visible: page.job().visible
 
                     Ring {

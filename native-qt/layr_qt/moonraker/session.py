@@ -11,6 +11,15 @@ from typing import Any
 from layr_qt.moonraker.backoff import Backoff
 from layr_qt.moonraker.files import gcodes_api_path, map_directory, map_metadata, pick_thumbnail, safe_gcode_filename, safe_relative
 from layr_qt.actions.gateway import clean_klipper_message
+from layr_qt.spoolman.api import (
+    LIST_LIMIT,
+    MAX_LIST_OFFSET,
+    absent_message,
+    ingest_proxy,
+    parse_active,
+    parse_status,
+    spoolman_list_request,
+)
 from layr_qt.moonraker.protocol import (
     config_settings_from,
     decode_message,
@@ -44,6 +53,8 @@ class MoonrakerSession:
         self.next_id = 1
         self._retry_armed = False
         self._klippy = "unknown"
+        self.spool_generation = 0
+        self.spool_printer = ""
 
     def start(self) -> list[dict]:
         self.running = True
@@ -72,6 +83,8 @@ class MoonrakerSession:
                         "group": info.get("group") or "",
                         "summary": info.get("summary") or "Command",
                         "message": "Connection closed before Moonraker replied. Check the printer before retrying",
+                        "follow": info.get("follow"),
+                        "echo": info.get("echo"),
                     }
                 )
             )
@@ -117,6 +130,10 @@ class MoonrakerSession:
             self._klippy = "shutdown"
             detail = _shutdown_message(message.get("params"))
             return [event({"type": "klippy", "state": "shutdown", "message": detail or "Klipper shutdown"})]
+        if method == "notify_active_spool_set":
+            return self._notify_active_spool(message.get("params"))
+        if method == "notify_spoolman_status_changed":
+            return self._notify_spoolman_link(message.get("params"))
         return []
 
     def on_timer(self, name: str) -> list[dict]:
@@ -162,6 +179,7 @@ class MoonrakerSession:
             "settle": plan.get("settle"),
             "record": plan.get("record"),
             "follow": plan.get("follow"),
+            "echo": plan.get("echo"),
         }
         timeout = int(plan.get("timeoutMs") or RPC_TIMEOUT_MS)
         return [
@@ -185,6 +203,75 @@ class MoonrakerSession:
         if self.transport != "connected":
             return [event(_metadata_event(purpose, safe, error="Offline"))]
         return [self._rpc("server.files.metadata", {"filename": safe}, purpose, {"filename": safe})]
+
+    def refresh_spoolman(self, printer_key: str) -> list[dict]:
+        """Read Spoolman status, then the active id and ``GET /v1/spool`` when Moonraker allows it."""
+        if self.transport != "connected" or not printer_key:
+            return []
+        self.spool_generation += 1
+        self.spool_printer = printer_key
+        return [self._rpc("server.spoolman.status", {}, "spoolman-status", self._spool_meta(0))]
+
+    def request_spool_id(self, printer_key: str) -> list[dict]:
+        if self.transport != "connected" or printer_key != self.spool_printer or self.spool_generation <= 0:
+            return []
+        return [self._rpc("server.spoolman.get_spool_id", {}, "spoolman-active", self._spool_meta(0))]
+
+    def _spool_meta(self, offset: int) -> dict:
+        return {"printerKey": self.spool_printer, "generation": self.spool_generation, "offset": offset}
+
+    def _spool_event(self, info: dict, body: dict) -> dict:
+        meta = info.get("meta") or {}
+        purpose = str(info.get("purpose") or "")
+        part = purpose.split("-", 1)[1] if "-" in purpose else "status"
+        payload = {
+            "type": "spoolman",
+            "part": part,
+            "printerKey": meta.get("printerKey") or "",
+            "generation": meta.get("generation") or 0,
+        }
+        payload.update(body)
+        return event(payload)
+
+    def _notify_payload(self, params: object) -> dict:
+        if isinstance(params, list) and params and isinstance(params[0], dict):
+            return params[0]
+        if isinstance(params, dict):
+            return params
+        return {}
+
+    def _notify_active_spool(self, params: object) -> list[dict]:
+        if self.transport != "connected" or not self.spool_printer or self.spool_generation <= 0:
+            return []
+        payload = self._notify_payload(params)
+        parsed = parse_active(payload if "spool_id" in payload else {})
+        return [
+            event(
+                {
+                    "type": "spoolman",
+                    "part": "notify-active",
+                    "printerKey": self.spool_printer,
+                    "generation": self.spool_generation,
+                    **parsed,
+                }
+            )
+        ]
+
+    def _notify_spoolman_link(self, params: object) -> list[dict]:
+        if self.transport != "connected" or not self.spool_printer or self.spool_generation <= 0:
+            return []
+        payload = self._notify_payload(params)
+        return [
+            event(
+                {
+                    "type": "spoolman",
+                    "part": "link",
+                    "printerKey": self.spool_printer,
+                    "generation": self.spool_generation,
+                    "connected": payload.get("spoolman_connected") is True,
+                }
+            )
+        ]
 
     def _begin_connect(self) -> list[dict]:
         self.transport = "connecting"
@@ -225,6 +312,8 @@ class MoonrakerSession:
                         "group": info.get("group") or "",
                         "summary": info.get("summary") or "Command",
                         "message": f"{reason} before Moonraker replied. Check the printer before retrying",
+                        "follow": info.get("follow"),
+                        "echo": info.get("echo"),
                     }
                 )
             )
@@ -247,6 +336,8 @@ class MoonrakerSession:
                     "group": info.get("group") or "",
                     "summary": summary,
                     "message": f"{summary} was not acknowledged. Check the printer before retrying",
+                    "follow": info.get("follow"),
+                    "echo": info.get("echo"),
                 }
             )
         ]
@@ -271,6 +362,8 @@ class MoonrakerSession:
                         "group": info.get("group") or "",
                         "summary": summary,
                         "message": clean_klipper_message(str(text)),
+                        "follow": info.get("follow"),
+                        "echo": info.get("echo"),
                     }
                 )
             )
@@ -286,6 +379,7 @@ class MoonrakerSession:
                     "settle": info.get("settle"),
                     "record": info.get("record"),
                     "follow": info.get("follow"),
+                    "echo": info.get("echo"),
                 }
             )
         )
@@ -313,6 +407,8 @@ class MoonrakerSession:
             text = error.get("message") if isinstance(error, dict) else "Moonraker error"
             return actions + self._rpc_error(info, text or "Moonraker error")
         result = message.get("result")
+        if str(info.get("purpose") or "").startswith("spoolman"):
+            return actions + self._rpc_result(info, result)
         return actions + self._rpc_result(info, result if isinstance(result, dict) else {})
 
     def _rpc_error(self, info: dict, text: str) -> list[dict]:
@@ -323,10 +419,50 @@ class MoonrakerSession:
             return [event({"type": "directory", "relative": info["meta"].get("relative", ""), "error": text, "dirs": [], "files": []})]
         if purpose in ("job", "file"):
             return [event(_metadata_event(purpose, info["meta"].get("filename", ""), error=text))]
+        if purpose.startswith("spoolman"):
+            absent = purpose == "spoolman-status" and absent_message(text)
+            return [self._spool_event(info, {"ok": False, "absent": absent, "error": text, "connected": False, "offline": False})]
         return []
 
-    def _rpc_result(self, info: dict, result: dict) -> list[dict]:
+    def _rpc_result(self, info: dict, result: object) -> list[dict]:
         purpose = info["purpose"]
+        if purpose == "spoolman-status":
+            body = parse_status(result)
+            actions = [self._spool_event(info, body)]
+            if body.get("ok"):
+                actions.append(self._rpc("server.spoolman.get_spool_id", {}, "spoolman-active", self._spool_meta(0)))
+                if body.get("connected"):
+                    listed = spoolman_list_request(0)
+                    actions.append(self._rpc(listed["method"], listed["params"], "spoolman-list", self._spool_meta(0)))
+            return actions
+        if purpose == "spoolman-active":
+            return [self._spool_event(info, parse_active(result))]
+        if purpose == "spoolman-list":
+            ingested = ingest_proxy(result)
+            offset = int((info.get("meta") or {}).get("offset") or 0)
+            more = bool(ingested["ok"] and ingested["received"] >= LIST_LIMIT and offset + LIST_LIMIT <= MAX_LIST_OFFSET)
+            actions = [
+                self._spool_event(
+                    info,
+                    {
+                        "ok": ingested["ok"],
+                        "offline": ingested["offline"],
+                        "error": ingested["error"],
+                        "offset": offset,
+                        "spools": ingested["spools"],
+                        "images": ingested["images"],
+                        "rejected": ingested["rejected"],
+                        "more": more,
+                    },
+                )
+            ]
+            same_read = (info.get("meta") or {}).get("generation") == self.spool_generation
+            if more and same_read:
+                listed = spoolman_list_request(offset + LIST_LIMIT)
+                actions.append(self._rpc(listed["method"], listed["params"], "spoolman-list", self._spool_meta(offset + LIST_LIMIT)))
+            return actions
+        if not isinstance(result, dict):
+            return []
         if purpose == "identify":
             self.backoff.reset()
             self.transport = "connected"

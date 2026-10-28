@@ -72,6 +72,14 @@ Do this while the printer is idle, with the bed clear, until the motion checks a
 24. Pause, resume, and then cancel with the confirmation. While printing, Move should offer Z babystep and should not offer jogging. Heat changes should ask first.
 25. Hold STOP only if you intend to emergency-stop. A short tap must not fire it. After an emergency stop, restart Klipper from More only when you mean to.
 
+## Spoolman, if you use it
+
+These checks are optional. They do not block the numbered checks above or the rollback below. Printing, jogging, and heating must still work when Spoolman is absent. Do them while `layr-qt` is still the panel.
+
+- With no `[spoolman]` section, open Filament. It should say Spoolman is not enabled, show no weights, and leave Set active disabled. Home may say the same. Moonraker should stay connected.
+- If you run Spoolman, add the server in Moonraker's own configuration and restart Moonraker yourself. LAYR must not have edited `moonraker.conf`. On Filament, confirm the printer URL, the active spool, remaining weight, and that a picture appears only for a spool whose JSON already contained a PNG or JPEG. Set a different spool only while the printer is idle, and only after the confirmation. Dismiss a second attempt and confirm one write happened.
+- Run an unload macro from Filament only if you mean to move filament. Clear the active spool only after Klipper accepts that macro. Cancel the dialog, or stop the macro, and confirm the previous spool is still active. If the result never arrives, clear it yourself from Filament after you have checked the printer. Do not treat this as an MMU test.
+
 ## Rollback
 
 26. `./native-qt/scripts/kiosk-switch.sh rollback --yes` should disable `layr-qt` and enable the single panel recorded in step 4.

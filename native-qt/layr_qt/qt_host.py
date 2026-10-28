@@ -212,6 +212,40 @@ class Bridge(QObject):
             self.runtime.controller.toggle_hidden()
             self.runtime.publish()
 
+    @pyqtSlot(str, str, str, str, str)
+    def setSpoolFilter(self, search: str, material: str, vendor: str, status: str, color: str) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.set_spool_filter(search, material, vendor, status, color)
+            self.runtime.publish()
+
+    @pyqtSlot(int)
+    def moveSpoolPage(self, delta: int) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.move_spool_page(delta)
+            self.runtime.publish()
+
+    @pyqtSlot(int)
+    def selectSpool(self, spool_id: int) -> None:  # noqa: N802
+        if self.runtime:
+            self.runtime.controller.select_spool(spool_id)
+            self.runtime.publish()
+
+    @pyqtSlot()
+    def refreshSpools(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.refresh_spools(io))
+
+    @pyqtSlot(int)
+    def setActiveSpool(self, spool_id: int) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.set_active_spool(spool_id, io))
+
+    @pyqtSlot()
+    def clearActiveSpool(self) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.clear_active_spool(io))
+
+    @pyqtSlot(str)
+    def unloadAndClear(self, macro: str) -> None:  # noqa: N802
+        self._command(lambda io: self.runtime.controller.unload_and_clear(macro, io))
+
     def _command(self, fn) -> None:
         if self.runtime:
             self.runtime.command(fn)
@@ -274,6 +308,7 @@ class QtRuntime(QObject):
             "touchP50Ms": None,
             "note": "Fixture data. Not a Pi measurement and not a Chromium comparison.",
         }
+        self._sync_spool_images()
         view = build_view(
             self.controller.store,
             self.controller.prefs,
@@ -284,6 +319,7 @@ class QtRuntime(QObject):
             settings_error=self.controller.settings_error,
             fixture=self.controller.fixture,
             ui=self.controller.ui_state(),
+            spoolman=self.controller.spoolman,
         )
         self._apply_cursor(bool(view["hideCursor"]))
         self.bridge.set_view(json.dumps(view, separators=(",", ":")))
@@ -484,6 +520,25 @@ class QtRuntime(QObject):
         socket.blockSignals(True)
         socket.close()
         socket.deleteLater()
+
+    def _sync_spool_images(self) -> None:
+        images = getattr(self.controller.spoolman, "images", {}) or {}
+        wanted = set(images)
+        changed = False
+        for key, data in images.items():
+            if key in self.provider.images or image_kind(data) is None:
+                continue
+            image = QImage()
+            if not image.loadFromData(data):
+                continue
+            self.provider.put(key, image)
+            changed = True
+        for key in list(self.provider.images):
+            if key.startswith("spool/") and key not in wanted:
+                del self.provider.images[key]
+                changed = True
+        if changed:
+            self.bridge.set_thumb_token(self.provider.token)
 
     def _sync_thumbnail(self, key: str) -> None:
         if not key or key == self._thumb_key or key in self.provider.images:

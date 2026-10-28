@@ -1,6 +1,7 @@
 /**
- * Spoolman integration contract — NOT IMPLEMENTED yet (planned after the Trident MVP). Defined so the Extrude
- * screen and printer profiles can be built against a stable interface later.
+ * Spoolman integration contract for the Svelte app. The Svelte UI does not call this module.
+ * The native Qt Filament screen implements the same rules in `native-qt/` (confirm a write, and
+ * clear the active spool only after an unload Klipper has accepted).
  *
  * Planned workflow:
  *  1. Browse available spools (Moonraker `server.spoolman.proxy` → Spoolman `GET /v1/spool`).

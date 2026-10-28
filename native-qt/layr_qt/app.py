@@ -30,7 +30,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--platform", default="", help="Qt platform plugin name, for example wayland or xcb")
     parser.add_argument("--moonraker", default="", help="Session Moonraker URL. Not written until you tap Save.")
     parser.add_argument("--config", default="", help="Preferences JSON path")
-    parser.add_argument("--page", default="", choices=["", "home", "move", "heat", "files", "more", "settings", "controls"])
+    parser.add_argument("--page", default="", choices=["", "home", "move", "heat", "files", "filament", "more", "settings", "controls"])
     parser.add_argument("--fixture", default="", choices=["", *FIXTURES], help="Show canned data and do not connect")
     parser.add_argument("--screenshot", default="", help="Grab the window and exit. Implies offscreen unless a platform is set.")
     parser.add_argument("--self-check", action="store_true", help="Load QML offscreen and exit")
@@ -110,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
         controller.fixture = True
         controller.prefs = parse_preferences(fixture_preferences())
         apply_fixture(store, fixture_name if fixture_name in ("offline", "ready", "files") else "printing")
+        if fixture_name == "offline":
+            controller.spoolman.hide("Fixture mode is offline and does not contact Spoolman.")
+        else:
+            from layr_qt.spoolman.samples import load_fixture_spools
+
+            load_fixture_spools(controller.spoolman, controller.printer_key())
         if not args.page:
             controller.page = {"files": "files", "controls": "move", "settings": "settings"}.get(fixture_name, "home")
     if args.page:
