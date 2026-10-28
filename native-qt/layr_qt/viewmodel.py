@@ -25,9 +25,10 @@ from layr_qt.moonraker.status import (
 from layr_qt.moonraker.telemetry import js_round, map_motion
 from layr_qt.actions.panel import attach_panel, file_flags
 from layr_qt.preferences import resolve_printer_name
+from layr_qt.spoolman.model import empty_spool_view
 from layr_qt.store import PrinterStore
 
-PAGES = ("home", "move", "heat", "files", "more", "settings")
+PAGES = ("home", "move", "heat", "files", "filament", "more", "settings")
 
 
 def canonical_page(page: str) -> str | None:
@@ -197,6 +198,7 @@ def build_view(
     fixture: bool = False,
     utc: bool = False,
     ui: dict | None = None,
+    spoolman=None,
 ) -> dict:
     live = store.transport == "connected" and store.klippy == "ready"
     raw = store.raw if live else {}
@@ -298,6 +300,15 @@ def build_view(
     }
     state, panel = attach_panel(store, prefs, fixture=fixture, ui=ui)
     view.update(panel)
+    gate = panel.get("gate") or {}
+    printing = bool(gate.get("printing") or gate.get("paused"))
+    unload_macros = [item for item in panel.get("macros") or [] if not item.get("needsParams")]
+    if spoolman is None:
+        view["spoolman"] = empty_spool_view()
+        view["spool"] = {"visible": False, "text": "", "color": ""}
+    else:
+        view["spoolman"] = spoolman.view(printing=printing, printer_label=name, unload_macros=unload_macros)
+        view["spool"] = spoolman.home_chip()
     selected = view["files"]["selected"]
     if selected:
         selected.update(file_flags(state, selected.get("path") or "", fixture=fixture))

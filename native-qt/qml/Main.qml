@@ -169,6 +169,15 @@ Window {
                 view: root.view
                 compact: root.compact
             }
+            FilamentPage {
+                anchors.top: bar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                visible: root.view.page === "filament"
+                view: root.view
+                compact: root.compact
+            }
             ControlsPage {
                 anchors.top: bar.bottom
                 anchors.left: parent.left

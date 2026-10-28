@@ -11,7 +11,8 @@ deploy it over KlipperScreen until you have checked it in a browser. See
 [docs/trident-checklist.md](docs/trident-checklist.md).
 
 Spoolman (browse spools, set the active spool, clear it only after a confirmed unload) is defined
-in `src/lib/spoolman/types.ts` and is **not implemented**.
+in `src/lib/spoolman/types.ts`. The Svelte UI does not implement it. The native Qt controller has a
+Filament screen for the same rules. That screen has not been tested on a Pi.
 
 | 1024×600 | 800×480 |
 | --- | --- |
@@ -168,7 +169,7 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). Spoolman and MMU stay unwired.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not. An MMU stays unwired.
 
 ## Architecture
 
@@ -184,7 +185,7 @@ src/
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
-    spoolman/types.ts           Contract only; not implemented
+    spoolman/types.ts           Svelte contract only. Qt implements the same rules.
 deploy/                         check, install, display switch, rollback, uninstall
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
@@ -213,7 +214,7 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 - Progress comes from `display_status.progress` (falling back to `virtual_sdcard.progress`) and can
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
-- Spoolman is not implemented.
+- The Svelte UI does not implement Spoolman. The native Qt Filament screen does, and it has not been tested on a Pi.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.

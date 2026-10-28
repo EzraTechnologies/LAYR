@@ -14,6 +14,7 @@ Rectangle {
         { "id": "move", "label": "Move" },
         { "id": "heat", "label": "Heat" },
         { "id": "files", "label": "Files" },
+        { "id": "filament", "label": "Filament" },
         { "id": "more", "label": "More" },
         { "id": "settings", "label": "Setup" }
     ]

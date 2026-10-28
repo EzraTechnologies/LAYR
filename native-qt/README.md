@@ -21,11 +21,12 @@ Disconnected and "Klipper not ready" clear those live values. The UI does not ke
 
 ## Pages
 
-Home, Move, Heat, Files, More, Setup. Primary actions are on those screens.
+Home, Move, Heat, Files, Filament, More, Setup. Primary actions are on those screens.
 
 - Move homes axes, jogs inside configured travel, and clamps Z at 0 even when `position_min` is negative. During a print the jog pad is replaced by Z babystep (`SET_GCODE_OFFSET`, at most 0.1 mm per tap, ±2 mm total).
 - Heat sets hotend and bed targets inside the Klipper limits from `configfile`. High targets, and any target change during a print, ask first. Off sends target 0. Extrusion stays locked below `min_extrude_temp` and while a job is printing. Load and unload appear only when a matching macro exists on this printer.
 - Files lists folders, metadata, and thumbnails. Start and delete ask first. The active job cannot be deleted or started again, and a second file cannot be started while a job is active.
+- Filament reads Spoolman through Moonraker when that component is enabled. It lists spools, filters them, and sets or clears the active spool only after confirmation. An unload clears the active spool only after Klipper accepts the macro you picked. See [docs/integrations.md](docs/integrations.md). The screen has not been tried on a Pi.
 - More lists discovered `gcode_macro` objects, including user macros such as Demon Klipper Essentials. Names are not hard-coded. A macro that needs parameters opens the console instead of running empty. The console sends one confirmed line. Restart and firmware restart ask first. Hold STOP for emergency stop.
 - Fans and lights are discovered. `heater_fan` and `controller_fan` stay automatic. Part cooling uses `M106` / `M107`. `fan_generic` uses `SET_FAN_SPEED`. Lights use `SET_PIN` or `SET_LED` for objects whose names look like lights.
 
@@ -60,7 +61,7 @@ python3 -m layr_qt --fixture printing --geometry 1024x600
 
 Qt still sets a blank cursor. Cage draws its own sprite when the HDMI7 touch device is also a pointer, so the Qt cursor is not enough. `scripts/qt-kiosk.sh` writes a transparent Xcursor theme (`layr-blank`) and sets `XCURSOR_THEME` and `WLR_NO_HARDWARE_CURSORS=1` when Hide pointer is on. Touch is not disabled. A physical mouse still clicks. Setup can show the system cursor again.
 
-The Setup, Heat, and console keyboards are 240 px (the Heat setpoint pad is 200 px). Focusing a field scrolls it above the keyboard. Commit `b7b438f` fixed the keyboard height. The scroll behaviour is in this branch. Neither the blank Cage cursor nor the keyboard has been checked on the HDMI7. See [docs/pi-smoke.md](docs/pi-smoke.md).
+The Setup, Heat, Filament search, and console keyboards are 240 px (the Heat setpoint pad is 200 px) and include Shift. Focusing a field scrolls it above the keyboard. Neither the blank Cage cursor nor the keyboard has been checked on the HDMI7. See [docs/pi-smoke.md](docs/pi-smoke.md).
 
 ## Opt-in kiosk
 
@@ -107,7 +108,7 @@ cd native-qt
 ./scripts/verify.sh
 ```
 
-`verify.sh` runs the unit tests and, when PyQt6 imports, an offscreen QML load at 1024×600, 800×480 Setup, 800×480 Heat, and 1024×600 Move. The tests assert the Moonraker method and G-code text, and they assert that disconnected, read-only, and invalid states send nothing.
+`verify.sh` runs the unit tests and, when PyQt6 imports, an offscreen QML load at 1024×600, 800×480 Setup, 800×480 Heat, 1024×600 Move, and Filament at 1024×600 and 800×480 (including Spoolman hidden). The tests assert the Moonraker method and G-code text, and they assert that disconnected, read-only, and invalid states send nothing. Spoolman writes are covered without a network.
 
 Fixture screenshots (a PC, offscreen, not the panel):
 
@@ -120,6 +121,6 @@ Fixture screenshots (a PC, offscreen, not the panel):
 - [docs/platform.md](docs/platform.md) — Bookworm packages, Wayland, xcb, EGLFS, tested versus not tested
 - [docs/pi-smoke.md](docs/pi-smoke.md) — Pi checklist for touch, the service, the pointer, the keyboard, controls, auth, a live print, and rollback
 - [docs/benchmark.md](docs/benchmark.md) — repeatable Pi comparison against Chromium
-- [docs/integrations.md](docs/integrations.md) — Spoolman and an MMU stay unwired
+- [docs/integrations.md](docs/integrations.md) — Filament / Spoolman on Qt. An MMU stays unwired
 
 Preferences example: [config.example.json](config.example.json). Copy it to `~/.config/layr-native-qt/preferences.json` or pass `--config`. The API key is intentionally not a field.

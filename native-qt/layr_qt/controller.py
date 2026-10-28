@@ -9,8 +9,10 @@ from __future__ import annotations
 from layr_qt.actions.gateway import CommandGateway
 from layr_qt.actions.model import build_snapshot
 from layr_qt.moonraker.session import MoonrakerSession
-from layr_qt.preferences import parse_preferences, sanitize_display_name
+from layr_qt.preferences import parse_preferences, resolve_printer_name, sanitize_display_name
 from layr_qt.moonraker.urls import validate_moonraker_url
+from layr_qt.spoolman.api import should_clear_after_unload, unload_outcome
+from layr_qt.spoolman.model import HIDDEN_HELP, SpoolmanModel
 from layr_qt.viewmodel import canonical_page
 
 FIXTURE_MESSAGE = "Fixture mode does not connect to a printer."
@@ -35,6 +37,11 @@ class Controller:
         self.show_hidden = False
         self.settle: dict | None = None
         self._follow_directory = False
+        self.spoolman = SpoolmanModel()
+        self._pending_spool_refresh = False
+        self._clear_after_unload = False
+        self._read_spool_id = False
+        self._dispatch_depth = 0
 
     def start(self, io) -> None:
         if self.fixture:
@@ -71,6 +78,11 @@ class Controller:
         self.page = page
         if page == "files" and not self.fixture and not self.store.directory_loaded:
             self._dispatch(self.session.request_directory(self.store.directory_relative), io)
+            return
+        if page == "filament" and not self.fixture and self.session.transport == "connected":
+            if self.spoolman.phase != "loading" and "spoolman" not in self.gateway.inflight:
+                self._pending_spool_refresh = True
+                self._dispatch([], io)
 
     def open_directory(self, path: str, io) -> None:
         self.store.selected_path = None
@@ -105,6 +117,9 @@ class Controller:
             }
         )
         self.settings_error = ""
+        if previous != self.prefs["moonrakerUrl"]:
+            self.spoolman.hide("Spoolman readings are hidden until this printer is connected.")
+            self.spoolman.printer_key = self.printer_key()
         return {"urlChanged": previous != self.prefs["moonrakerUrl"]}
 
     def reconnect(self, io) -> None:
@@ -193,6 +208,35 @@ class Controller:
     def set_extrude_factor(self, percent: float, io) -> None:
         self.request({"kind": "set_extrude_factor", "percent": percent}, io)
 
+    def set_spool_filter(self, search: str, material: str, vendor: str, status: str, color: str) -> None:
+        self.spoolman.set_filter(search=search, material=material, vendor=vendor, status=status, color=color)
+
+    def move_spool_page(self, delta: int) -> None:
+        self.spoolman.move_page(delta)
+
+    def select_spool(self, spool_id: int) -> None:
+        self.spoolman.select(int(spool_id))
+
+    def refresh_spools(self, io) -> None:
+        if self.fixture or self.session.transport != "connected":
+            return
+        if self.spoolman.phase == "loading" or "spoolman" in self.gateway.inflight:
+            return
+        self._pending_spool_refresh = True
+        self._dispatch([], io)
+
+    def set_active_spool(self, spool_id: int, io) -> None:
+        self.request({"kind": "set_active_spool", "spoolId": int(spool_id)}, io)
+
+    def clear_active_spool(self, io) -> None:
+        self.request({"kind": "clear_active_spool"}, io)
+
+    def unload_and_clear(self, macro: str, io) -> None:
+        self.request({"kind": "unload_clear", "name": macro}, io)
+
+    def printer_key(self) -> str:
+        return (self.prefs.get("moonrakerUrl") or "").strip()
+
     def request(self, command: dict, io, *, confirmed: bool = False) -> None:
         if self.fixture:
             self._toast("warn", FIXTURE_MESSAGE)
@@ -223,7 +267,12 @@ class Controller:
         self._send_plan(outcome["plan"], io)
 
     def snapshot(self) -> dict:
-        return build_snapshot(self.store, configured=bool(self.prefs.get("moonrakerUrl")))
+        state = build_snapshot(self.store, configured=bool(self.prefs.get("moonrakerUrl")))
+        label, _source = resolve_printer_name(self.prefs.get("displayName") or "", self.store.hostname)
+        state["printerKey"] = self.printer_key()
+        state["printerLabel"] = label
+        state["spoolman"] = self.spoolman.facts()
+        return state
 
     def ui_state(self) -> dict:
         return {
@@ -277,25 +326,66 @@ class Controller:
             self.settle = {"group": group, "axis": event["settle"]["axis"], "target": event["settle"]["target"]}
             extra.append({"kind": "timer", "name": "settle", "ms": 3000})
             self._toast("ok", _ok_text(event))
-        else:
-            if group:
-                self.gateway.release(group)
-            if self.settle and self.settle.get("group") == group:
-                self.settle = None
-                extra.append({"kind": "cancel_timer", "name": "settle"})
-            if status == "ok":
-                self._toast("ok", _ok_text(event))
-                if event.get("record"):
-                    self._log_console("command", str(event["record"]))
-                if event.get("follow") == "directory":
-                    self._follow_directory = True
-            elif status == "failed":
-                self._toast("danger", f"{summary} failed. {event.get('message') or ''}".strip())
-                if event.get("record"):
-                    self._log_console("error", str(event["record"]))
-            elif status == "unconfirmed":
-                self._toast("warn", event.get("message") or f"{summary} was not acknowledged. Check the printer before retrying")
+            return extra
+        if group:
+            self.gateway.release(group)
+        if self.settle and self.settle.get("group") == group:
+            self.settle = None
+            extra.append({"kind": "cancel_timer", "name": "settle"})
+        if event.get("follow") == "clear-active-spool":
+            self._on_unload_result(event)
+            return extra
+        echo = event.get("echo") if isinstance(event.get("echo"), dict) else {}
+        if echo.get("spoolWrite"):
+            self._on_spool_write(event, echo)
+            return extra
+        if status == "ok":
+            self._toast("ok", _ok_text(event))
+            if event.get("record"):
+                self._log_console("command", str(event["record"]))
+            if event.get("follow") == "directory":
+                self._follow_directory = True
+        elif status == "failed":
+            self._toast("danger", f"{summary} failed. {event.get('message') or ''}".strip())
+            if event.get("record"):
+                self._log_console("error", str(event["record"]))
+        elif status == "unconfirmed":
+            self._toast("warn", event.get("message") or f"{summary} was not acknowledged. Check the printer before retrying")
         return extra
+
+    def _on_unload_result(self, event: dict) -> None:
+        outcome = unload_outcome(event.get("status") or "")
+        echo = event.get("echo") if isinstance(event.get("echo"), dict) else {}
+        if echo.get("printerKey") != self.printer_key():
+            self._toast("warn", "Ignored an unload reply for a different printer. The active spool was kept.")
+            return
+        if not should_clear_after_unload(outcome):
+            if outcome == "failed":
+                self._toast("danger", "Unload failed. The active spool was kept.")
+            else:
+                self._toast(
+                    "warn",
+                    "Could not confirm the unload finished. The active spool was kept. Clear it from Filament only after you check the printer.",
+                )
+            return
+        self._toast("ok", "Unload finished. Clearing the active spool because Klipper accepted it.")
+        self._clear_after_unload = True
+
+    def _on_spool_write(self, event: dict, echo: dict) -> None:
+        summary = event.get("summary") or "Spool change"
+        if echo.get("printerKey") != self.printer_key():
+            self._toast("warn", "Ignored a spool reply for a different printer.")
+            return
+        status = event.get("status")
+        if status == "ok":
+            self.spoolman.acknowledge(echo.get("spoolId"))
+            self._toast("ok", f"{summary}. Moonraker accepted it.")
+            self._read_spool_id = True
+            return
+        if status == "failed":
+            self._toast("danger", f"{summary} failed. {event.get('message') or 'The active spool was left as it was.'}".strip())
+            return
+        self._toast("warn", event.get("message") or f"{summary} was not acknowledged. The active spool was left as it was.")
 
     def _log_console(self, kind: str, text: str) -> None:
         self.console.append({"kind": kind, "text": text})
@@ -305,27 +395,73 @@ class Controller:
     def _consume_event(self, event: dict) -> list[dict]:
         if event.get("type") == "command":
             return self._on_command_result(event)
+        if event.get("type") == "spoolman":
+            self._on_spoolman_event(event)
+            return []
         self.store.apply(event)
+        if event.get("type") == "transport" and event.get("state") in ("idle", "waiting", "connecting") and not self.fixture:
+            self.spoolman.hide(HIDDEN_HELP)
+        if (
+            event.get("type") == "snapshot"
+            and not self.fixture
+            and self.store.transport == "connected"
+            and self.store.klippy == "ready"
+        ):
+            self._pending_spool_refresh = True
         if event.get("type") in ("status", "snapshot"):
             return self._check_settle()
         return []
 
+    def _on_spoolman_event(self, event: dict) -> None:
+        was_offline = self.spoolman.phase == "offline"
+        self.spoolman.apply(event)
+        if event.get("part") == "link" and event.get("connected") and was_offline and "spoolman" not in self.gateway.inflight:
+            self._pending_spool_refresh = True
+
     def _dispatch(self, actions: list[dict], io) -> None:
-        io_actions: list[dict] = []
-        for action in actions:
-            if action.get("kind") == "event":
-                io_actions.extend(self._consume_event(action["event"]))
-            else:
-                io_actions.append(action)
-        target = self.store.take_metadata_request()
-        if target and not self.fixture:
-            self._dispatch(self.session.request_metadata(target, "job"), io)
-        follow = self._follow_directory
-        self._follow_directory = False
-        for action in io_actions:
-            io(action)
-        if follow and not self.fixture:
-            self._dispatch(self.session.request_directory(self.store.directory_relative), io)
+        self._dispatch_depth += 1
+        try:
+            io_actions: list[dict] = []
+            for action in actions:
+                if action.get("kind") == "event":
+                    io_actions.extend(self._consume_event(action["event"]))
+                else:
+                    io_actions.append(action)
+            target = self.store.take_metadata_request()
+            if target and not self.fixture:
+                self._dispatch(self.session.request_metadata(target, "job"), io)
+            follow = self._follow_directory
+            self._follow_directory = False
+            for action in io_actions:
+                io(action)
+            if follow and not self.fixture:
+                self._dispatch(self.session.request_directory(self.store.directory_relative), io)
+            if self._dispatch_depth == 1:
+                self._finish_spool_side_effects(io)
+        finally:
+            self._dispatch_depth -= 1
+
+    def _finish_spool_side_effects(self, io) -> None:
+        if self.fixture:
+            self._pending_spool_refresh = False
+            self._clear_after_unload = False
+            self._read_spool_id = False
+            return
+        if self._clear_after_unload:
+            self._clear_after_unload = False
+            self.request({"kind": "clear_active_spool", "authorized": True}, io, confirmed=True)
+        if self._read_spool_id:
+            self._read_spool_id = False
+            self._dispatch(self.session.request_spool_id(self.printer_key()), io)
+        if self._pending_spool_refresh:
+            self._pending_spool_refresh = False
+            if "spoolman" in self.gateway.inflight:
+                return
+            actions = self.session.refresh_spoolman(self.printer_key())
+            if not actions:
+                return
+            self.spoolman.expect(self.printer_key(), self.session.spool_generation)
+            self._dispatch(actions, io)
 
 
 def _axes(text: str) -> list[str]:

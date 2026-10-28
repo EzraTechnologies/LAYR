@@ -1,63 +1,32 @@
-"""Future Moonraker ports for Spoolman and an MMU.
+"""Moonraker ports for Spoolman reads and a future MMU.
 
-Nothing in this module is called by the running UI. The methods are not on the
-read allow-list, so the session cannot send them. Spoolman stays the next
-product priority (issue 5). AFC / Happy Hare (issue 4) is not implemented.
+Spoolman reads are on the session allow-list. Setting the active spool is a
+confirmed control write (``server.spoolman.post_spool_id``). AFC / Happy Hare
+is not subscribed and has no UI.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from layr_qt.moonraker.protocol import READ_METHODS
+from layr_qt.spoolman.api import (
+    SPOOLMAN_READS,
+    SPOOLMAN_WRITES,
+    spoolman_active_request,
+    spoolman_list_request,
+    spoolman_set_active_request,
+    spoolman_status_request,
+)
 
-# Moonraker Spoolman component. Writes must go through a confirmed command
-# path, the same rule as ``src/lib/spoolman/types.ts``.
-SPOOLMAN_READS = frozenset({"server.spoolman.get_spool_id", "server.spoolman.proxy", "server.spoolman.status"})
-SPOOLMAN_WRITES = frozenset({"server.spoolman.post_spool_id"})
-
-
-def spoolman_list_request() -> dict:
-    """Shape of a future ``server.spoolman.proxy`` GET of ``/v1/spool``. Not sent."""
-    return {"method": "server.spoolman.proxy", "params": {"request_method": "GET", "path": "/v1/spool"}}
-
-
-def spoolman_active_request() -> dict:
-    return {"method": "server.spoolman.get_spool_id", "params": {}}
-
-
-def spoolman_set_active_request(spool_id: int | None) -> dict:
-    return {"method": "server.spoolman.post_spool_id", "params": {"spool_id": spool_id}}
-
-
-class SpoolmanPort(Protocol):
-    """Same workflow as the TypeScript contract. Not implemented in this prototype."""
-
-    def list_spools(self, printer_id: str) -> list[dict]: ...
-
-    def get_active_spool(self, printer_id: str) -> dict | None: ...
-
-    def set_active_spool(self, printer_id: str, spool_id: int) -> None: ...
-
-    def clear_active_spool_after_unload(self, printer_id: str, outcome: str) -> None: ...
-
-
-class SpoolmanNotReady:
-    """Placeholder so a later screen can depend on the port without sending RPCs."""
-
-    def list_spools(self, printer_id: str) -> list[dict]:
-        raise NotImplementedError("Spoolman is not part of the Qt prototype")
-
-    def get_active_spool(self, printer_id: str) -> dict | None:
-        raise NotImplementedError("Spoolman is not part of the Qt prototype")
-
-    def set_active_spool(self, printer_id: str, spool_id: int) -> None:
-        raise NotImplementedError("Spoolman is not part of the Qt prototype")
-
-    def clear_active_spool_after_unload(self, printer_id: str, outcome: str) -> None:
-        if outcome != "confirmed-success":
-            return
-        raise NotImplementedError("Spoolman is not part of the Qt prototype")
+__all__ = [
+    "SPOOLMAN_READS",
+    "SPOOLMAN_WRITES",
+    "mmu_object_names",
+    "read_path_blocks_spoolman_writes_and_mmu",
+    "spoolman_active_request",
+    "spoolman_list_request",
+    "spoolman_set_active_request",
+    "spoolman_status_request",
+]
 
 
 def mmu_object_names(available: list[str]) -> list[str]:
@@ -75,6 +44,7 @@ def mmu_object_names(available: list[str]) -> list[str]:
     return found
 
 
-def prototype_cannot_call_spoolman_or_mmu() -> bool:
-    blocked = SPOOLMAN_READS | SPOOLMAN_WRITES | {"printer.gcode.script", "printer.print.start", "printer.mmu.*"}
-    return READ_METHODS.isdisjoint(blocked)
+def read_path_blocks_spoolman_writes_and_mmu() -> bool:
+    """Status reads may include Spoolman. Writes and MMU motion stay off that path."""
+    blocked = set(SPOOLMAN_WRITES) | {"printer.gcode.script", "printer.print.start", "printer.mmu.*"}
+    return READ_METHODS.isdisjoint(blocked) and SPOOLMAN_READS <= READ_METHODS

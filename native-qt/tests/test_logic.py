@@ -10,12 +10,12 @@ import pytest
 
 from layr_qt.controller import Controller
 from layr_qt.moonraker.adapters import (
-    SpoolmanNotReady,
     mmu_object_names,
-    prototype_cannot_call_spoolman_or_mmu,
+    read_path_blocks_spoolman_writes_and_mmu,
     spoolman_list_request,
     spoolman_set_active_request,
 )
+from layr_qt.spoolman.api import should_clear_after_unload
 from layr_qt.moonraker.backoff import Backoff, BackoffOptions
 from layr_qt.moonraker.files import image_kind, map_thumbnails, safe_relative, thumbnail_request_url
 from layr_qt.moonraker.protocol import MethodNotAllowedError, encode_request, merge_status, plan_subscription
@@ -156,18 +156,19 @@ def test_subscription_includes_motion_and_skips_mmu():
     assert "AFC" not in plan["objects"]
     assert "temperature_sensor chamber" in plan["objects"]
     assert mmu_object_names(names) == ["mmu", "AFC"]
-    assert prototype_cannot_call_spoolman_or_mmu()
+    assert read_path_blocks_spoolman_writes_and_mmu()
     with pytest.raises(MethodNotAllowedError):
         encode_request(1, "printer.gcode.script", {"script": "G28"})
     with pytest.raises(MethodNotAllowedError):
         encode_request(1, "server.spoolman.post_spool_id", {"spool_id": 1})
+    encode_request(1, "server.spoolman.post_spool_id", {"spool_id": 1}, control=True)
     assert spoolman_list_request()["method"] not in plan["objects"]
-    blocked = SpoolmanNotReady()
-    with pytest.raises(NotImplementedError):
-        blocked.list_spools("default")
-    blocked.clear_active_spool_after_unload("default", "cancelled")
-    with pytest.raises(NotImplementedError):
-        blocked.clear_active_spool_after_unload("default", "confirmed-success")
+    assert spoolman_list_request()["params"]["path"] == "/v1/spool"
+    assert spoolman_list_request()["params"]["use_v2_response"] is True
+    assert should_clear_after_unload("cancelled") is False
+    assert should_clear_after_unload("failed") is False
+    assert should_clear_after_unload("unconfirmed") is False
+    assert should_clear_after_unload("confirmed-success") is True
     assert spoolman_set_active_request(None)["params"]["spool_id"] is None
 
 
@@ -272,9 +273,10 @@ def test_session_subscribes_and_view_uses_live_motion(tmp_path):
     assert "mmu" not in subscribe["params"]["objects"]
     assert subscribe["params"]["objects"]["motion_report"] == ["live_velocity", "live_extruder_velocity"]
     controller.on_message(_ok(subscribe["id"], {"status": PRINTING_STATUS}), io)
-    meta = _rpc([item for item in io_log if item["kind"] == "send"][-1:])
-    assert meta["method"] == "server.files.metadata"
+    sends = [json.loads(item["text"]) for item in io_log if item["kind"] == "send"]
+    meta = next(item for item in reversed(sends) if item["method"] == "server.files.metadata")
     assert meta["params"]["filename"] == "jobs/voron_cube.gcode"
+    assert any(item["method"] == "server.spoolman.status" for item in sends)
     controller.on_message(
         _ok(
             meta["id"],

@@ -525,6 +525,8 @@ def prepare_command(command: dict, state: dict) -> dict:
     if gate:
         return _fail(gate)
 
+    if kind in ("set_active_spool", "clear_active_spool", "unload_clear"):
+        return _prepare_spoolman(command, state)
     if kind == "pause":
         if not _is_printing(state):
             return _fail("No print is running")
@@ -648,3 +650,124 @@ def prepare_command(command: dict, state: dict) -> dict:
     if kind == "macro":
         return _prepare_macro(state, str(command.get("name") or ""))
     return _fail("This action is not available")
+
+
+def _spool_facts(state: dict) -> dict:
+    facts = state.get("spoolman")
+    return facts if isinstance(facts, dict) else {}
+
+
+def _prepare_spoolman(command: dict, state: dict) -> dict:
+    """Active-spool writes. Printing stays locked. Unload macros are not name-matched."""
+    kind = command.get("kind")
+    facts = _spool_facts(state)
+    label = state.get("printerLabel") or "this printer"
+    printer_key = state.get("printerKey") or ""
+    if _job_active(state):
+        return _fail(f"A print is active on {label}. Spool changes stay locked until it finishes.")
+    if facts.get("phase") != "ready" or facts.get("printerKey") != printer_key:
+        return _fail("Spoolman is not available on this printer")
+    if kind == "set_active_spool":
+        return _prepare_set_spool(command, facts, label, printer_key)
+    if kind == "clear_active_spool":
+        return _prepare_clear_spool(command, facts, label, printer_key)
+    if kind == "unload_clear":
+        return _prepare_unload_clear(command, state, label, printer_key)
+    return _fail("This action is not available")
+
+
+def _prepare_set_spool(command: dict, facts: dict, label: str, printer_key: str) -> dict:
+    raw = command.get("spoolId")
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return _fail("Choose a spool")
+    if raw not in (facts.get("ids") or []):
+        return _fail("That spool is not in this printer's list")
+    if facts.get("activeKnown") and facts.get("activeId") == raw:
+        return _fail("That spool is already active")
+    name = (facts.get("names") or {}).get(raw) or f"Spool {raw}"
+    archived = raw in (facts.get("archived") or [])
+    body = f"Use {name} as the active spool on {label}. Filament tracking follows this spool."
+    if archived:
+        body += " This spool is archived."
+    return _ok(
+        {
+            "method": "server.spoolman.post_spool_id",
+            "params": {"spool_id": raw},
+            "summary": f"Active spool {name}",
+            "group": "spoolman",
+            "timeoutMs": 15 * SECOND,
+            "confirm": {
+                "title": f"Set active spool on {label}?",
+                "body": body,
+                "confirmLabel": "Set active spool",
+                "cancelLabel": "Go back",
+                "tone": "warn" if archived else "primary",
+            },
+            "echo": {"spoolWrite": True, "spoolId": raw, "printerKey": printer_key},
+        }
+    )
+
+
+def _prepare_clear_spool(command: dict, facts: dict, label: str, printer_key: str) -> dict:
+    authorized = bool(command.get("authorized"))
+    if not facts.get("activeKnown"):
+        if authorized:
+            return _fail("Unload finished. The active spool was not read, so it was kept. Clear it from Filament after you check the printer.")
+        return _fail("The active spool has not been read")
+    if facts.get("activeId") is None:
+        if authorized:
+            return _fail("Unload finished. No active spool was set, so nothing was cleared.")
+        return _fail("No active spool is set")
+    body = (
+        f"Klipper accepted the unload on {label}. Clear the active spool now. This does not move filament."
+        if authorized
+        else f"Stop tracking the active spool on {label}. This does not move filament. Use it after you have checked an unload yourself."
+    )
+    return _ok(
+        {
+            "method": "server.spoolman.post_spool_id",
+            "params": {"spool_id": None},
+            "summary": "Clear active spool",
+            "group": "spoolman",
+            "timeoutMs": 15 * SECOND,
+            "confirm": {
+                "title": f"Clear the active spool on {label}?",
+                "body": body,
+                "confirmLabel": "Clear active spool",
+                "cancelLabel": "Keep spool",
+                "tone": "warn",
+            },
+            "echo": {"spoolWrite": True, "spoolId": None, "printerKey": printer_key},
+        }
+    )
+
+
+def _prepare_unload_clear(command: dict, state: dict, label: str, printer_key: str) -> dict:
+    name = str(command.get("name") or "")
+    macro = next((item for item in state.get("macros") or [] if item.get("name") == name), None)
+    if macro is None or not MACRO_NAME_RE.match(name):
+        return _fail("This macro is not available")
+    required = macro.get("requiredParams") or []
+    if required:
+        return _fail(f"{name} needs {', '.join(required)}. LAYR will not guess them, and the active spool was kept.")
+    return _script(
+        [name],
+        f"Run {name}",
+        "spoolman",
+        MACRO_TIMEOUT_MS,
+        {
+            "confirm": {
+                "title": f"Unload with {name}?",
+                "body": (
+                    f"Run {name} on {label}. The active spool is cleared only if Klipper accepts this macro. "
+                    "A failed, cancelled, or unanswered run keeps the spool. The macro name is whatever this printer reports."
+                ),
+                "confirmLabel": "Run and clear if accepted",
+                "cancelLabel": "Go back",
+                "tone": "warn",
+            },
+            "follow": "clear-active-spool",
+            "echo": {"printerKey": printer_key, "unload": True},
+            "record": name,
+        },
+    )

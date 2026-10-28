@@ -1,8 +1,9 @@
 """JSON-RPC helpers and the Moonraker method allow-lists.
 
 Reads are the default. Printer-changing methods are accepted only when the
-command gateway sets ``control=True``. Spoolman writes, MMU commands, machine
-power, and config writes stay rejected. See ``adapters.py``.
+command gateway sets ``control=True``. Spoolman proxy calls are limited to
+documented GET paths. MMU commands, machine power, and config writes stay
+rejected. See ``adapters.py``.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+
+from layr_qt.spoolman.api import spoolman_proxy_allowed, spoolman_write_allowed
 
 READ_METHODS = frozenset(
     {
@@ -23,6 +26,9 @@ READ_METHODS = frozenset(
         "server.files.metadata",
         "server.files.thumbnails",
         "server.gcode_store",
+        "server.spoolman.status",
+        "server.spoolman.get_spool_id",
+        "server.spoolman.proxy",
     }
 )
 
@@ -38,6 +44,7 @@ CONTROL_METHODS = frozenset(
         "printer.restart",
         "printer.firmware_restart",
         "server.files.delete_file",
+        "server.spoolman.post_spool_id",
     }
 )
 
@@ -148,6 +155,10 @@ def plan_subscription(available: list[str]) -> dict[str, Any]:
 
 def encode_request(rpc_id: int, method: str, params: dict | None = None, *, control: bool = False) -> str:
     if not is_allowed_method(method, control=control):
+        raise MethodNotAllowedError(method)
+    if method == "server.spoolman.proxy" and not spoolman_proxy_allowed(params):
+        raise MethodNotAllowedError(method)
+    if method == "server.spoolman.post_spool_id" and not spoolman_write_allowed(params):
         raise MethodNotAllowedError(method)
     body: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": rpc_id}
     if params is not None:
