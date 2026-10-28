@@ -5,6 +5,7 @@ import {
   gcodesFileUrlPath,
   joinPath,
   mapDirectory,
+  pathCrumbs,
   mapMetadata,
   mapThumbnails,
   pickThumbnail,
@@ -89,6 +90,40 @@ describe('metadata mapping', () => {
       ['sb/part.gcode', false],
       // No metadata in the listing (older Moonraker): fetched separately.
       ['sb/legacy.gcode', true],
+    ]);
+  });
+
+  it('keeps the current directory only, including an empty folder, and does not pull in nested files', () => {
+    const result = mapDirectory('jobs', {
+      dirs: [{ dirname: 'empty bin' }, { dirname: '.thumbs' }, { dirname: 'customer #1' }],
+      files: [{ filename: 'panel.gcode', modified: 1, size: 10, estimated_time: 30 }],
+    });
+    expect(result.dirs.map((d) => d.path)).toEqual(['jobs/customer #1', 'jobs/empty bin']);
+    expect(result.files.map((f) => f.path)).toEqual(['jobs/panel.gcode']);
+  });
+});
+
+describe('folder path', () => {
+  it('builds a breadcrumb from the real directory and cannot leave the gcodes root', () => {
+    expect(pathCrumbs('')).toEqual([{ label: 'G-code files', path: '' }]);
+    expect(pathCrumbs('stealthburner')).toEqual([
+      { label: 'G-code files', path: '' },
+      { label: 'stealthburner', path: 'stealthburner' },
+    ]);
+    expect(pathCrumbs('stealthburner/parts/hardware')).toEqual([
+      { label: 'G-code files', path: '' },
+      { label: 'stealthburner', path: 'stealthburner' },
+      { label: 'parts', path: 'stealthburner/parts' },
+      { label: 'hardware', path: 'stealthburner/parts/hardware' },
+    ]);
+    expect(pathCrumbs('a//b/../c')).toEqual([
+      { label: 'G-code files', path: '' },
+      { label: 'a', path: 'a' },
+      { label: 'c', path: 'a/c' },
+    ]);
+    expect(pathCrumbs('../etc')).toEqual([
+      { label: 'G-code files', path: '' },
+      { label: 'etc', path: 'etc' },
     ]);
   });
 });

@@ -67,6 +67,31 @@ export function parentDir(path: string): string {
   return i === -1 ? '' : path.slice(0, i);
 }
 
+export interface PathCrumb {
+  /** Segment label. The root crumb is "G-code files". */
+  label: string;
+  /** Path relative to the gcodes root. Empty at the root. */
+  path: string;
+}
+
+/**
+ * Breadcrumb for the current gcodes directory. `..` cannot leave the root.
+ * Each crumb is one real directory; nothing is flattened or invented.
+ */
+export function pathCrumbs(dir: string): PathCrumb[] {
+  const crumbs: PathCrumb[] = [{ label: 'G-code files', path: '' }];
+  for (const part of dir.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (crumbs.length > 1) crumbs.pop();
+      continue;
+    }
+    const parent = crumbs.at(-1)!.path;
+    crumbs.push({ label: part, path: parent ? `${parent}/${part}` : part });
+  }
+  return crumbs;
+}
+
 /** Encodes each path segment, keeping `/` separators: `my dir/a#1.png` → `my%20dir/a%231.png`. */
 export function encodePath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');

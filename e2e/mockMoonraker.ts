@@ -167,6 +167,8 @@ export interface MockOptions {
   scenario?: Scenario;
   homed?: boolean;
   files?: MockFile[];
+  /** Directory paths relative to gcodes that exist even with no files inside them. */
+  emptyDirs?: string[];
   /** Status overrides applied after the scenario. */
   status?: Status;
   /** Pre-filled `server.gcode_store`. */
@@ -179,6 +181,7 @@ export class MockMoonraker {
   status: Status;
   klippy: string;
   files: MockFile[];
+  emptyDirs: string[];
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
@@ -192,6 +195,7 @@ export class MockMoonraker {
     for (const [name, fields] of Object.entries(options.status ?? {})) this.status[name] = { ...this.status[name], ...fields };
     this.klippy = scenario === 'shutdown' ? 'shutdown' : scenario === 'startup' ? 'startup' : 'ready';
     this.files = options.files ?? defaultFiles();
+    this.emptyDirs = options.emptyDirs ?? [];
     this.gcodeStore = options.gcodeStore ?? [
       { message: 'G28', time: T - 400, type: 'command' },
       { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
@@ -355,6 +359,14 @@ export class MockMoonraker {
       const rest = f.path.slice(prefix.length);
       if (rest.includes('/')) dirs.add(rest.split('/')[0]!);
       else files.push({ filename: rest, modified: f.modified, size: f.size, permissions: 'rw', ...(f.meta ?? {}) });
+    }
+    for (const empty of this.emptyDirs) {
+      const normalized = empty.replace(/^\/+|\/+$/g, '');
+      if (!normalized || normalized.split('/').some((part) => part === '' || part === '.' || part === '..' || part.startsWith('.'))) continue;
+      if (normalized === dir) continue;
+      if (!normalized.startsWith(prefix)) continue;
+      const name = normalized.slice(prefix.length).split('/')[0];
+      if (name) dirs.add(name);
     }
     dirs.add('.thumbs');
     return {

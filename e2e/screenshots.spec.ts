@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openWithMock, VIEWPORTS } from './helpers';
-import type { MockOptions } from './mockMoonraker';
+import { defaultFiles, type MockFile, type MockOptions } from './mockMoonraker';
 
 /**
  * Regenerates docs/screenshots from the real production bundle connected to the mock Moonraker in
@@ -11,6 +11,31 @@ interface Shot {
   route: string;
   options?: MockOptions;
   prepare?: (page: Page) => Promise<void>;
+}
+
+/** Adds one real subfolder under stealthburner so the nested shot has folders and files together. */
+function withPartsFolder(): MockFile[] {
+  const files = defaultFiles();
+  const donor = files.find((file) => file.path.endsWith('SB_cowling_ASA_0.2mm.gcode'));
+  return [
+    ...files,
+    {
+      path: 'stealthburner/parts/logo_plate.gcode',
+      modified: (donor?.modified ?? 1) - 10,
+      size: 420_000,
+      meta: {
+        estimated_time: 900,
+        filament_total: 800,
+        filament_type: 'ASA',
+        slicer: 'OrcaSlicer',
+        slicer_version: '2.3.0',
+        thumbnails: [
+          { width: 32, height: 32, relative_path: '.thumbs/logo_plate-32x32.png' },
+          { width: 300, height: 300, relative_path: '.thumbs/logo_plate-300x300.png' },
+        ],
+      },
+    },
+  ];
 }
 
 const SHOTS: Shot[] = [
@@ -29,6 +54,38 @@ const SHOTS: Shot[] = [
     prepare: async (page) => {
       await expect(page.getByRole('button', { name: /Voron_Design_Cube/ })).toBeVisible();
       await expect(page.getByRole('img', { name: /Voron_Design_Cube/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'files-folders',
+    route: 'files',
+    options: { scenario: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('radio', { name: 'Folders' }).click();
+      await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
+      await expect(page.getByRole('img', { name: /Voron_Design_Cube/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'files-folders-nested',
+    route: 'files',
+    options: { scenario: 'ready', files: withPartsFolder() },
+    prepare: async (page) => {
+      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /stealthburner/ }).click();
+      await expect(page.getByRole('heading', { name: 'stealthburner' })).toBeVisible();
+      await expect(page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /parts/ })).toBeVisible();
+      await expect(page.getByRole('img', { name: /SB_main_body/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'files-folder-empty',
+    route: 'files',
+    options: { scenario: 'ready', emptyDirs: ['archive'] },
+    prepare: async (page) => {
+      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /archive/ }).click();
+      await expect(page.getByText('This folder is empty')).toBeVisible();
     },
   },
   {

@@ -2,11 +2,11 @@
   import Icon from '../components/Icon.svelte';
   import Thumb from '../components/Thumb.svelte';
   import { app } from '../lib/context';
-  import { formatBytes, parentDir, pickThumbnail, type FileEntry, type SortKey } from '../lib/files/files';
+  import { formatBytes, parentDir, pathCrumbs, pickThumbnail, type FileEntry, type SortKey } from '../lib/files/files';
   import { displayFilename, formatDate, formatDuration, formatFilament } from '../lib/format';
   import { navigate } from '../lib/routes';
 
-  const { store, ui, files } = app();
+  const { store, ui, files, settings } = app();
   const printerState = store.state;
   const connected = $derived(printerState.transport === 'connected');
 
@@ -18,6 +18,13 @@
   ];
 
   let selected = $state<FileEntry | null>(null);
+  const viewMode = $derived(settings.value.filesViewMode);
+  const crumbs = $derived(pathCrumbs(files.dir));
+
+  function setView(mode: 'list' | 'folders') {
+    if (settings.value.filesViewMode === mode) return;
+    settings.update({ filesViewMode: mode });
+  }
 
   $effect(() => {
     if (connected && !files.loaded && !files.loading) void files.load();
@@ -63,7 +70,34 @@
           <Icon name="back" size={20} />
         </button>
       {/if}
-      <h2 class="path" title={`gcodes/${files.dir}`}>{files.dir ? files.dir.split('/').pop() : 'G-code files'}</h2>
+      {#if viewMode === 'folders'}
+        <nav aria-label="Folder path">
+          <ol class="breadcrumb">
+            {#each crumbs as crumb, i (crumb.path)}
+              <li>
+                {#if i < crumbs.length - 1}
+                  <button
+                    type="button"
+                    class="crumb"
+                    title={crumb.path ? `gcodes/${crumb.path}` : 'gcodes'}
+                    onclick={() => files.open(crumb.path)}
+                  >
+                    {crumb.label}
+                  </button>
+                {:else}
+                  <h2 class="path" title={files.dir ? `gcodes/${files.dir}` : 'gcodes'}>{crumb.label}</h2>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+        </nav>
+      {:else}
+        <h2 class="path" title={`gcodes/${files.dir}`}>{files.dir ? files.dir.split('/').pop() : 'G-code files'}</h2>
+      {/if}
+    </div>
+    <div class="seg view" role="radiogroup" aria-label="File view">
+      <button type="button" role="radio" aria-checked={viewMode === 'list'} onclick={() => setView('list')}>List</button>
+      <button type="button" role="radio" aria-checked={viewMode === 'folders'} onclick={() => setView('folders')}>Folders</button>
     </div>
     <div class="seg sort" role="radiogroup" aria-label="Sort files">
       {#each SORTS as sort (sort.id)}
@@ -101,8 +135,57 @@
     {:else if files.loaded && files.dirs.length === 0 && files.files.length === 0}
       <div class="empty fill">
         <Icon name="folder" size={32} />
-        <strong>No G-code files here</strong>
-        <span>Upload files from your slicer, Mainsail or Fluidd.</span>
+        {#if viewMode === 'folders' && files.dir}
+          <strong>This folder is empty</strong>
+          <span>No G-code files or subfolders here.</span>
+        {:else}
+          <strong>No G-code files here</strong>
+          <span>Upload files from your slicer, Mainsail or Fluidd.</span>
+        {/if}
+      </div>
+    {:else if viewMode === 'folders'}
+      <div class="browser scroll" aria-busy={files.loading}>
+        {#if files.dirs.length > 0}
+          <section class="section" aria-labelledby="folder-section">
+            <h3 id="folder-section" class="eyebrow">Folders</h3>
+            <ul class="tile-grid" aria-label="Folders">
+              {#each files.dirs as dir (dir.path)}
+                <li>
+                  <button type="button" class="tile folder-tile" onclick={() => files.open(dir.path)}>
+                    <span class="folder-icon tile-icon"><Icon name="folder" size={28} /></span>
+                    <span class="text">
+                      <span class="name" title={dir.name}>{dir.name}</span>
+                      <span class="meta">Folder</span>
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+        {#if files.files.length > 0}
+          <section class="section" aria-labelledby="gcode-section">
+            <h3 id="gcode-section" class="eyebrow">G-code</h3>
+            <ul class="tile-grid" aria-label="G-code files">
+              {#each files.sorted as file (file.path)}
+                <li>
+                  <button type="button" class="tile file-tile" onclick={() => (selected = file)}>
+                    <Thumb
+                      path={pickThumbnail(file.meta?.thumbnails ?? [], 128)?.path ?? null}
+                      cacheKey={file.modified}
+                      size={112}
+                      alt={displayFilename(file.name)}
+                    />
+                    <span class="text">
+                      <span class="name" title={file.name}>{displayFilename(file.name)}</span>
+                      <span class="meta" title={metaLine(file)}>{metaLine(file)}</span>
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
       </div>
     {:else}
       <ul class="list scroll" aria-label="Files" aria-busy={files.loading}>
@@ -206,17 +289,18 @@
 
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--gap);
+    gap: 8px var(--gap);
     min-width: 0;
   }
 
   .crumbs {
-    flex: 1;
+    flex: 1 1 160px;
     display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 0;
+    min-width: min(100%, 120px);
   }
 
   .back,
@@ -229,6 +313,8 @@
 
   .path {
     margin: 0;
+    min-width: 0;
+    max-width: 100%;
     font-size: var(--fs-lg);
     font-weight: 650;
     white-space: nowrap;
@@ -236,7 +322,61 @@
     text-overflow: ellipsis;
   }
 
-  .sort {
+  .crumbs nav {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .breadcrumb li {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .breadcrumb li + li::before {
+    content: '/';
+    flex: none;
+    margin: 0 2px;
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
+  }
+
+  .crumb {
+    min-width: 44px;
+    min-height: 44px;
+    max-width: 180px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .crumb:active {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  .view,
+  .sort,
+  .refresh {
     flex: none;
   }
 
@@ -258,6 +398,96 @@
     padding: 6px;
     flex: 1;
     min-height: 0;
+  }
+
+  .browser {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 10px;
+  }
+
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .section .eyebrow {
+    margin: 0;
+  }
+
+  .tile-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+
+  .tile-grid li {
+    display: flex;
+    min-width: 0;
+  }
+
+  .tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-height: 88px;
+    padding: 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+    color: var(--text);
+    text-align: left;
+  }
+
+  .tile:active {
+    border-color: color-mix(in srgb, var(--cyan) 45%, transparent);
+  }
+
+  .folder-tile {
+    flex-direction: row;
+    align-items: center;
+    min-height: 84px;
+  }
+
+  .tile-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .file-tile :global(.thumb) {
+    width: 100% !important;
+    height: 120px !important;
+    aspect-ratio: auto;
+  }
+
+  .file-tile :global(.thumb img) {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .tile .text {
+    width: 100%;
+  }
+
+  .tile .name,
+  .tile .meta {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .row {
@@ -410,9 +640,19 @@
     .date {
       display: none;
     }
+    .view button,
     .sort button {
       padding: 0 6px;
       font-size: var(--fs-xs);
+    }
+    .tile-grid {
+      grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    }
+    .file-tile :global(.thumb) {
+      height: 84px !important;
+    }
+    .crumb {
+      max-width: 120px;
     }
     .sheet :global(.thumb) {
       width: 150px !important;

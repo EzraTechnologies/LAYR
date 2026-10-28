@@ -19,6 +19,7 @@ Filament screen for the same rules. That screen has not been tested on a Pi.
 | ![Printing, 1024×600](docs/screenshots/1024x600-home-printing.png) | ![Printing, 800×480](docs/screenshots/800x480-home-printing.png) |
 | ![Move, 1024×600](docs/screenshots/1024x600-move.png) | ![Heat, 800×480](docs/screenshots/800x480-heat.png) |
 | ![Files, 1024×600](docs/screenshots/1024x600-files.png) | ![Console, 800×480](docs/screenshots/800x480-console.png) |
+| ![Folders, 1024×600](docs/screenshots/1024x600-files-folders.png) | ![Folders, 800×480](docs/screenshots/800x480-files-folders.png) |
 | ![Not set up, 1024×600](docs/screenshots/1024x600-not-set-up.png) | ![Offline, 800×480](docs/screenshots/800x480-offline.png) |
 
 Screenshots are captured from the production bundle talking to a mocked Moonraker
@@ -32,7 +33,11 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
   latest console alert. Speed and flow are Klipper `motion_report` values, not the M220/M221
   percentages. Those percentages sit behind the speed and flow readouts.
 - **Files**: G-code folders, sort, metadata, thumbnails (including nested paths), start and delete.
-  Both ask before acting. Files without a thumbnail show a placeholder.
+  Both ask before acting. Files without a thumbnail show a placeholder. The screen can stay on the
+  compact list (the default, including on profiles saved before this choice existed) or switch to
+  folder cards. List / Folders on the Files toolbar and under Settings stay in sync and are stored
+  on this device only. Folders shows the real directories in the current Moonraker folder, then the
+  G-code files in that folder. It does not flatten the tree or create folders.
 - **Move**: home X, Y, Z or all; jog with step size and speed; position and homed state; motors off;
   Z-offset babysteps while a print is running (ordinary jogging is blocked during a print).
 - **Heat**: targets, presets, and cool-down, clamped to the printer's configured limits. High targets
@@ -45,9 +50,9 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
   A macro that needs parameters opens the console instead of being sent empty.
 - **Console**: recent Moonraker G-code history, an on-screen keyboard, and a confirmation before every
   line. Nothing in a file is executed just by being displayed.
-- **Settings**: Moonraker URL, display name, reconnect, theme, hide cursor, and a dim timeout.
-  The display name is stored on this screen and does not change the Linux hostname. Restart and
-  firmware restart are confirmed. Emergency stop is a press-and-hold in the top bar.
+- **Settings**: Moonraker URL, display name, reconnect, theme, hide cursor, file browsing, and a dim timeout.
+  The display name and the List / Folders choice are stored on this screen and do not change the printer.
+  Restart and firmware restart are confirmed. Emergency stop is a press-and-hold in the top bar.
 
 There is no Demo mode. With no Moonraker URL, the UI stays on "not set up" and does not invent
 temperatures or positions. A dropped connection shows Offline and keeps retrying; it never substitutes

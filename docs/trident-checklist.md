@@ -36,6 +36,7 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 ## Files and a short print
 
 - [ ] The file list matches Moonraker, including a folder. Sort by name and modified time.
+- [ ] Files opens in the compact list. List / Folders on that screen and Settings → Files switch immediately and still match after a reload. Folders shows the real subfolders as cards, then the G-code in that folder, with Back and the path. An empty folder says it is empty. Sorting, print, and delete are unchanged, and the choice does not create or move files.
 - [ ] A file with a thumbnail shows it, including a file in a subfolder. A file without one shows the placeholder icon.
 - [ ] Start asks for confirmation, then the dashboard shows filename, the G-code thumbnail (including a file in a subfolder; a placeholder when there is none), progress, layer (when the slicer reports it), fans, and time remaining.
 - [ ] While printing, Speed is Klipper's live mm/s (`motion_report.live_velocity`) and Flow is live mm³/s from extruder velocity × the configured filament diameter. They are not the M220/M221 percentages. Pause or a stopped extruder shows about 0, not the last percentage. A retract shows a negative flow. Tapping Speed or Flow adjusts the percentage behind that readout. Z offset is still the Z button, which opens Move. There is no Fine Tuning page.
