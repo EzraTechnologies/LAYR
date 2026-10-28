@@ -1,4 +1,6 @@
 import { objectSuffix } from '../moonraker/objects';
+import type { SpoolmanFacts } from '../spoolman/types';
+import { prepareSpoolmanCommand } from '../spoolman/plan';
 import {
   AXES,
   FALLBACK_LIMITS,
@@ -49,7 +51,12 @@ export type PrinterCommand =
   /** A single line typed by the user in the console. */
   | { kind: 'gcode'; script: string }
   | { kind: 'start_print'; filename: string }
-  | { kind: 'delete_file'; path: string };
+  | { kind: 'delete_file'; path: string }
+  /** Moonraker `server.spoolman.post_spool_id`. Confirmed, and locked while a print is active. */
+  | { kind: 'set_active_spool'; spoolId: number }
+  | { kind: 'clear_active_spool'; authorized?: boolean }
+  /** Runs a parameter-free unload macro. The spool is cleared only after Klipper accepts it. */
+  | { kind: 'unload_for_spool_clear'; macro: string };
 
 export type CommandKind = PrinterCommand['kind'];
 
@@ -393,8 +400,17 @@ function validFilePath(path: string): boolean {
   return path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
 }
 
+/** Extra facts that do not live on `PrinterState` (Spoolman is not a Klipper object). */
+export interface CommandContext {
+  spoolman: SpoolmanFacts | null;
+  /** Names from `printer.gcode.help`, once read. Null until that list has arrived. */
+  gcodeCommands: ReadonlySet<string> | null;
+}
+
+export const EMPTY_COMMAND_CONTEXT: CommandContext = { spoolman: null, gcodeCommands: null };
+
 /** Decides whether `command` may run in `state`, and how. Never performs I/O. */
-export function prepareCommand(command: PrinterCommand, state: PrinterState): Prepared {
+export function prepareCommand(command: PrinterCommand, state: PrinterState, context: CommandContext = EMPTY_COMMAND_CONTEXT): Prepared {
   switch (command.kind) {
     case 'emergency_stop': {
       const gate = hostGate(state);
@@ -527,5 +543,9 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       return prepareLight(state, command.light, command.value);
     case 'macro':
       return prepareMacro(state, command.name);
+    case 'set_active_spool':
+    case 'clear_active_spool':
+    case 'unload_for_spool_clear':
+      return prepareSpoolmanCommand(command, state, context.spoolman);
   }
 }

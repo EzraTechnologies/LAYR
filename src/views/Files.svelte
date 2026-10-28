@@ -5,8 +5,10 @@
   import { formatBytes, parentDir, pickThumbnail, type FileEntry, type SortKey } from '../lib/files/files';
   import { displayFilename, formatDate, formatDuration, formatFilament } from '../lib/format';
   import { navigate } from '../lib/routes';
+  import { activeSummary } from '../lib/spoolman/store.svelte';
 
-  const { store, ui, files } = app();
+  const { store, ui, files, spoolman } = app();
+  const trackedSpool = $derived(activeSummary(spoolman.spools, spoolman.facts));
   const printerState = store.state;
   const connected = $derived(printerState.transport === 'connected');
 
@@ -163,6 +165,14 @@
           <div><dt>Print time</dt><dd class="num">{formatDuration(detail.meta?.estimatedTime)}</dd></div>
           <div><dt>Filament</dt><dd class="num">{formatFilament(detail.meta?.filamentTotal)}{detail.meta?.filamentWeight ? ` · ${detail.meta.filamentWeight.toFixed(1)} g` : ''}</dd></div>
           <div><dt>Material</dt><dd title={detail.meta?.filamentName ?? ''}>{detail.meta?.filamentType ?? '—'}</dd></div>
+          {#if trackedSpool}
+            <div class="wide">
+              <dt>Active spool</dt>
+              <dd title={`${trackedSpool.name}${trackedSpool.material ? ` · ${trackedSpool.material}` : ''}`}>
+                {trackedSpool.name}{trackedSpool.material ? ` · ${trackedSpool.material}` : ''}
+              </dd>
+            </div>
+          {/if}
           <div><dt>Layer</dt><dd class="num">{detail.meta?.layerHeight ? `${detail.meta.layerHeight} mm` : '—'}</dd></div>
           <div><dt>Temps</dt><dd class="num">{detail.meta?.firstLayerExtruderTemp ? `${detail.meta.firstLayerExtruderTemp}° / ${detail.meta.firstLayerBedTemp ?? '—'}°` : '—'}</dd></div>
           <div><dt>Size</dt><dd class="num">{formatBytes(detail.size)}</dd></div>

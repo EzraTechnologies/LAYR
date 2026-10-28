@@ -1,12 +1,13 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { ROUTES, type RouteId } from '../lib/routes';
+  import { ROUTES, type AppRoute, type RouteId } from '../lib/routes';
 
   interface Props {
     current: RouteId;
+    routes?: readonly AppRoute[];
   }
 
-  let { current }: Props = $props();
+  let { current, routes = ROUTES }: Props = $props();
 </script>
 
 <nav class="rail" aria-label="Main">
@@ -29,7 +30,7 @@
   </div>
 
   <ul>
-    {#each ROUTES as route (route.id)}
+    {#each routes as route (route.id)}
       <li>
         <a
           href={`#/${route.id}`}
@@ -55,6 +56,7 @@
     border-right: 1px solid var(--border);
     background: rgba(10, 12, 17, 0.6);
     min-height: 0;
+    overflow: hidden;
   }
 
   .brand {
@@ -78,10 +80,13 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-auto-rows: minmax(var(--touch), 1fr);
+    grid-auto-rows: minmax(44px, 1fr);
     gap: 3px;
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
 
   li {

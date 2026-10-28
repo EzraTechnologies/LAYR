@@ -12,12 +12,41 @@ export const ROUTES = [
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; icon: IconName }>;
 
-export type RouteId = (typeof ROUTES)[number]['id'];
+/** Shown only when that printer actually exposes the integration. */
+export const INTEGRATION_ROUTES = [
+  { id: 'filament', label: 'Spools', icon: 'spool', after: 'extrude' },
+] as const satisfies ReadonlyArray<{ id: string; label: string; icon: IconName; after: string }>;
+
+export type RouteId = (typeof ROUTES)[number]['id'] | (typeof INTEGRATION_ROUTES)[number]['id'];
+
+export interface AppRoute {
+  id: RouteId;
+  label: string;
+  icon: IconName;
+}
+
+const KNOWN = new Set<string>([...ROUTES.map((route) => route.id), ...INTEGRATION_ROUTES.map((route) => route.id)]);
 
 /** Parses `#/files` style hashes; unknown routes fall back to Home. */
 export function parseRoute(hash: string): RouteId {
   const id = hash.replace(/^#\/?/, '').split(/[/?]/)[0] ?? '';
-  return ROUTES.some((r) => r.id === id) ? (id as RouteId) : 'home';
+  return KNOWN.has(id) ? (id as RouteId) : 'home';
+}
+
+export interface IntegrationFlags {
+  spoolman: boolean;
+  afc?: boolean;
+  mmu?: boolean;
+}
+
+/** Core routes, plus integration entries the connected printer actually has. */
+export function visibleRoutes(flags: IntegrationFlags): AppRoute[] {
+  const extras: AppRoute[] = [];
+  if (flags.spoolman) extras.push(INTEGRATION_ROUTES[0]);
+  const routes: AppRoute[] = ROUTES.map((route) => ({ id: route.id, label: route.label, icon: route.icon }));
+  const after = routes.findIndex((route) => route.id === 'extrude');
+  routes.splice(after + 1, 0, ...extras);
+  return routes;
 }
 
 export function navigate(route: RouteId): void {

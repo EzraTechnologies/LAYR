@@ -20,6 +20,7 @@ function fakeConnection(impl: (method: string, params?: Record<string, unknown>)
     onReady: () => () => {},
     onGcodeResponse: () => () => {},
     onFilelistChanged: () => () => {},
+    onSpoolman: () => () => {},
   };
   return { connection, calls };
 }

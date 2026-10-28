@@ -6,9 +6,12 @@
   import TemperatureCard from '../components/TemperatureCard.svelte';
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
+  import { spoolQuantityLine } from '../lib/spoolman/api';
+  import { activeSummary } from '../lib/spoolman/store.svelte';
 
-  const { store, console: log } = app();
+  const { store, console: log, spoolman } = app();
   const printerState = store.state;
+  const activeSpool = $derived(activeSummary(spoolman.spools, spoolman.facts));
 
   const online = $derived(printerState.status === 'ready' || printerState.status === 'printing' || printerState.status === 'paused');
   const showJob = $derived(online || (printerState.status === 'error' && printerState.klippy === 'ready'));
@@ -31,6 +34,16 @@
           </li>
         {/each}
       </ul>
+    {/if}
+    {#if activeSpool}
+      {@const spoolLine = [activeSpool.name, activeSpool.material, spoolQuantityLine(activeSpool)].filter(Boolean).join(' · ')}
+      <a class="spool card" href="#/filament">
+        <span class="swatch" style:background={activeSpool.colors[0] ?? 'transparent'} class:none={activeSpool.colors.length === 0} aria-hidden="true"></span>
+        <span class="spool-copy">
+          <span class="eyebrow">Active spool</span>
+          <span class="spool-name" title={spoolLine}>{spoolLine}</span>
+        </span>
+      </a>
     {/if}
     {#if showJob}
       <JobCard />
@@ -98,6 +111,46 @@
     display: grid;
     gap: 6px;
     flex: none;
+  }
+
+  .spool {
+    flex: none;
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 6px 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  }
+
+  .swatch.none {
+    background: repeating-linear-gradient(135deg, var(--surface-3), var(--surface-3) 3px, var(--surface) 3px, var(--surface) 6px) !important;
+  }
+
+  .spool-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .spool-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .spool-name {
+    font-weight: 650;
+    font-size: var(--fs-sm);
   }
 
   .alert {

@@ -269,6 +269,7 @@ describe('MoonrakerClient', () => {
         'printer.print.start',
         'printer.restart',
         'server.files.delete_file',
+        'server.spoolman.post_spool_id',
       ].sort(),
     );
     client.stop();

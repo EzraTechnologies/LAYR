@@ -7,7 +7,7 @@
   import type { MacroInfo } from '../lib/printer/model';
   import { navigate } from '../lib/routes';
 
-  const { store, ui, consoleDraft } = app();
+  const { store, ui, consoleDraft, spoolman } = app();
   const printerState = store.state;
 
   const LENGTHS = [1, 5, 10, 25, 50] as const;
@@ -155,7 +155,11 @@
           {/each}
         </ul>
       {/if}
-      <p class="hint">Spool tracking with Spoolman is planned for a later release.</p>
+      {#if spoolman.facts.phase === 'ready' || spoolman.facts.phase === 'offline' || spoolman.facts.phase === 'error'}
+        <p class="hint">Spool tracking is on the Spools screen.</p>
+      {:else}
+        <p class="hint">Spool tracking with Spoolman is planned for a later release.</p>
+      {/if}
     </section>
   </div>
 </div>

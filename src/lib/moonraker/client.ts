@@ -1,6 +1,8 @@
 import type { KlippyState, TransportState } from '../printer/model';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
+import { assertSpoolmanCall } from '../spoolman/api';
+import type { SpoolmanNotice } from '../spoolman/types';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -36,6 +38,9 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.files.get_directory',
   'server.files.metadata',
   'server.files.thumbnails',
+  'server.spoolman.status',
+  'server.spoolman.get_spool_id',
+  'server.spoolman.proxy',
 ]);
 
 /**
@@ -54,6 +59,7 @@ export const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'printer.restart',
   'printer.firmware_restart',
   'server.files.delete_file',
+  'server.spoolman.post_spool_id',
 ]);
 
 export function isAllowedMethod(method: string): boolean {
@@ -102,7 +108,8 @@ export type ClientEvent =
   /** Incremental `notify_status_update` diff. */
   | { type: 'status'; diff: RawStatus }
   | { type: 'gcode_response'; message: string }
-  | { type: 'filelist_changed'; action: string; path: string | null; root: string | null };
+  | { type: 'filelist_changed'; action: string; path: string | null; root: string | null }
+  | { type: 'spoolman'; notice: SpoolmanNotice };
 
 export interface MoonrakerClientOptions {
   /** Moonraker base URL, e.g. `http://printer.local:7125`. `ws(s)://` URLs are accepted too. */
@@ -501,11 +508,22 @@ export class MoonrakerClient {
         this.#setKlippy('disconnected', null);
         this.#scheduleKlippyPoll(generation);
         return;
+      case 'notify_spoolman_status_changed':
+        this.#emit({ type: 'spoolman', notice: { kind: 'link', connected: spoolmanLinkConnected(message.params?.[0]) } });
+        return;
+      case 'notify_active_spool_set':
+        this.#emit({ type: 'spoolman', notice: { kind: 'active', spoolId: spoolmanActiveId(message.params?.[0]) } });
+        return;
     }
   }
 
   #call<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     if (!isAllowedMethod(method)) return Promise.reject(new MethodNotAllowedError(method));
+    try {
+      assertSpoolmanCall(method, params);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
     const socket = this.#socket;
     if (!socket || socket.readyState !== WS_OPEN) {
       return Promise.reject(new Error('Not connected to Moonraker'));
@@ -594,4 +612,17 @@ export class MoonrakerClient {
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function spoolmanLinkConnected(payload: unknown): boolean | null {
+  if (typeof payload !== 'object' || payload === null || !('spoolman_connected' in payload)) return null;
+  const value = (payload as { spoolman_connected?: unknown }).spoolman_connected;
+  return typeof value === 'boolean' ? value : null;
+}
+
+function spoolmanActiveId(payload: unknown): number | null {
+  const value = typeof payload === 'object' && payload !== null && 'spool_id' in payload ? (payload as { spool_id?: unknown }).spool_id : payload;
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  return null;
 }

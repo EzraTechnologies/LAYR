@@ -63,6 +63,15 @@ const SHOTS: Shot[] = [
     },
   },
   { name: 'settings', route: 'settings', options: { scenario: 'ready' } },
+  { name: 'filament', route: 'filament', options: { scenario: 'ready', homed: true, spoolman: 'ready' } },
+  {
+    name: 'home-spool',
+    route: 'home',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('link', { name: /Active spool/ })).toBeVisible();
+    },
+  },
   {
     name: 'confirm-cancel',
     route: 'home',

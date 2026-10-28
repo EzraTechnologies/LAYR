@@ -1,4 +1,5 @@
 import type { PrinterProfile } from '../config';
+import type { SpoolmanNotice } from '../spoolman/types';
 import { mapThumbnails, pickThumbnail } from '../files/files';
 import { MoonrakerClient, type CallOptions, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
 import { mergeStatus, toNumber } from '../moonraker/mapping';
@@ -51,6 +52,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
   readonly #ready = new Listeners<void>();
   readonly #gcode = new Listeners<string>();
   readonly #files = new Listeners<FileChange>();
+  readonly #spoolman = new Listeners<SpoolmanNotice>();
 
   constructor(profile: PrinterProfile & { moonrakerUrl: string }, options: LiveSourceOptions = {}) {
     this.printerId = profile.id;
@@ -143,6 +145,10 @@ export class LiveSource implements PrinterSource, PrinterConnection {
     return this.#files.add(listener);
   }
 
+  onSpoolman(listener: (notice: SpoolmanNotice) => void): () => void {
+    return this.#spoolman.add(listener);
+  }
+
   #now(): number {
     return this.#options.client?.now?.() ?? Date.now();
   }
@@ -189,6 +195,9 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         return;
       case 'filelist_changed':
         this.#files.emit({ action: event.action, path: event.path, root: event.root });
+        return;
+      case 'spoolman':
+        this.#spoolman.emit(event.notice);
         return;
     }
   }

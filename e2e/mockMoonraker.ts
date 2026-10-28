@@ -45,6 +45,31 @@ const MACROS: Record<string, { gcode: string; description?: string }> = {
   _CLIENT_VARIABLE: { gcode: '' },
 };
 
+function mockSpoolPayload(): Array<Record<string, unknown>> {
+  const rows: MockSpool[] = [
+    { id: 1, name: 'PolyTerra Black', material: 'PLA', vendor: 'Polymaker', color: '1c1c1c', remaining: 812, length: 274_000, used: 188, total: 1000 },
+    { id: 2, name: 'Galaxy Orange', material: 'ASA', vendor: 'Polymaker', color: 'ff6a00', remaining: 420.4, length: 141_200, used: 79.6, total: 500 },
+    { id: 3, name: 'Empty PETG', material: 'PETG', vendor: 'Prusament', color: '2f6fed', remaining: 0, length: 0, used: 1000, total: 1000, archived: true },
+    { id: 4, name: 'Mystery spool', material: 'Nylon', vendor: '', color: '', remaining: null, length: null, used: null, total: null },
+  ];
+  return rows.map((spool) => ({
+    id: spool.id,
+    archived: spool.archived === true,
+    remaining_weight: spool.remaining,
+    remaining_length: spool.length,
+    used_weight: spool.used,
+    location: spool.id === 2 ? 'Box 1' : null,
+    lot_nr: spool.id === 1 ? 'L2401' : null,
+    filament: {
+      name: spool.name,
+      material: spool.material,
+      weight: spool.total,
+      color_hex: spool.color || null,
+      vendor: spool.vendor ? { name: spool.vendor } : null,
+    },
+  }));
+}
+
 function thumbs(name: string): Array<Record<string, unknown>> {
   const base = name.replace(/\.gcode$/, '');
   return [
@@ -159,7 +184,23 @@ const CONTROL = new Set([
   'printer.restart',
   'printer.firmware_restart',
   'server.files.delete_file',
+  'server.spoolman.post_spool_id',
 ]);
+
+export type SpoolmanMode = 'absent' | 'ready' | 'offline' | 'error';
+
+interface MockSpool {
+  id: number;
+  name: string;
+  material: string;
+  vendor: string;
+  color: string;
+  remaining: number | null;
+  length: number | null;
+  used: number | null;
+  total: number | null;
+  archived?: boolean;
+}
 
 class RpcFailure extends Error {}
 
@@ -171,6 +212,10 @@ export interface MockOptions {
   status?: Status;
   /** Pre-filled `server.gcode_store`. */
   gcodeStore?: Array<{ message: string; time: number; type: 'command' | 'response' }>;
+  /** Moonraker Spoolman component. Absent printers omit it from `server.info.components`. */
+  spoolman?: SpoolmanMode;
+  /** Macro names that should be rejected by Klipper. */
+  failMacros?: string[];
 }
 
 export class MockMoonraker {
@@ -182,6 +227,9 @@ export class MockMoonraker {
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
+  spoolman: SpoolmanMode;
+  activeSpoolId: number | null = 2;
+  readonly failMacros: Set<string>;
   #ws: WebSocketRoute | null = null;
   #relative = false;
   #saved: Record<string, boolean> = {};
@@ -196,6 +244,8 @@ export class MockMoonraker {
       { message: 'G28', time: T - 400, type: 'command' },
       { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
     ];
+    this.spoolman = options.spoolman ?? 'absent';
+    this.failMacros = new Set(options.failMacros ?? []);
   }
 
   /** Control (printer-changing) calls in order. */
@@ -275,7 +325,26 @@ export class MockMoonraker {
       case 'server.connection.identify':
         return { connection_id: 101 };
       case 'server.info':
-        return { klippy_connected: true, klippy_state: this.klippy, moonraker_version: 'v0.9.3' };
+        return {
+          klippy_connected: true,
+          klippy_state: this.klippy,
+          moonraker_version: 'v0.9.3',
+          components: this.spoolman === 'absent' ? ['klippy_connection', 'file_manager'] : ['klippy_connection', 'file_manager', 'spoolman'],
+        };
+      case 'server.spoolman.status':
+        if (this.spoolman === 'error') throw new RpcFailure('Spoolman database is locked');
+        return { spoolman_connected: this.spoolman === 'ready', pending_reports: [], spool_id: this.activeSpoolId };
+      case 'server.spoolman.get_spool_id':
+        return { spool_id: this.activeSpoolId };
+      case 'server.spoolman.post_spool_id': {
+        const id = params.spool_id;
+        this.activeSpoolId = typeof id === 'number' ? id : null;
+        setTimeout(() => this.notify('notify_active_spool_set', [{ spool_id: this.activeSpoolId }]), 10);
+        return { spool_id: this.activeSpoolId };
+      }
+      case 'server.spoolman.proxy':
+        if (params.request_method !== 'GET' || params.path !== '/v1/spool') throw new RpcFailure('Spoolman proxy request is not allowed');
+        return { response: mockSpoolPayload() };
       case 'printer.info':
         return {
           state: this.klippy,
@@ -476,6 +545,7 @@ export class MockMoonraker {
           break;
         default:
           if (word in MACROS) {
+            if (this.failMacros.has(word)) this.#fail(`${word} failed`);
             if (word.includes('FILAMENT')) await new Promise((r) => setTimeout(r, 250));
             this.#respond(`// ${word} done`);
             break;

@@ -1,4 +1,5 @@
 import type { CallOptions } from '../moonraker/client';
+import type { SpoolmanNotice } from '../spoolman/types';
 import type { PrinterState } from './model';
 
 /**
@@ -27,6 +28,8 @@ export interface PrinterConnection {
   onReady(listener: () => void): () => void;
   onGcodeResponse(listener: (message: string) => void): () => void;
   onFilelistChanged(listener: (change: { action: string; path: string | null; root: string | null }) => void): () => void;
+  /** Moonraker Spoolman notifications. Ignored by the UI when Spoolman is not in use. */
+  onSpoolman(listener: (notice: SpoolmanNotice) => void): () => void;
 }
 
 /** Emits a single "not configured" state and never touches the network. */

@@ -12,7 +12,8 @@
   import { FileBrowser } from './lib/files/browser.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
-  import { parseRoute, type RouteId } from './lib/routes';
+  import { parseRoute, visibleRoutes, type RouteId } from './lib/routes';
+  import { SpoolmanStore } from './lib/spoolman/store.svelte';
   import { SettingsStore } from './lib/settings.svelte';
   import { Ui } from './lib/ui.svelte';
   import Console from './views/Console.svelte';
@@ -23,6 +24,7 @@
   import Heat from './views/Heat.svelte';
   import Macros from './views/Macros.svelte';
   import Move from './views/Move.svelte';
+  import Filament from './views/Filament.svelte';
   import Settings from './views/Settings.svelte';
 
   interface Props {
@@ -40,11 +42,14 @@
   const files = new FileBrowser(connection);
   const ui = new Ui(store.commands, consoleLog);
   const settings = new SettingsStore();
+  const spoolman = new SpoolmanStore(printer.id, connection, store.commands, ui, (facts) => store.updateCommandContext({ spoolman: facts }));
 
   // svelte-ignore state_referenced_locally
-  setApp({ config, printer, store, ui, files, console: consoleLog, settings, consoleDraft: { value: '' } });
+  setApp({ config, printer, store, ui, files, console: consoleLog, settings, spoolman, consoleDraft: { value: '' } });
 
   let route = $state<RouteId>(parseRoute(location.hash));
+  const spoolPhase = $derived(spoolman.facts.phase);
+  const routes = $derived(visibleRoutes({ spoolman: spoolPhase === 'ready' || spoolPhase === 'offline' || spoolPhase === 'error' }));
 
   function onHashChange() {
     route = parseRoute(location.hash);
@@ -56,6 +61,10 @@
     root.classList.toggle('hide-cursor', settings.value.hideCursor);
   });
 
+  $effect(() => {
+    spoolman.observe(store.state.transport, store.state.klippy, store.state.printerId, store.state.reconnectAttempt);
+  });
+
   onMount(() => {
     window.addEventListener('hashchange', onHashChange);
     store.start();
@@ -64,6 +73,7 @@
   onDestroy(() => {
     window.removeEventListener('hashchange', onHashChange);
     store.stop();
+    spoolman.dispose();
     files.dispose();
     consoleLog.dispose();
   });
@@ -85,7 +95,7 @@
 </script>
 
 <div class="app">
-  <NavRail current={route} />
+  <NavRail current={route} {routes} />
   <TopBar />
 
   <main class="content" id="main">
@@ -99,6 +109,8 @@
       <Heat />
     {:else if route === 'extrude'}
       <Extrude />
+    {:else if route === 'filament'}
+      <Filament />
     {:else if route === 'fans'}
       <Fans />
     {:else if route === 'macros'}

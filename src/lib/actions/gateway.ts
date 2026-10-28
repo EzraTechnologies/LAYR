@@ -1,7 +1,7 @@
 import { errorMessage, RpcError, RpcUnconfirmedError } from '../moonraker/client';
 import type { PrinterState } from '../printer/model';
 import type { PrinterConnection } from '../printer/source';
-import { ESTOP_GROUP, prepareCommand, type Confirmation, type PrinterCommand } from './commands';
+import { EMPTY_COMMAND_CONTEXT, ESTOP_GROUP, prepareCommand, type CommandContext, type Confirmation, type PrinterCommand } from './commands';
 
 export type CommandOutcome =
   | { status: 'ok'; summary: string; note: string | null }
@@ -22,6 +22,8 @@ export interface GatewayOptions {
   /** How long a command stays busy waiting for its `settled` condition after success. */
   settleTimeoutMs?: number;
   settlePollMs?: number;
+  /** Spoolman and other facts that are not part of `PrinterState`. */
+  context?: () => CommandContext;
 }
 
 /**
@@ -35,12 +37,14 @@ export class CommandGateway {
   readonly #listeners = new Set<(busy: ReadonlySet<string>) => void>();
   readonly #settleTimeoutMs: number;
   readonly #settlePollMs: number;
+  readonly #context: () => CommandContext;
 
   constructor(connection: PrinterConnection | null, getState: () => PrinterState, options: GatewayOptions = {}) {
     this.#connection = connection;
     this.#getState = getState;
     this.#settleTimeoutMs = options.settleTimeoutMs ?? 3000;
     this.#settlePollMs = options.settlePollMs ?? 50;
+    this.#context = options.context ?? (() => EMPTY_COMMAND_CONTEXT);
   }
 
   /** False when no Moonraker endpoint is configured. */
@@ -50,13 +54,13 @@ export class CommandGateway {
 
   availability(command: PrinterCommand): Availability {
     if (!this.#connection) return { allowed: false, message: 'Set up the printer connection in Settings' };
-    const prepared = prepareCommand(command, this.#getState());
+    const prepared = prepareCommand(command, this.#getState(), this.#context());
     return prepared.ok ? { allowed: true, note: prepared.plan.note } : { allowed: false, message: prepared.message };
   }
 
   /** The busy group a command belongs to, or null if it is not currently allowed. */
   groupOf(command: PrinterCommand): string | null {
-    const prepared = prepareCommand(command, this.#getState());
+    const prepared = prepareCommand(command, this.#getState(), this.#context());
     return prepared.ok ? prepared.plan.group : null;
   }
 
@@ -72,7 +76,7 @@ export class CommandGateway {
   async execute(command: PrinterCommand, options: { confirmed?: boolean } = {}): Promise<CommandOutcome> {
     const connection = this.#connection;
     if (!connection) return { status: 'blocked', message: 'Set up the printer connection in Settings' };
-    const prepared = prepareCommand(command, this.#getState());
+    const prepared = prepareCommand(command, this.#getState(), this.#context());
     if (!prepared.ok) return { status: 'blocked', message: prepared.message };
     const plan = prepared.plan;
 
