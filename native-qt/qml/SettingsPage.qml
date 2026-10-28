@@ -309,28 +309,31 @@ Item {
                     }
                 }
             }
+            // Explicit row geometry ensures each touch hitbox matches its visible key.
+            // An implicit-width, centered Row can misplace touch targets on some Qt/Wayland builds.
             Row {
+                width: parent.width
+                height: 44
                 spacing: 8
-                anchors.horizontalCenter: parent.horizontalCenter
                 Rectangle {
-                    width: 100
-                    height: 40
+                    width: (parent.width - parent.spacing * 3) / 4
+                    height: parent.height
                     radius: 8
                     color: page.shiftActive ? Style.purple : Style.surface3
                     Text { anchors.centerIn: parent; text: "Shift ↑"; color: page.shiftActive ? "#061016" : Style.text; font.bold: true }
                     MouseArea { anchors.fill: parent; onClicked: page.shiftActive = !page.shiftActive }
                 }
                 Rectangle {
-                    width: 120
-                    height: 40
+                    width: (parent.width - parent.spacing * 3) / 4
+                    height: parent.height
                     radius: 8
                     color: Style.surface3
                     Text { anchors.centerIn: parent; text: "Space"; color: Style.text }
                     MouseArea { anchors.fill: parent; onClicked: if (page.keyboardTarget) page.keyboardTarget.insert(page.keyboardTarget.cursorPosition, " ") }
                 }
                 Rectangle {
-                    width: 120
-                    height: 40
+                    width: (parent.width - parent.spacing * 3) / 4
+                    height: parent.height
                     radius: 8
                     color: Style.surface3
                     Text { anchors.centerIn: parent; text: "Delete"; color: Style.text }
@@ -343,8 +346,8 @@ Item {
                     }
                 }
                 Rectangle {
-                    width: 120
-                    height: 40
+                    width: (parent.width - parent.spacing * 3) / 4
+                    height: parent.height
                     radius: 8
                     color: Style.cyan
                     Text { anchors.centerIn: parent; text: "Done"; color: "#061016"; font.bold: true }
