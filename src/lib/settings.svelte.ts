@@ -1,3 +1,6 @@
+/** How the Files screen lays out the current Moonraker directory. Display only. */
+export type FilesViewMode = 'list' | 'folders';
+
 /** Device-local display preferences, stored in localStorage. Nothing here is sent to the printer. */
 export interface UiSettings {
   /** Minutes without touch before the screen dims; 0 disables dimming. */
@@ -15,6 +18,11 @@ export interface UiSettings {
   showHiddenMacros: boolean;
   /** Shows LAYR's on-screen keyboard for text fields. */
   onScreenKeyboard: boolean;
+  /**
+   * Files screen layout. `list` is the compact rows shipped before this setting existed.
+   * Missing or unknown values stay on `list` so older profiles keep their current screen.
+   */
+  filesViewMode: FilesViewMode;
 }
 
 export const STORAGE_UI_KEY = 'layr.ui';
@@ -28,7 +36,19 @@ export const DEFAULT_SETTINGS: UiSettings = {
   showHiddenMacros: false,
   onScreenKeyboard: true,
   displayName: '',
+  filesViewMode: 'list',
 };
+
+/**
+ * Accepts the current values and the singular "folder" used in older notes.
+ * Anything else, including a missing field, stays on the list.
+ */
+export function parseFilesViewMode(value: unknown): FilesViewMode {
+  if (typeof value !== 'string') return 'list';
+  const mode = value.trim().toLowerCase();
+  if (mode === 'folder' || mode === 'folders') return 'folders';
+  return 'list';
+}
 
 export function parseSettings(raw: string | null): UiSettings {
   if (!raw) return { ...DEFAULT_SETTINGS };
@@ -45,6 +65,7 @@ export function parseSettings(raw: string | null): UiSettings {
       const name = value.displayName.replace(/[\u0000-\u001f]/g, '').trim();
       if (name.length <= 32) s.displayName = name;
     }
+    s.filesViewMode = parseFilesViewMode(value.filesViewMode);
     return s;
   } catch {
     return { ...DEFAULT_SETTINGS };
