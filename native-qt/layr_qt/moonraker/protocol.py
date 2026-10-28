@@ -1,12 +1,14 @@
-"""JSON-RPC helpers and the read-only Moonraker method list.
+"""JSON-RPC helpers and the Moonraker method allow-lists.
 
-Printer-changing methods are absent on purpose. Spoolman writes and MMU commands
-are absent too; see ``adapters.py``.
+Reads are the default. Printer-changing methods are accepted only when the
+command gateway sets ``control=True``. Spoolman writes, MMU commands, machine
+power, and config writes stay rejected. See ``adapters.py``.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 READ_METHODS = frozenset(
@@ -20,8 +22,28 @@ READ_METHODS = frozenset(
         "server.files.get_directory",
         "server.files.metadata",
         "server.files.thumbnails",
+        "server.gcode_store",
     }
 )
+
+# Only the command gateway may encode these. The session's status RPCs pass control=False.
+CONTROL_METHODS = frozenset(
+    {
+        "printer.gcode.script",
+        "printer.print.start",
+        "printer.print.pause",
+        "printer.print.resume",
+        "printer.print.cancel",
+        "printer.emergency_stop",
+        "printer.restart",
+        "printer.firmware_restart",
+        "server.files.delete_file",
+    }
+)
+
+LED_PREFIXES = ("led ", "neopixel ", "dotstar ", "pca9533 ", "pca9632 ")
+LIGHT_PIN_RE = re.compile(r"(light|led|lamp|lighting|lights)", re.IGNORECASE)
+MAX_LIGHTS = 6
 
 CORE_OBJECTS: dict[str, list[str]] = {
     "webhooks": ["state", "state_message"],
@@ -59,8 +81,19 @@ class MethodNotAllowedError(RuntimeError):
         self.method = method
 
 
-def is_allowed_method(method: str) -> bool:
+def is_allowed_method(method: str, *, control: bool = False) -> bool:
+    if control:
+        return method in CONTROL_METHODS
     return method in READ_METHODS
+
+
+def is_light_object(name: str) -> bool:
+    if name.startswith(LED_PREFIXES):
+        return True
+    if name.startswith("output_pin "):
+        suffix = name.split(" ", 1)[1]
+        return LIGHT_PIN_RE.search(suffix) is not None
+    return False
 
 
 def is_fan_object(name: str) -> bool:
@@ -107,11 +140,14 @@ def plan_subscription(available: list[str]) -> dict[str, Any]:
     fans = [name for name in available if name != "fan" and is_fan_object(name)]
     for name in fans[:MAX_FANS]:
         objects[name] = ["speed", "rpm"]
+    lights = [name for name in available if is_light_object(name)]
+    for name in lights[:MAX_LIGHTS]:
+        objects[name] = ["value"] if name.startswith("output_pin ") else ["color_data"]
     return {"objects": objects, "missing": missing}
 
 
-def encode_request(rpc_id: int, method: str, params: dict | None = None) -> str:
-    if method not in READ_METHODS:
+def encode_request(rpc_id: int, method: str, params: dict | None = None, *, control: bool = False) -> str:
+    if not is_allowed_method(method, control=control):
         raise MethodNotAllowedError(method)
     body: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": rpc_id}
     if params is not None:

@@ -9,5 +9,11 @@ python3 -m pytest -q
 if python3 -c 'import PyQt6.QtQuick' >/dev/null 2>&1; then
   QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
     python3 -m layr_qt --self-check --geometry 1024x600
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
+    python3 -m layr_qt --self-check --geometry 800x480 --page settings
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
+    python3 -m layr_qt --self-check --geometry 800x480 --page heat
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
+    python3 -m layr_qt --self-check --geometry 1024x600 --page move
 fi
 echo "verify ok"

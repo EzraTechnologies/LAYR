@@ -105,6 +105,35 @@ Window {
                         }
                     }
                     Rectangle {
+                        id: estop
+                        height: 44
+                        width: root.compact ? 72 : 88
+                        radius: 12
+                        color: estopHold.running ? Style.danger : "#33fb7185"
+                        border.color: Style.danger
+                        opacity: (root.view.gate && root.view.gate.host) ? 1 : 0.35
+                        Text {
+                            anchors.centerIn: parent
+                            text: estopHold.running ? "Hold" : "STOP"
+                            color: estopHold.running ? "#1a0a10" : Style.danger
+                            font.bold: true
+                            font.pixelSize: 14
+                        }
+                        Timer {
+                            id: estopHold
+                            interval: 800
+                            onTriggered: bridge.emergencyStop()
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: root.view.gate && root.view.gate.host === true
+                            cursorShape: Qt.BlankCursor
+                            onPressed: estopHold.start()
+                            onReleased: estopHold.stop()
+                            onCanceled: estopHold.stop()
+                        }
+                    }
+                    Rectangle {
                         height: 32
                         width: lockText.width + 20
                         radius: 16
@@ -113,7 +142,7 @@ Window {
                         Text {
                             id: lockText
                             anchors.centerIn: parent
-                            text: root.view.fixture ? "Fixture" : "Read only"
+                            text: root.view.modeLabel || (root.view.fixture ? "Fixture" : "Offline")
                             color: Style.text2
                             font.bold: true
                             font.pixelSize: 13
@@ -145,7 +174,25 @@ Window {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                visible: root.view.page === "controls"
+                visible: root.view.page === "move"
+                view: root.view
+                compact: root.compact
+            }
+            HeatPage {
+                anchors.top: bar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                visible: root.view.page === "heat"
+                view: root.view
+                compact: root.compact
+            }
+            MorePage {
+                anchors.top: bar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                visible: root.view.page === "more"
                 view: root.view
                 compact: root.compact
             }
@@ -168,6 +215,87 @@ Window {
         MouseArea {
             anchors.fill: parent
             onPressed: bridge.wake()
+        }
+    }
+
+    Rectangle {
+        visible: root.view.toast && root.view.toast.text
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 12
+        radius: 12
+        height: toastText.implicitHeight + 20
+        color: "#f012151c"
+        border.color: Style.toneColor((root.view.toast && root.view.toast.tone) || "warn")
+        z: 5
+        Text {
+            id: toastText
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: 12
+            wrapMode: Text.WordWrap
+            color: Style.text
+            font.pixelSize: 14
+            text: (root.view.toast && root.view.toast.text) ? root.view.toast.text : ""
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: bridge.dismissToast()
+        }
+    }
+
+    Rectangle {
+        visible: root.view.confirm && root.view.confirm.title
+        anchors.fill: parent
+        color: "#cc07080c"
+        z: 6
+        MouseArea { anchors.fill: parent }
+        Rectangle {
+            width: Math.min(parent.width - 48, 520)
+            height: confirmBody.implicitHeight + 120
+            anchors.centerIn: parent
+            radius: 16
+            color: Style.surface
+            border.color: Style.border
+            Column {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 10
+                Text {
+                    id: confirmTitle
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: (root.view.confirm && root.view.confirm.title) ? root.view.confirm.title : ""
+                    color: Style.text
+                    font.bold: true
+                    font.pixelSize: 20
+                }
+                Text {
+                    id: confirmBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: (root.view.confirm && root.view.confirm.body) ? root.view.confirm.body : ""
+                    color: Style.text2
+                    font.pixelSize: 15
+                }
+                Row {
+                    spacing: 8
+                    Tap {
+                        width: 160
+                        label: (root.view.confirm && root.view.confirm.cancelLabel) ? root.view.confirm.cancelLabel : "Go back"
+                        onTapped: bridge.dismissPending()
+                    }
+                    Tap {
+                        width: 180
+                        label: (root.view.confirm && root.view.confirm.confirmLabel) ? root.view.confirm.confirmLabel : "Confirm"
+                        fill: (root.view.confirm && root.view.confirm.tone === "danger") ? Style.danger : Style.cyan
+                        ink: "#061016"
+                        onTapped: bridge.confirmPending()
+                    }
+                }
+            }
         }
     }
     }

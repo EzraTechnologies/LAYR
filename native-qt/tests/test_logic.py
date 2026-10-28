@@ -376,6 +376,16 @@ def test_qml_does_not_present_factors_as_speed():
     assert "M221" in controls
     assert "printer.gcode" not in home
     assert "printer.gcode" not in controls
+    assert "pausePrint" in home
+    for name in ("HomePage.qml", "ControlsPage.qml", "HeatPage.qml", "FilesPage.qml", "MorePage.qml"):
+        text = (ROOT / "qml" / name).read_text(encoding="utf-8")
+        for forbidden in ("SET_HEATER_TEMPERATURE", "G28", "printer.emergency_stop", "printer.print.start"):
+            assert forbidden not in text
+    settings = (ROOT / "qml" / "SettingsPage.qml").read_text(encoding="utf-8")
+    more = (ROOT / "qml" / "MorePage.qml").read_text(encoding="utf-8")
+    assert "height: 240" in settings
+    assert "height: 240" in more
+    assert "reveal(" in settings
 
 
 def test_scripts_do_not_stop_the_display_stack():

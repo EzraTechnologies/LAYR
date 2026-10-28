@@ -168,7 +168,7 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is a separate read-only Qt Quick / QML comparison build. It is not the kiosk. It does not replace this Svelte app, and its installer does not stop `layr-web`, `layr-kiosk`, or KlipperScreen. See [native-qt/README.md](native-qt/README.md). Spoolman is still the next product feature; the Qt shell does not implement it.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). Spoolman and MMU stay unwired.
 
 ## Architecture
 

@@ -34,6 +34,15 @@ Item {
             pull()
     }
 
+    function reveal(item) {
+        var pos = item.mapToItem(form, 0, 0)
+        var bottom = pos.y + item.height + 12
+        if (bottom > scroller.contentY + scroller.height)
+            scroller.contentY = Math.max(0, bottom - scroller.height)
+        if (pos.y < scroller.contentY)
+            scroller.contentY = Math.max(0, pos.y - 8)
+    }
+
     Flickable {
         id: scroller
         anchors.fill: parent
@@ -67,7 +76,7 @@ Item {
                     font.pixelSize: 16
                     leftPadding: 12
                     onTextChanged: page.draftName = text
-                    onActiveFocusChanged: if (activeFocus) page.keyboardTarget = nameField
+                    onActiveFocusChanged: if (activeFocus) { page.keyboardTarget = nameField; Qt.callLater(function() { page.reveal(nameField) }) }
                     background: Rectangle { color: Style.surface3; radius: 12; border.color: nameField.activeFocus ? Style.cyan : Style.border }
                 }
 
@@ -83,7 +92,7 @@ Item {
                     leftPadding: 12
                     inputMethodHints: Qt.ImhUrlCharactersOnly
                     onTextChanged: page.draftUrl = text
-                    onActiveFocusChanged: if (activeFocus) page.keyboardTarget = urlField
+                    onActiveFocusChanged: if (activeFocus) { page.keyboardTarget = urlField; Qt.callLater(function() { page.reveal(urlField) }) }
                     background: Rectangle { color: Style.surface3; radius: 12; border.color: urlField.activeFocus ? Style.cyan : Style.border }
                 }
 

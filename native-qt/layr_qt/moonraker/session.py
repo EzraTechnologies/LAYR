@@ -10,6 +10,7 @@ from typing import Any
 
 from layr_qt.moonraker.backoff import Backoff
 from layr_qt.moonraker.files import gcodes_api_path, map_directory, map_metadata, pick_thumbnail, safe_gcode_filename, safe_relative
+from layr_qt.actions.gateway import clean_klipper_message
 from layr_qt.moonraker.protocol import (
     config_settings_from,
     decode_message,
@@ -21,7 +22,7 @@ from layr_qt.moonraker.status import parse_klippy_state
 
 IDENTIFY_PARAMS = {
     "client_name": "LAYR Qt",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "display",
     "url": "https://github.com/EzraTechnologies/LAYR",
 }
@@ -39,6 +40,7 @@ class MoonrakerSession:
         self.transport = "idle"
         self.running = False
         self.pending: dict[int, dict] = {}
+        self.control: dict[int, dict] = {}
         self.next_id = 1
         self._retry_armed = False
         self._klippy = "unknown"
@@ -49,16 +51,31 @@ class MoonrakerSession:
         return self._begin_connect()
 
     def stop(self) -> list[dict]:
+        dropped = list(self.control.values())
         self.running = False
         self.pending.clear()
+        self.control.clear()
         self.transport = "idle"
         self._retry_armed = False
         self.backoff.reset()
-        return [
+        actions: list[dict] = [
             {"kind": "close"},
             {"kind": "cancel_timers"},
             event({"type": "transport", "state": "idle", "attempt": 0, "reason": None}),
         ]
+        for info in dropped:
+            actions.append(
+                event(
+                    {
+                        "type": "command",
+                        "status": "unconfirmed",
+                        "group": info.get("group") or "",
+                        "summary": info.get("summary") or "Command",
+                        "message": "Connection closed before Moonraker replied. Check the printer before retrying",
+                    }
+                )
+            )
+        return actions
 
     def on_open(self) -> list[dict]:
         if not self.running or self.transport != "connecting":
@@ -79,6 +96,8 @@ class MoonrakerSession:
         message = decode_message(text)
         if message is None:
             return []
+        if "id" in message and message.get("id") in self.control:
+            return self._handle_control(message)
         if "id" in message and message.get("id") in self.pending:
             return self._handle_response(message)
         method = message.get("method")
@@ -114,7 +133,41 @@ class MoonrakerSession:
             if not self.pending:
                 return []
             return self._fail("Moonraker did not answer")
+        if name.startswith("cmd"):
+            return self._control_timeout(name)
         return []
+
+    def submit_control(self, plan: dict) -> list[dict]:
+        """Send one gateway plan. Does not treat a missing reply as success."""
+        summary = plan.get("summary") or "Command"
+        group = plan.get("group") or ""
+        if self.transport != "connected":
+            return [
+                event(
+                    {
+                        "type": "command",
+                        "status": "unconfirmed",
+                        "group": group,
+                        "summary": summary,
+                        "message": f"{summary} was not acknowledged. Check the printer before retrying",
+                    }
+                )
+            ]
+        rpc_id = self.next_id
+        self.next_id += 1
+        self.control[rpc_id] = {
+            "group": group,
+            "summary": summary,
+            "note": plan.get("note"),
+            "settle": plan.get("settle"),
+            "record": plan.get("record"),
+            "follow": plan.get("follow"),
+        }
+        timeout = int(plan.get("timeoutMs") or RPC_TIMEOUT_MS)
+        return [
+            {"kind": "send", "text": encode_request(rpc_id, plan["method"], plan.get("params"), control=True)},
+            {"kind": "timer", "name": f"cmd{rpc_id}", "ms": timeout},
+        ]
 
     def request_directory(self, relative: str) -> list[dict]:
         api_path = gcodes_api_path(relative)
@@ -136,6 +189,7 @@ class MoonrakerSession:
     def _begin_connect(self) -> list[dict]:
         self.transport = "connecting"
         self.pending.clear()
+        self.control.clear()
         self._retry_armed = False
         self._klippy = "unknown"
         return [
@@ -149,17 +203,93 @@ class MoonrakerSession:
             return [{"kind": "close"}, {"kind": "cancel_timers"}]
         if self.transport == "waiting" and self._retry_armed:
             return []
+        dropped = list(self.control.values())
         self.pending.clear()
+        self.control.clear()
         self.transport = "waiting"
         self._klippy = "unknown"
         delay = self.backoff.next_ms()
         self._retry_armed = True
-        return [
+        actions: list[dict] = [
             {"kind": "close"},
             {"kind": "cancel_timers"},
             {"kind": "timer", "name": "reconnect", "ms": delay},
             event({"type": "transport", "state": "waiting", "attempt": self.backoff.attempt, "reason": reason, "nextRetryMs": delay}),
         ]
+        for info in dropped:
+            actions.append(
+                event(
+                    {
+                        "type": "command",
+                        "status": "unconfirmed",
+                        "group": info.get("group") or "",
+                        "summary": info.get("summary") or "Command",
+                        "message": f"{reason} before Moonraker replied. Check the printer before retrying",
+                    }
+                )
+            )
+        return actions
+
+    def _control_timeout(self, name: str) -> list[dict]:
+        try:
+            rpc_id = int(name[3:])
+        except ValueError:
+            return []
+        info = self.control.pop(rpc_id, None)
+        if info is None:
+            return []
+        summary = info.get("summary") or "Command"
+        return [
+            event(
+                {
+                    "type": "command",
+                    "status": "unconfirmed",
+                    "group": info.get("group") or "",
+                    "summary": summary,
+                    "message": f"{summary} was not acknowledged. Check the printer before retrying",
+                }
+            )
+        ]
+
+    def _handle_control(self, message: dict) -> list[dict]:
+        info = self.control.pop(message.get("id"), None)
+        if info is None:
+            return []
+        actions: list[dict] = [{"kind": "cancel_timer", "name": f"cmd{message.get('id')}"}]
+        error = message.get("error")
+        summary = info.get("summary") or "Command"
+        if error:
+            if isinstance(error, dict):
+                text = error.get("message") or "Moonraker error"
+            else:
+                text = str(error)
+            actions.append(
+                event(
+                    {
+                        "type": "command",
+                        "status": "failed",
+                        "group": info.get("group") or "",
+                        "summary": summary,
+                        "message": clean_klipper_message(str(text)),
+                    }
+                )
+            )
+            return actions
+        actions.append(
+            event(
+                {
+                    "type": "command",
+                    "status": "ok",
+                    "group": info.get("group") or "",
+                    "summary": summary,
+                    "note": info.get("note"),
+                    "settle": info.get("settle"),
+                    "record": info.get("record"),
+                    "follow": info.get("follow"),
+                }
+            )
+        )
+        return actions
 
     def _rpc(self, method: str, params: dict, purpose: str, meta: dict | None = None) -> dict:
         rpc_id = self.next_id

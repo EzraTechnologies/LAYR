@@ -1,1 +1,1 @@
-"""Moonraker protocol, telemetry, and the read-only session driver."""
+"""Moonraker protocol, telemetry, and the session driver."""
