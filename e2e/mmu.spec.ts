@@ -1,8 +1,27 @@
 import { expect, test } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
 import { errorMmu, MMU_COMMANDS, partialMmu, printingMmu, readyMmu } from './mmuFixture';
+import { MOONRAKER } from './mockMoonraker';
+
+test.describe('Happy Hare switched off', () => {
+  test('ignores a listed mmu object until Settings turns Happy Hare on', async ({ page }) => {
+    const mock = await openWithMock(page, 'mmu', { scenario: 'ready', mmu: { status: readyMmu() } });
+    await expect(page).toHaveURL(/#\/home$/);
+    await expect(page.getByRole('link', { name: 'MMU', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Happy Hare/ })).toHaveCount(0);
+    const subscribed = mock.calls.find((call) => call.method === 'printer.objects.subscribe');
+    expect(subscribed?.params?.objects).not.toHaveProperty('mmu');
+    expect(mock.calls.some((call) => call.method === 'printer.gcode.help')).toBe(false);
+    expect(mock.scripts).toEqual([]);
+  });
+});
 
 test.describe('Happy Hare MMU', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedIntegrations(page, { happyHare: true }, MOONRAKER);
+  });
+
   test('stays hidden when the printer has no mmu object', async ({ page }) => {
     const mock = await openWithMock(page, 'mmu', { scenario: 'ready' });
     await expect(page.getByRole('heading', { name: 'No Happy Hare MMU' })).toBeVisible();
@@ -87,9 +106,31 @@ test.describe('Happy Hare MMU', () => {
     await expect(page.getByRole('link', { name: 'MMU', exact: true })).toHaveCount(0);
     expect(shutdown.scripts).toEqual([]);
 
+    await seedIntegrations(page, { happyHare: true }, 'http://127.0.0.1:9');
     await page.goto('/?moonraker=http://127.0.0.1:9#/mmu');
     await expect(page.getByText('Printer is offline. MMU state is not shown')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('radio')).toHaveCount(0);
+  });
+
+  test('turning Happy Hare off drops the subscription and leaves the MMU screen', async ({ page }) => {
+    const mock = await openWithMock(page, 'mmu', { scenario: 'ready', mmu: { status: readyMmu() } });
+    await expect(page.getByRole('heading', { name: 'Happy Hare' })).toBeVisible();
+    await page.getByRole('link', { name: 'Settings' }).click();
+    const toggle = page.locator('[data-integration="happyHare"]');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('link', { name: 'MMU', exact: true })).toHaveCount(0);
+    await expect.poll(() => {
+      const last = mock.calls.filter((call) => call.method === 'printer.objects.subscribe').at(-1);
+      const objects = (last?.params?.objects ?? null) as Record<string, unknown> | null;
+      return objects !== null && !Object.prototype.hasOwnProperty.call(objects, 'mmu');
+    }).toBe(true);
+    await page.evaluate(() => {
+      location.hash = '#/mmu';
+    });
+    await expect(page).toHaveURL(/#\/home$/);
+    expect(mock.scripts).toEqual([]);
+    expect(mock.controlCalls).toEqual([]);
   });
 
   for (const vp of VIEWPORTS) {

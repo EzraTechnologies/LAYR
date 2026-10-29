@@ -1,3 +1,4 @@
+import { integrationEnabled } from '../integrations/runtime';
 import { prepareMmuMove } from '../mmu/happyhare';
 import { objectSuffix } from '../moonraker/objects';
 import {
@@ -345,6 +346,7 @@ function prepareLight(state: PrinterState, lightName: string, value: number): Pr
 }
 
 function prepareMmu(state: PrinterState, command: Extract<PrinterCommand, { kind: 'mmu' }>): Prepared {
+  if (!integrationEnabled('happyHare')) return fail('Turn Happy Hare on in Settings before moving the MMU');
   const result = prepareMmuMove(command, { mmu: state.mmu, jobState: state.job?.state ?? null });
   if (!result.ok) return fail(result.message);
   return gcodeScript([result.plan.script], result.plan.summary, 'mmu', MACRO_TIMEOUT_MS, {

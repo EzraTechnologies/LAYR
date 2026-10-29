@@ -2,6 +2,7 @@ import type { KlippyState, TransportState } from '../printer/model';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
 import { mmuCommandsFromHelp } from '../mmu/happyhare';
+import { integrationEnabled } from '../integrations/runtime';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -385,8 +386,10 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
-      // Only an `mmu` object triggers this read. A missing method leaves the screen read-only.
-      const gcodeCommands = objects.includes('mmu') ? await this.#mmuCommands() : null;
+      // Help is read only when Happy Hare is switched on and Klipper listed `mmu`.
+      // A missing method leaves the screen read-only.
+      const gcodeCommands =
+        objects.includes('mmu') && integrationEnabled('happyHare') ? await this.#mmuCommands() : null;
       if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',

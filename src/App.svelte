@@ -10,9 +10,11 @@
   import { ConsoleLog } from './lib/console/console.svelte';
   import { setApp } from './lib/context';
   import { FileBrowser } from './lib/files/browser.svelte';
+  import { integrationRouteHidden } from './lib/integrations/preferences';
+  import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
-  import { parseRoute, type RouteId } from './lib/routes';
+  import { navigate, parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
   import { Ui } from './lib/ui.svelte';
   import Console from './views/Console.svelte';
@@ -55,6 +57,10 @@
     const root = document.documentElement;
     root.classList.toggle('theme-black', settings.value.theme === 'black');
     root.classList.toggle('hide-cursor', settings.value.hideCursor);
+  });
+
+  $effect(() => {
+    if (integrationRouteHidden(route, integrations.value)) navigate('home');
   });
 
   onMount(() => {

@@ -3,6 +3,11 @@
  * Requesting explicit fields (instead of `null` = everything) keeps WebSocket traffic and UI updates low.
  */
 
+import { integrationEnabled, linkStatusSubscription } from '../integrations/runtime';
+
+/** Happy Hare objects are added or dropped when its Settings switch changes. */
+linkStatusSubscription();
+
 export const CORE_OBJECTS: Record<string, string[]> = {
   webhooks: ['state', 'state_message'],
   print_stats: ['filename', 'state', 'message', 'print_duration', 'total_duration', 'filament_used', 'info'],
@@ -155,8 +160,9 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     objects[name] = ['filament_detected', 'enabled'];
   }
 
-  // Exact Klipper object name. AFC and other MMU objects are not Happy Hare and are left untouched.
-  if (availableSet.has('mmu')) objects.mmu = [...MMU_FIELDS];
+  // Exact Klipper object name, and only after the user turns Happy Hare on.
+  // AFC and other MMU objects are not Happy Hare and are left untouched.
+  if (availableSet.has('mmu') && integrationEnabled('happyHare')) objects.mmu = [...MMU_FIELDS];
 
   return { objects, missing };
 }

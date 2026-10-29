@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { openWithMock, VIEWPORTS } from './helpers';
 import { errorMmu, printingMmu, readyMmu } from './mmuFixture';
-import { defaultFiles, type MockFile, type MockOptions } from './mockMoonraker';
+import { defaultFiles, MOONRAKER, type MockFile, type MockOptions } from './mockMoonraker';
 
 /**
  * Regenerates docs/screenshots from the real production bundle connected to the mock Moonraker in
@@ -170,6 +171,7 @@ test.describe('screenshots @screenshot', () => {
     for (const shot of SHOTS) {
       test(`${vp.name} ${shot.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
+        if (shot.name.startsWith('mmu')) await seedIntegrations(page, { happyHare: true }, MOONRAKER);
         await openWithMock(page, shot.route, { ...shot.options, fixedClock: true });
         await shot.prepare?.(page);
         await page.evaluate(() => document.fonts.ready);
@@ -197,6 +199,7 @@ test.describe('screenshots @screenshot', () => {
 
     test(`${vp.name} mmu-offline`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
+      await seedIntegrations(page, { happyHare: true }, 'http://127.0.0.1:9');
       await page.goto('/?moonraker=http://127.0.0.1:9#/mmu');
       await expect(page.getByText('Printer is offline. MMU state is not shown')).toBeVisible({ timeout: 10_000 });
       await page.screenshot({ path: `docs/screenshots/${vp.name}-mmu-offline.png` });

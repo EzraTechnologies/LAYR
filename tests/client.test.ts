@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { Backoff } from '../src/lib/moonraker/backoff';
 import {
   CONTROL_METHODS,
@@ -118,7 +119,23 @@ describe('MoonrakerClient', () => {
     client.stop();
   });
 
+  it('does not subscribe to Happy Hare or ask for help while the switch is off', async () => {
+    resetIntegrationRuntime();
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 1 } },
+    });
+    server.help = { MMU_LOAD: 'Load' };
+    const { client } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).not.toHaveProperty('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
+    client.stop();
+  });
+
   it('subscribes to Happy Hare fields and keeps only registered commands', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
     const server = new FakeMoonraker({
       objects: ['webhooks', 'extruder', 'mmu'],
       status: {
@@ -140,9 +157,11 @@ describe('MoonrakerClient', () => {
     const snapshot = events.find((e) => e.type === 'snapshot');
     expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toEqual(['MMU_LOAD', 'MMU_CHANGE_TOOL']);
     client.stop();
+    resetIntegrationRuntime();
   });
 
   it('stays connected when Happy Hare command help fails', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
     const server = new FakeMoonraker({
       objects: ['webhooks', 'extruder', 'mmu'],
       status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 0 } },
@@ -154,7 +173,9 @@ describe('MoonrakerClient', () => {
     const snapshot = events.find((e) => e.type === 'snapshot');
     expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toBeNull();
     expect(klippy()).toEqual(['ready']);
+    expect(server.calls).toContain('printer.gcode.help');
     client.stop();
+    resetIntegrationRuntime();
   });
 
   it('reconnects with bounded exponential backoff and resets after success', async () => {

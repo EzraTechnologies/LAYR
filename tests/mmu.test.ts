@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { prepareCommand } from '../src/lib/actions/commands';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import {
   filamentHeadline,
   MMU_CHANGE_TOOL,
@@ -16,6 +17,10 @@ import { assembleState, type AssembleInputs } from '../src/lib/printer/assemble'
 import { readyState, withJob } from './stateFixture';
 
 const COMMANDS = ['MMU_LOAD', 'MMU_UNLOAD', 'MMU_CHANGE_TOOL', 'MMU_RECOVER'];
+
+function enableHappyHare(): void {
+  setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
+}
 
 function loadedMmu() {
   return {
@@ -56,7 +61,14 @@ describe('planSubscription', () => {
     expect(plan.objects.AFC).toBeUndefined();
   });
 
+  it('does not subscribe while Happy Hare is switched off', () => {
+    resetIntegrationRuntime();
+    const plan = planSubscription(['extruder', 'mmu']);
+    expect(plan.objects.mmu).toBeUndefined();
+  });
+
   it('subscribes only to the documented Happy Hare fields', () => {
+    enableHappyHare();
     const plan = planSubscription(['extruder', 'mmu']);
     expect(plan.objects.mmu).toEqual([...MMU_FIELDS]);
     expect(plan.objects.mmu).not.toContain('nfc');
@@ -232,7 +244,16 @@ describe('prepareMmuMove', () => {
     expect(result.plan.body).not.toContain('LOADED=');
   });
 
+  it('refuses a move while Happy Hare is switched off', () => {
+    resetIntegrationRuntime();
+    const refused = prepareCommand({ kind: 'mmu', action: 'load' }, readyState({ mmu }));
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.message).toBe('Turn Happy Hare on in Settings before moving the MMU');
+  });
+
   it('goes through prepareCommand with the same script and an offline gate', () => {
+    enableHappyHare();
     const state = readyState({ mmu });
     const prepared = prepareCommand({ kind: 'mmu', action: 'change_tool', tool: 0 }, state);
     expect(prepared.ok).toBe(true);
@@ -252,6 +273,9 @@ describe('prepareMmuMove', () => {
 });
 
 describe('assembleState mmu', () => {
+  beforeEach(() => enableHappyHare());
+  afterEach(() => resetIntegrationRuntime());
+
   const base: AssembleInputs = {
     printerId: 'p1',
     configuredName: 'Trident',
@@ -271,6 +295,11 @@ describe('assembleState mmu', () => {
     gcodeCommands: COMMANDS,
     now: 0,
   };
+
+  it('hides the MMU while the Settings switch is off', () => {
+    resetIntegrationRuntime();
+    expect(assembleState(base).mmu).toBeNull();
+  });
 
   it('hides the MMU when the object was not listed', () => {
     expect(assembleState({ ...base, objects: ['extruder'] }).mmu).toBeNull();

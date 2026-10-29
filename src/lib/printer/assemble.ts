@@ -1,3 +1,4 @@
+import { integrationEnabled } from '../integrations/runtime';
 import { parseMmu } from '../mmu/happyhare';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
@@ -91,7 +92,10 @@ export function assembleState(input: AssembleInputs): PrinterState {
     lights: mapLights(raw, input.settings),
     macros: info.macros,
     filamentSensors: mapFilamentSensors(raw),
-    mmu: connected && input.objects.includes('mmu') ? parseMmu(raw.mmu, input.gcodeCommands ?? null) : null,
+    mmu:
+      connected && integrationEnabled('happyHare') && input.objects.includes('mmu')
+        ? parseMmu(raw.mmu, input.gcodeCommands ?? null)
+        : null,
     limits: structuredClone(info.limits),
     idleState: typeof raw.idle_timeout?.state === 'string' ? raw.idle_timeout.state : null,
     missingObjects: connected ? input.missingObjects : [],
