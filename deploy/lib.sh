@@ -98,3 +98,23 @@ write_layr_env() {
   rm -f "$tmp"
   chmod 600 "$dest"
 }
+
+# Opt-in udev rule for Raspberry Pi vc4-hdmi virtual pointing sticks.
+# Tests set LAYR_UDEV_RULES_PATH. A Pi leaves it unset.
+HDMI_POINTER_RULE_NAME="99-layr-ignore-hdmi-pointers.rules"
+HDMI_POINTER_RULE_PATH="${LAYR_UDEV_RULES_PATH:-/etc/udev/rules.d/${HDMI_POINTER_RULE_NAME}}"
+
+# Restart layr-kiosk only when it is already active.
+# Does not start a disabled kiosk. Does not restart Klipper, Moonraker, or KlipperScreen.
+reload_active_kiosk() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    warn "systemctl is not available, so layr-kiosk was not reloaded."
+    return 1
+  fi
+  if ! unit_active "$KIOSK_UNIT"; then
+    info "layr-kiosk.service is not active, so it was not started."
+    return 0
+  fi
+  info "Reloading layr-kiosk.service only. Klipper, Moonraker, and KlipperScreen are not restarted."
+  run sudo systemctl restart "$KIOSK_UNIT"
+}

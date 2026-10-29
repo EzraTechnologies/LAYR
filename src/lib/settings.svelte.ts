@@ -20,10 +20,18 @@ export interface UiSettings {
   onScreenKeyboard: boolean;
   /**
    * Files screen layout. `list` is the compact rows shipped before this setting existed.
-   * Missing or unknown values stay on `list` so older profiles keep their current screen.
+   * `folders` is the thumbnail-card layout. The stored id stays `folders` so a device
+   * that saved it before the control was labelled Thumbnails still opens that layout.
+   * Missing or unknown values, including the display word "thumbnails", stay on `list`.
    */
   filesViewMode: FilesViewMode;
 }
+
+/** Toolbar and Settings labels. `folders` is the persisted id for the Thumbnails layout. */
+export const FILES_VIEW_OPTIONS: Array<{ id: FilesViewMode; label: string }> = [
+  { id: 'list', label: 'List' },
+  { id: 'folders', label: 'Thumbnails' },
+];
 
 export const STORAGE_UI_KEY = 'layr.ui';
 export const DIM_OPTIONS = [0, 1, 5, 10, 30] as const;

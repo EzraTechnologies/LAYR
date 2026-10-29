@@ -5,6 +5,7 @@
   import { formatBytes, parentDir, pathCrumbs, pickThumbnail, type FileEntry, type SortKey } from '../lib/files/files';
   import { displayFilename, formatDate, formatDuration, formatFilament } from '../lib/format';
   import { navigate } from '../lib/routes';
+  import { FILES_VIEW_OPTIONS } from '../lib/settings.svelte';
   import { materialMismatch, materialText, quantityText } from '../lib/spoolman/api';
 
   const { store, ui, files, settings, spoolman } = app();
@@ -105,8 +106,11 @@
       {/if}
     </div>
     <div class="seg view" role="radiogroup" aria-label="File view">
-      <button type="button" role="radio" aria-checked={viewMode === 'list'} onclick={() => setView('list')}>List</button>
-      <button type="button" role="radio" aria-checked={viewMode === 'folders'} onclick={() => setView('folders')}>Folders</button>
+      {#each FILES_VIEW_OPTIONS as mode (mode.id)}
+        <button type="button" role="radio" aria-checked={viewMode === mode.id} onclick={() => setView(mode.id)}>
+          {mode.label}
+        </button>
+      {/each}
     </div>
     <div class="seg sort" role="radiogroup" aria-label="Sort files">
       {#each SORTS as sort (sort.id)}
