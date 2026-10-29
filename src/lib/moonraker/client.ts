@@ -2,6 +2,7 @@ import type { KlippyState, TransportState } from '../printer/model';
 import { parseSpoolmanNotice, spoolmanParamsAllowed, type SpoolmanNotice } from '../spoolman/api';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
+import { AFC_OBJECT, afcCommandsFromHelp } from '../afc/objects';
 import { mmuCommandsFromHelp } from '../mmu/happyhare';
 import { integrationEnabled } from '../integrations/runtime';
 import { planSubscription } from './objects';
@@ -106,6 +107,8 @@ export type ClientEvent =
       hostname: string | null;
       objects: string[];
       settings: ConfigSettings;
+      /** Documented AFC commands present in `printer.gcode.help`. Empty when AFC is not installed. */
+      afcCommands: string[];
       /** Supported Happy Hare commands, or null when help was not queried or failed. */
       gcodeCommands: string[] | null;
     }
@@ -396,10 +399,22 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
-      // Help is read only when Happy Hare is switched on and Klipper listed `mmu`.
-      // A missing method leaves the screen read-only.
-      const gcodeCommands =
-        objects.includes('mmu') && integrationEnabled('happyHare') ? await this.#mmuCommands() : null;
+      // One help read, and only for a changer that is switched on and listed.
+      // Happy Hare and AFC are exclusive, so this is a single query. Failure is not a disconnect.
+      let afcCommands: string[] = [];
+      let gcodeCommands: string[] | null = null;
+      const wantAfc = objects.includes(AFC_OBJECT) && integrationEnabled('afc');
+      const wantMmu = objects.includes('mmu') && integrationEnabled('happyHare');
+      if (wantAfc || wantMmu) {
+        try {
+          const help = await this.#call<unknown>('printer.gcode.help', undefined, 2500);
+          if (wantAfc) afcCommands = afcCommandsFromHelp(help);
+          if (wantMmu) gcodeCommands = mmuCommandsFromHelp(help);
+        } catch {
+          if (wantAfc) afcCommands = [];
+          if (wantMmu) gcodeCommands = null;
+        }
+      }
       if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
@@ -408,6 +423,7 @@ export class MoonrakerClient {
         hostname: printer.hostname?.trim() || null,
         objects,
         settings,
+        afcCommands,
         gcodeCommands,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
@@ -428,16 +444,6 @@ export class MoonrakerClient {
       return typeof settings === 'object' && settings !== null ? (settings as ConfigSettings) : {};
     } catch {
       return {};
-    }
-  }
-
-  /** `printer.gcode.help` for the four commands the MMU screen can send. Failure is not a disconnect. */
-  async #mmuCommands(): Promise<string[] | null> {
-    try {
-      const help = await this.#call<unknown>('printer.gcode.help', undefined, 2500);
-      return mmuCommandsFromHelp(help);
-    } catch {
-      return null;
     }
   }
 

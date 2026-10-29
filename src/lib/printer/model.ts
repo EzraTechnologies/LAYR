@@ -1,3 +1,5 @@
+import type { AfcStatus } from '../afc/types';
+
 /**
  * Printer view model. The live Moonraker source produces `PrinterState`; UI components only ever read this shape.
  */
@@ -245,6 +247,11 @@ export interface PrinterState {
   lights: LightControl[];
   macros: MacroInfo[];
   filamentSensors: FilamentSensor[];
+  /**
+   * AFC add-on, when this printer's object list contains `AFC` and Klipper is ready.
+   * Null on printers without AFC, and whenever live object data is hidden.
+   */
+  afc: AfcStatus | null;
   /** Happy Hare, when this printer listed the `mmu` object and Klipper is ready. */
   mmu: MmuState | null;
   limits: PrinterLimits;
@@ -288,6 +295,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     lights: [],
     macros: [],
     filamentSensors: [],
+    afc: null,
     mmu: null,
     limits: structuredClone(FALLBACK_LIMITS),
     idleState: null,

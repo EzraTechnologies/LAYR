@@ -3,9 +3,10 @@
  * Requesting explicit fields (instead of `null` = everything) keeps WebSocket traffic and UI updates low.
  */
 
+import { afcSubscription } from '../afc/objects';
 import { integrationEnabled, linkStatusSubscription } from '../integrations/runtime';
 
-/** Happy Hare objects are added or dropped when its Settings switch changes. */
+/** AFC and Happy Hare objects are added or dropped when their Settings switches change. */
 linkStatusSubscription();
 
 export const CORE_OBJECTS: Record<string, string[]> = {
@@ -160,6 +161,8 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     objects[name] = ['filament_detected', 'enabled'];
   }
 
+  // AFC is optional. The plan stays unchanged until the user turns AFC on and Klipper lists `AFC`.
+  if (integrationEnabled('afc')) Object.assign(objects, afcSubscription(available).objects);
   // Exact Klipper object name, and only after the user turns Happy Hare on.
   // AFC and other MMU objects are not Happy Hare and are left untouched.
   if (availableSet.has('mmu') && integrationEnabled('happyHare')) objects.mmu = [...MMU_FIELDS];

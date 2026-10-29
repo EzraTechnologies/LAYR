@@ -86,6 +86,8 @@ export class FakeMoonraker {
   silentScripts = false;
   /** Extra fields merged into `server.files.metadata`, keyed by filename. */
   metadata: Record<string, Record<string, unknown>> = {};
+  /** When set, `printer.gcode.help` includes these AFC entries. Null omits them. */
+  gcodeHelp: Record<string, string> | null = null;
   /** `printer.gcode.help` result. `'error'` rejects the call. */
   help: Record<string, unknown> | 'error' = {};
 
@@ -156,7 +158,10 @@ export class FakeMoonraker {
             socket.push({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } }),
           );
         }
-        return reply(this.help);
+        return reply({
+          ...this.help,
+          ...(this.gcodeHelp ?? {}),
+        });
       case 'printer.gcode.script': {
         const script = String(msg.params?.script);
         this.scripts.push(script);

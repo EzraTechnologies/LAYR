@@ -13,7 +13,7 @@
   import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
-  import { navigate, parseRoute, type RouteId } from './lib/routes';
+  import { navItems, navigate, parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
   import { SpoolmanLive } from './lib/spoolman/live.svelte';
   import { Ui } from './lib/ui.svelte';
@@ -101,7 +101,7 @@
 </script>
 
 <div class="app">
-  <NavRail current={route} />
+  <NavRail current={route} items={navItems(store.state.afc !== null, store.state.mmu !== null)} />
   <TopBar />
 
   <main class="content" id="main">

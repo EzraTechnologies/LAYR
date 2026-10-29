@@ -1,3 +1,4 @@
+import { mapAfc } from '../afc/map';
 import { integrationEnabled } from '../integrations/runtime';
 import { parseMmu } from '../mmu/happyhare';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
@@ -22,6 +23,8 @@ export interface AssembleInputs {
   missingObjects: string[];
   /** Object names from `printer.objects.list`. */
   objects: string[];
+  /** AFC commands listed by `printer.gcode.help`. Empty when AFC is absent or the query failed. */
+  afcCommands: readonly string[];
   /** `configfile.settings`, from the subscription snapshot (query is only a fallback). */
   settings: ConfigSettings;
   /** Thumbnail for the current job file, or null. Cleared when the filename changes. */
@@ -92,6 +95,7 @@ export function assembleState(input: AssembleInputs): PrinterState {
     lights: mapLights(raw, input.settings),
     macros: info.macros,
     filamentSensors: mapFilamentSensors(raw),
+    afc: connected && integrationEnabled('afc') ? mapAfc(raw, input.objects, input.afcCommands) : null,
     mmu:
       connected && integrationEnabled('happyHare') && input.objects.includes('mmu')
         ? parseMmu(raw.mmu, input.gcodeCommands ?? null)

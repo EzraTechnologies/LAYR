@@ -290,6 +290,7 @@ describe('assembleState mmu', () => {
     slicerEstimate: null,
     missingObjects: [],
     objects: ['mmu', 'extruder'],
+    afcCommands: [],
     settings: {},
     thumbnailPath: null,
     gcodeCommands: COMMANDS,

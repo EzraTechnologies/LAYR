@@ -74,6 +74,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
       slicerEstimate: null,
       missingObjects: [],
       objects: [],
+      afcCommands: [],
       settings: {},
       thumbnailPath: null,
       gcodeCommands: null,
@@ -187,6 +188,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         inputs.missingObjects = event.missing;
         inputs.hostname = event.hostname;
         inputs.objects = event.objects;
+        inputs.afcCommands = event.afcCommands;
         inputs.settings = event.settings;
         inputs.gcodeCommands = event.gcodeCommands;
         this.#metadataFor = null;

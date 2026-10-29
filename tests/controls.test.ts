@@ -150,6 +150,7 @@ describe('assembleState with controls', () => {
     slicerEstimate: null,
     missingObjects: [],
     objects: ['gcode_macro PARK'],
+    afcCommands: [],
     settings: { extruder: { max_temp: 290 } },
     thumbnailPath: null,
     now: 0,
