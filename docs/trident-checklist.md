@@ -32,6 +32,18 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 - [ ] Below `min_extrude_temp` both buttons are refused and no G-code is sent.
 - [ ] LOAD / UNLOAD appear only when those macros exist. The toast says the macro finished only after Klipper replies. A failed or cancelled run does not say the filament was unloaded.
 - [ ] Spoolman is not on this screen. Choosing or clearing a spool is a later milestone.
+- [ ] If this printer has no Happy Hare MMU, the rail has no MMU item and `#/mmu` says no `mmu` object was listed. Nothing in that check moves filament.
+
+## Happy Hare (only when this printer already runs it)
+
+Skip this section when Klipper does not list an `mmu` object. LAYR does not install Happy Hare and does not edit `printer.cfg` or `mmu.cfg`. These checks have not been done on hardware in this repo. Confirm them on a machine where a wrong tool change is safe (no print, bed clear).
+
+- [ ] With Happy Hare connected, the rail shows MMU and Home shows the reported tool, gate, and filament. Those match `MMU_STATUS` / Mainsail. Missing fields say they were not reported.
+- [ ] Load, unload, and tool change are absent when `MMU_LOAD`, `MMU_UNLOAD`, or `MMU_CHANGE_TOOL` is not in `printer.gcode.help`.
+- [ ] Confirming Load sends only `MMU_LOAD`. Cancelling sends nothing. The same for Unload and `MMU_CHANGE_TOOL TOOL=n`.
+- [ ] While a print is running, those buttons stay disabled and no MMU G-code is sent.
+- [ ] With the MMU paused on a real error, the pause reason matches Happy Hare. Recover, if shown, sends only `MMU_RECOVER` after confirmation.
+- [ ] A printer without the `mmu` object never shows this screen's data and never calls `printer.gcode.help`.
 
 ## Files and a short print
 

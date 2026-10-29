@@ -1,15 +1,19 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { ROUTES, type RouteId } from '../lib/routes';
+  import { app } from '../lib/context';
+  import { MMU_ROUTE, ROUTES, type RouteId } from '../lib/routes';
 
   interface Props {
     current: RouteId;
   }
 
   let { current }: Props = $props();
+
+  const { store } = app();
+  const routes = $derived(store.state.mmu ? [...ROUTES, MMU_ROUTE] : [...ROUTES]);
 </script>
 
-<nav class="rail" aria-label="Main">
+<nav class="rail" class:extra={store.state.mmu !== null} aria-label="Main">
   <div class="brand" aria-label="LAYR">
     <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
       <defs>
@@ -29,7 +33,7 @@
   </div>
 
   <ul>
-    {#each ROUTES as route (route.id)}
+    {#each routes as route (route.id)}
       <li>
         <a
           href={`#/${route.id}`}
@@ -150,5 +154,17 @@
       gap: 0;
       padding: 2px;
     }
+  }
+
+  /* A tenth item only exists when Happy Hare is present. Keep each target at least 44px. */
+  .rail.extra ul {
+    gap: 2px;
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+
+  .rail.extra a {
+    min-height: 0;
+    gap: 1px;
+    padding: 2px;
   }
 </style>

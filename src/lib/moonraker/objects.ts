@@ -52,6 +52,41 @@ export const LED_PREFIXES = ['led ', 'neopixel ', 'dotstar ', 'pca9533 ', 'pca96
 export const FILAMENT_SENSOR_PREFIXES = ['filament_switch_sensor ', 'filament_motion_sensor '] as const;
 
 /**
+ * Happy Hare `mmu` status keys this UI reads.
+ * Klipper returns null for a key the running Happy Hare build does not publish
+ * (`webhooks` uses `dict.get`), so an older build still subscribes.
+ * `filament_pos` is the state-machine integer. Current Happy Hare also publishes
+ * `filament_position` as a bowden distance in millimetres; some older builds used
+ * that name for the integer. The parser accepts an in-range integer from either.
+ */
+export const MMU_FIELDS = [
+  'enabled',
+  'num_gates',
+  'is_homed',
+  'print_state',
+  'tool',
+  'gate',
+  'last_tool',
+  'next_tool',
+  'filament',
+  'filament_pos',
+  'filament_position',
+  'action',
+  'reason_for_pause',
+  'is_paused',
+  'is_locked',
+  'ttg_map',
+  'gate_status',
+  'gate_filament_name',
+  'gate_material',
+  'gate_color',
+  'gate_color_rgb',
+  'gate_temperature',
+  'gate_spool_id',
+  'active_filament',
+] as const;
+
+/**
  * `output_pin` objects can drive anything (beepers, relays, heaters on some machines), so only pins whose names
  * look like lighting are offered as light controls.
  */
@@ -119,6 +154,9 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
   for (const name of available.filter((n) => startsWithAny(n, FILAMENT_SENSOR_PREFIXES))) {
     objects[name] = ['filament_detected', 'enabled'];
   }
+
+  // Exact Klipper object name. AFC and other MMU objects are not Happy Hare and are left untouched.
+  if (availableSet.has('mmu')) objects.mmu = [...MMU_FIELDS];
 
   return { objects, missing };
 }

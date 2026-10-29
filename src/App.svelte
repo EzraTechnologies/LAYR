@@ -22,6 +22,7 @@
   import Files from './views/Files.svelte';
   import Heat from './views/Heat.svelte';
   import Macros from './views/Macros.svelte';
+  import Mmu from './views/Mmu.svelte';
   import Move from './views/Move.svelte';
   import Settings from './views/Settings.svelte';
 
@@ -103,6 +104,8 @@
       <Fans />
     {:else if route === 'macros'}
       <Macros />
+    {:else if route === 'mmu'}
+      <Mmu />
     {:else if route === 'console'}
       <Console />
     {:else if route === 'settings'}

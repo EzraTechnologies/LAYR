@@ -72,6 +72,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
       objects: [],
       settings: {},
       thumbnailPath: null,
+      gcodeCommands: null,
       now: this.#now(),
     };
   }
@@ -170,6 +171,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         inputs.hostname = event.hostname;
         inputs.objects = event.objects;
         inputs.settings = event.settings;
+        inputs.gcodeCommands = event.gcodeCommands;
         this.#metadataFor = null;
         this.#maybeFetchMetadata();
         this.#emitNow();

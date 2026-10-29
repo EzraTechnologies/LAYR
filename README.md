@@ -21,6 +21,8 @@ Filament screen for the same rules. That screen has not been tested on a Pi.
 | ![Files, 1024×600](docs/screenshots/1024x600-files.png) | ![Console, 800×480](docs/screenshots/800x480-console.png) |
 | ![Folders, 1024×600](docs/screenshots/1024x600-files-folders.png) | ![Folders, 800×480](docs/screenshots/800x480-files-folders.png) |
 | ![Not set up, 1024×600](docs/screenshots/1024x600-not-set-up.png) | ![Offline, 800×480](docs/screenshots/800x480-offline.png) |
+| ![Happy Hare, 1024×600](docs/screenshots/1024x600-mmu.png) | ![Happy Hare, 800×480](docs/screenshots/800x480-mmu.png) |
+| ![MMU error, 1024×600](docs/screenshots/1024x600-mmu-error.png) | ![MMU printing, 800×480](docs/screenshots/800x480-mmu-printing.png) |
 
 Screenshots are captured from the production bundle talking to a mocked Moonraker
 (`npm run screenshots`). They are fixture data, not a recording of a printer.
@@ -44,6 +46,10 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
   and changes during a print ask first.
 - **Extrude**: extrude and retract with a cold-extrusion lockout. Load and unload appear only when
   those macros exist, and success is reported only after Klipper accepts the macro.
+- **MMU**: optional Happy Hare panel. It appears only when Klipper lists an `mmu` object. Tool, gate,
+  filament, and errors come from that object's status. Load, unload, tool change, and recover run only
+  when `printer.gcode.help` lists those commands, and only after a confirmation. See
+  [docs/happy-hare.md](docs/happy-hare.md).
 - **Fans**: part cooling and other controllable fans, plus lights when the config actually has them.
   Sliders send a command when released.
 - **Macros**: discovered from the printer. Names starting with `_` are hidden unless you ask for them.
@@ -174,7 +180,7 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not. An MMU stays unwired.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not implement Spoolman. Happy Hare, when the printer lists an `mmu` object, is optional on the Chromium UI. The Qt UI does not drive an MMU.
 
 ## Architecture
 
@@ -182,9 +188,10 @@ that does not restart Klipper.
 src/
   App.svelte                    Hash routing, confirmation, toasts, dim overlay
   components/                   Nav rail, job, temperatures, jog helpers, keyboard, e-stop
-  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings
+  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, MMU
   lib/
     config.ts                   URL resolution. No implicit endpoint.
+    mmu/happyhare.ts            Happy Hare status parsing and confirmed MMU commands
     moonraker/                  WebSocket client, subscriptions, status and control mapping
     printer/                    PrinterState, live source, throttled store
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
@@ -220,6 +227,7 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
 - The Svelte UI does not implement Spoolman. The native Qt Filament screen does, and it has not been tested on a Pi.
+- Happy Hare on the Chromium UI is fixture-tested only. It has not been run against a real MMU, a tool change, or a 5-inch or 7-inch panel. See [docs/happy-hare.md](docs/happy-hare.md).
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.

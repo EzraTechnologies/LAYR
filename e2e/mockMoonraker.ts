@@ -173,6 +173,11 @@ export interface MockOptions {
   status?: Status;
   /** Pre-filled `server.gcode_store`. */
   gcodeStore?: Array<{ message: string; time: number; type: 'command' | 'response' }>;
+  /**
+   * Happy Hare `mmu` object. `commands: null` makes `printer.gcode.help` fail.
+   * Omit `commands` to register load, unload, tool change, and recover.
+   */
+  mmu?: { status: Record<string, unknown>; commands?: string[] | null };
 }
 
 export class MockMoonraker {
@@ -185,6 +190,8 @@ export class MockMoonraker {
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
+  /** `printer.gcode.help`. `'error'` rejects the method. */
+  mmuHelp: Record<string, string> | 'error' | null = null;
   #ws: WebSocketRoute | null = null;
   #relative = false;
   #saved: Record<string, boolean> = {};
@@ -200,6 +207,13 @@ export class MockMoonraker {
       { message: 'G28', time: T - 400, type: 'command' },
       { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
     ];
+    if (options.mmu) {
+      this.status.mmu = { ...options.mmu.status };
+      const names = options.mmu.commands === undefined
+        ? ['MMU_LOAD', 'MMU_UNLOAD', 'MMU_CHANGE_TOOL', 'MMU_RECOVER']
+        : options.mmu.commands;
+      this.mmuHelp = names === null ? 'error' : Object.fromEntries(names.map((name) => [name, name]));
+    }
   }
 
   /** Control (printer-changing) calls in order. */
@@ -298,6 +312,9 @@ export class MockMoonraker {
         return { eventtime: 1, status: { configfile: { settings: settings() } } };
       case 'server.gcode_store':
         return { gcode_store: this.gcodeStore };
+      case 'printer.gcode.help':
+        if (this.mmuHelp === 'error') throw new RpcFailure('Method not found: printer.gcode.help');
+        return this.mmuHelp ?? {};
       case 'server.files.get_directory':
         return this.#directory(String(params.path ?? 'gcodes'));
       case 'server.files.metadata': {

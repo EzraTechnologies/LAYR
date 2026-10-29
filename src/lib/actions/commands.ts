@@ -1,3 +1,4 @@
+import { prepareMmuMove } from '../mmu/happyhare';
 import { objectSuffix } from '../moonraker/objects';
 import {
   AXES,
@@ -46,6 +47,11 @@ export type PrinterCommand =
   /** `value` is 0..1. */
   | { kind: 'set_light'; light: string; value: number }
   | { kind: 'macro'; name: string }
+  /** Happy Hare load, unload, tool change, or recover. The script is fixed; parameters are not typed in. */
+  | { kind: 'mmu'; action: 'load' }
+  | { kind: 'mmu'; action: 'unload' }
+  | { kind: 'mmu'; action: 'recover' }
+  | { kind: 'mmu'; action: 'change_tool'; tool: number }
   /** A single line typed by the user in the console. */
   | { kind: 'gcode'; script: string }
   | { kind: 'start_print'; filename: string }
@@ -338,6 +344,19 @@ function prepareLight(state: PrinterState, lightName: string, value: number): Pr
   return gcodeScript([line], `${light.label} ${pct === 0 ? 'off' : light.dimmable ? `${pct}%` : 'on'}`, `light:${light.object}`, 10 * SECOND);
 }
 
+function prepareMmu(state: PrinterState, command: Extract<PrinterCommand, { kind: 'mmu' }>): Prepared {
+  const result = prepareMmuMove(command, { mmu: state.mmu, jobState: state.job?.state ?? null });
+  if (!result.ok) return fail(result.message);
+  return gcodeScript([result.plan.script], result.plan.summary, 'mmu', MACRO_TIMEOUT_MS, {
+    confirm: {
+      title: result.plan.title,
+      body: result.plan.body,
+      confirmLabel: result.plan.confirmLabel,
+      tone: result.plan.tone,
+    },
+  });
+}
+
 function prepareMacro(state: PrinterState, name: string): Prepared {
   const macro = state.macros.find((m) => m.name === name);
   if (!macro || !MACRO_NAME_RE.test(name)) return fail('This macro is not available');
@@ -527,5 +546,7 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       return prepareLight(state, command.light, command.value);
     case 'macro':
       return prepareMacro(state, command.name);
+    case 'mmu':
+      return prepareMmu(state, command);
   }
 }

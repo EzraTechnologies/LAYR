@@ -1,6 +1,7 @@
 import type { KlippyState, TransportState } from '../printer/model';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
+import { mmuCommandsFromHelp } from '../mmu/happyhare';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -36,6 +37,7 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.files.get_directory',
   'server.files.metadata',
   'server.files.thumbnails',
+  'printer.gcode.help',
 ]);
 
 /**
@@ -98,6 +100,8 @@ export type ClientEvent =
       hostname: string | null;
       objects: string[];
       settings: ConfigSettings;
+      /** Supported Happy Hare commands, or null when help was not queried or failed. */
+      gcodeCommands: string[] | null;
     }
   /** Incremental `notify_status_update` diff. */
   | { type: 'status'; diff: RawStatus }
@@ -381,6 +385,9 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
+      // Only an `mmu` object triggers this read. A missing method leaves the screen read-only.
+      const gcodeCommands = objects.includes('mmu') ? await this.#mmuCommands() : null;
+      if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
         status: result.status ?? {},
@@ -388,6 +395,7 @@ export class MoonrakerClient {
         hostname: printer.hostname?.trim() || null,
         objects,
         settings,
+        gcodeCommands,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);
@@ -407,6 +415,16 @@ export class MoonrakerClient {
       return typeof settings === 'object' && settings !== null ? (settings as ConfigSettings) : {};
     } catch {
       return {};
+    }
+  }
+
+  /** `printer.gcode.help` for the four commands the MMU screen can send. Failure is not a disconnect. */
+  async #mmuCommands(): Promise<string[] | null> {
+    try {
+      const help = await this.#call<unknown>('printer.gcode.help', undefined, 2500);
+      return mmuCommandsFromHelp(help);
+    } catch {
+      return null;
     }
   }
 

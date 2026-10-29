@@ -81,6 +81,8 @@ describe('MoonrakerClient', () => {
     expect(subscribed).toContain('temperature_sensor chamber');
     expect(subscribed).not.toContain('heater_bed');
     expect(subscribed).not.toContain('display_status');
+    expect(subscribed).not.toContain('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
 
     const snapshot = events.find((e) => e.type === 'snapshot');
     expect(snapshot).toMatchObject({
@@ -112,7 +114,46 @@ describe('MoonrakerClient', () => {
     });
     expect(server.calls).not.toContain('printer.objects.query');
     const snapshot = events.find((e) => e.type === 'snapshot');
-    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } } });
+    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } }, gcodeCommands: null });
+    client.stop();
+  });
+
+  it('subscribes to Happy Hare fields and keeps only registered commands', async () => {
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: {
+        webhooks: { state: 'ready' },
+        extruder: { temperature: 30 },
+        mmu: { tool: 1, gate: 2, filament: 'Loaded', enabled: true },
+      },
+    });
+    server.help = { MMU_LOAD: 'Load', MMU_CHANGE_TOOL: 'Change', G28: 'Home', MMU_TEST_CONFIG: 'test' };
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    const objects = server.subscribeParams?.objects as Record<string, string[]>;
+    expect(objects.mmu).toContain('tool');
+    expect(objects.mmu).toContain('gate_status');
+    expect(objects.mmu).not.toContain('nfc');
+    expect(objects.mmu).not.toContain('sensors');
+    expect(server.calls).toContain('printer.gcode.help');
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toEqual(['MMU_LOAD', 'MMU_CHANGE_TOOL']);
+    client.stop();
+  });
+
+  it('stays connected when Happy Hare command help fails', async () => {
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 0 } },
+    });
+    server.help = 'error';
+    const { client, events, klippy } = setup(server);
+    client.start();
+    await flush();
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toBeNull();
+    expect(klippy()).toEqual(['ready']);
     client.stop();
   });
 
