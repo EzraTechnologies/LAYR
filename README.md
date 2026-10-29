@@ -10,9 +10,11 @@ console commands. It has not been run on a Voron Trident or any other physical p
 deploy it over KlipperScreen until you have checked it in a browser. See
 [docs/trident-checklist.md](docs/trident-checklist.md).
 
-Spoolman (browse spools, set the active spool, clear it only after a confirmed unload) is defined
-in `src/lib/spoolman/types.ts`. The Svelte UI does not implement it. The native Qt controller has a
-Filament screen for the same rules. That screen has not been tested on a Pi.
+Spoolman in the Chromium UI is optional. When Moonraker reports the `spoolman` component, Extrude
+shows the active spool (material, colour, and remaining weight or length when Spoolman sent them),
+and a confirmed choice can change it. The active spool is cleared only after an unload Klipper has
+accepted. Printers without Spoolman keep the previous Extrude screen. The native Qt controller has
+its own Filament screen for the same rules. Neither UI has been tested on a Pi.
 
 | 1024×600 | 800×480 |
 | --- | --- |
@@ -20,6 +22,7 @@ Filament screen for the same rules. That screen has not been tested on a Pi.
 | ![Move, 1024×600](docs/screenshots/1024x600-move.png) | ![Heat, 800×480](docs/screenshots/800x480-heat.png) |
 | ![Files, 1024×600](docs/screenshots/1024x600-files.png) | ![Console, 800×480](docs/screenshots/800x480-console.png) |
 | ![Folders, 1024×600](docs/screenshots/1024x600-files-folders.png) | ![Folders, 800×480](docs/screenshots/800x480-files-folders.png) |
+| ![Spool on Extrude, 1024×600](docs/screenshots/1024x600-extrude-spool.png) | ![Spool browser, 800×480](docs/screenshots/800x480-spool-browse.png) |
 | ![Not set up, 1024×600](docs/screenshots/1024x600-not-set-up.png) | ![Offline, 800×480](docs/screenshots/800x480-offline.png) |
 
 Screenshots are captured from the production bundle talking to a mocked Moonraker
@@ -43,7 +46,11 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
 - **Heat**: targets, presets, and cool-down, clamped to the printer's configured limits. High targets
   and changes during a print ask first.
 - **Extrude**: extrude and retract with a cold-extrusion lockout. Load and unload appear only when
-  those macros exist, and success is reported only after Klipper accepts the macro.
+  those macros exist, and success is reported only after Klipper accepts the macro. If Moonraker has
+  Spoolman, the same screen shows the active spool and can browse and select one after confirmation.
+  An unload from this screen clears that spool only when Klipper accepts the macro. Home and the
+  file detail mention the same spool when it is known. A missing, offline, or unauthorized Spoolman
+  does not invent weights, and a print locks spool changes.
 - **Fans**: part cooling and other controllable fans, plus lights when the config actually has them.
   Sliders send a command when released.
 - **Macros**: discovered from the printer. Names starting with `_` are hidden unless you ask for them.
@@ -66,7 +73,9 @@ sample data.
 - The Moonraker client only sends methods in `READ_METHODS` or `CONTROL_METHODS`
   (`src/lib/moonraker/client.ts`). `machine.*`, `server.restart`, config writes and file uploads are
   rejected in the client. Deleting a G-code file is allowed, and only after confirmation, and not while
-  that file is the active print.
+  that file is the active print. Spoolman reads are `server.spoolman.status`, `get_spool_id`, and a
+  GET proxy limited to `/v1/spool`. `server.spoolman.post_spool_id` is sent only after confirmation,
+  or after an unload Klipper has accepted, and not during a print.
 - Motion: an axis must be homed before it can jog. XY travel uses the reported position limits. Z jogging
   does not go below 0 even if `position_min` is negative. A single jog is at most 100 mm. Homing Z alone
   is refused until X and Y are homed.
@@ -174,7 +183,8 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not. An MMU stays unwired.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Chromium Extrude screen does too, when
+that component is enabled. An MMU stays unwired.
 
 ## Architecture
 
@@ -190,7 +200,7 @@ src/
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
-    spoolman/types.ts           Svelte contract only. Qt implements the same rules.
+    spoolman/                   Optional Chromium Spoolman client, scoped to the active printer.
 deploy/                         check, install, display switch, rollback, uninstall
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
@@ -219,7 +229,12 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 - Progress comes from `display_status.progress` (falling back to `virtual_sdcard.progress`) and can
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
-- The Svelte UI does not implement Spoolman. The native Qt Filament screen does, and it has not been tested on a Pi.
+- Chromium Spoolman was checked against a mock Moonraker (unit tests and Playwright at 1024×600 and
+  800×480). It has not been run against a live Spoolman server or on a Raspberry Pi. LAYR does not
+  edit `moonraker.conf`. Add `[spoolman]` there yourself if you want the feature. Colour is a swatch
+  from `color_hex`. Picture bytes inside the spool JSON are not shown. The catalogue is dropped when
+  that Moonraker disconnects or the printer URL changes, so one printer's spools are not shown as
+  another's. The native Qt Filament screen is unchanged and still has not been tested on a Pi.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.

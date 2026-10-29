@@ -5,8 +5,9 @@
   import { formatBytes, parentDir, pathCrumbs, pickThumbnail, type FileEntry, type SortKey } from '../lib/files/files';
   import { displayFilename, formatDate, formatDuration, formatFilament } from '../lib/format';
   import { navigate } from '../lib/routes';
+  import { materialMismatch, materialText, quantityText } from '../lib/spoolman/api';
 
-  const { store, ui, files, settings } = app();
+  const { store, ui, files, settings, spoolman } = app();
   const printerState = store.state;
   const connected = $derived(printerState.transport === 'connected');
 
@@ -58,6 +59,14 @@
     return parts.join(' · ');
   }
 
+  const activeSpool = $derived(spoolman.snapshot.phase === 'ready' ? spoolman.activeSpool() : null);
+  const spoolNote = $derived(detail ? materialMismatch(detail.meta?.filamentType, activeSpool) : null);
+  const spoolFact = $derived.by(() => {
+    if (spoolman.snapshot.phase !== 'ready' || !spoolman.snapshot.activeKnown) return null;
+    if (!activeSpool && spoolman.snapshot.activeId == null) return 'No active spool';
+    if (!activeSpool) return `Spool ${spoolman.snapshot.activeId}`;
+    return `${activeSpool.name} · ${materialText(activeSpool)} · ${quantityText(activeSpool)}`;
+  });
   const startCheck = $derived(detail ? ui.gateway.availability({ kind: 'start_print', filename: detail.path }) : null);
   const deleteCheck = $derived(detail ? ui.gateway.availability({ kind: 'delete_file', path: detail.path }) : null);
 </script>
@@ -246,12 +255,18 @@
           <div><dt>Print time</dt><dd class="num">{formatDuration(detail.meta?.estimatedTime)}</dd></div>
           <div><dt>Filament</dt><dd class="num">{formatFilament(detail.meta?.filamentTotal)}{detail.meta?.filamentWeight ? ` · ${detail.meta.filamentWeight.toFixed(1)} g` : ''}</dd></div>
           <div><dt>Material</dt><dd title={detail.meta?.filamentName ?? ''}>{detail.meta?.filamentType ?? '—'}</dd></div>
+          {#if spoolFact}
+            <div class="wide"><dt>Active spool</dt><dd title={spoolFact}>{spoolFact}</dd></div>
+          {/if}
           <div><dt>Layer</dt><dd class="num">{detail.meta?.layerHeight ? `${detail.meta.layerHeight} mm` : '—'}</dd></div>
           <div><dt>Temps</dt><dd class="num">{detail.meta?.firstLayerExtruderTemp ? `${detail.meta.firstLayerExtruderTemp}° / ${detail.meta.firstLayerBedTemp ?? '—'}°` : '—'}</dd></div>
           <div><dt>Size</dt><dd class="num">{formatBytes(detail.size)}</dd></div>
           <div class="wide"><dt>Slicer</dt><dd title={detail.meta?.slicer ?? ''}>{detail.meta?.slicer ?? '—'}</dd></div>
           <div class="wide"><dt>Modified</dt><dd class="num">{formatDate(detail.modified)}</dd></div>
         </dl>
+        {#if spoolNote}
+          <p class="hint warn">{spoolNote}</p>
+        {/if}
         {#if startCheck && !startCheck.allowed}
           <p class="hint warn"><Icon name="lock" size={14} />{startCheck.message}</p>
         {/if}

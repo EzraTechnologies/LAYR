@@ -1,4 +1,5 @@
 import { objectSuffix } from '../moonraker/objects';
+import { spoolIdValue } from '../spoolman/api';
 import {
   AXES,
   FALLBACK_LIMITS,
@@ -45,7 +46,11 @@ export type PrinterCommand =
   | { kind: 'set_fan'; fan: string; speed: number }
   /** `value` is 0..1. */
   | { kind: 'set_light'; light: string; value: number }
-  | { kind: 'macro'; name: string }
+  | { kind: 'macro'; name: string; /** Appended to the confirmation body. Does not change the G-code. */ note?: string }
+  /** Selects the active Spoolman spool for this printer. Does not move filament. */
+  | { kind: 'set_active_spool'; spoolId: number; name: string }
+  /** Unsets the active spool. Sent only after a confirmed unload, or its own confirmation. */
+  | { kind: 'clear_active_spool' }
   /** A single line typed by the user in the console. */
   | { kind: 'gcode'; script: string }
   | { kind: 'start_print'; filename: string }
@@ -338,7 +343,7 @@ function prepareLight(state: PrinterState, lightName: string, value: number): Pr
   return gcodeScript([line], `${light.label} ${pct === 0 ? 'off' : light.dimmable ? `${pct}%` : 'on'}`, `light:${light.object}`, 10 * SECOND);
 }
 
-function prepareMacro(state: PrinterState, name: string): Prepared {
+function prepareMacro(state: PrinterState, name: string, note?: string): Prepared {
   const macro = state.macros.find((m) => m.name === name);
   if (!macro || !MACRO_NAME_RE.test(name)) return fail('This macro is not available');
   if (macro.requiredParams.length > 0) {
@@ -347,6 +352,7 @@ function prepareMacro(state: PrinterState, name: string): Prepared {
   const body = [
     macro.description ?? 'Runs this macro from your Klipper configuration.',
     jobActive(state) ? 'A print is in progress.' : '',
+    note?.trim() ?? '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -440,6 +446,9 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
     }
     case 'gcode':
       return prepareConsole(state, command.script);
+    case 'set_active_spool':
+    case 'clear_active_spool':
+      return prepareSpool(state, command);
   }
 
   const gate = readyGate(state);
@@ -526,6 +535,53 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
     case 'set_light':
       return prepareLight(state, command.light, command.value);
     case 'macro':
-      return prepareMacro(state, command.name);
+      return prepareMacro(state, command.name, command.note);
   }
+}
+
+function spoolLabel(name: string, id: number): string {
+  const clean = name.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return clean || `Spool ${id}`;
+}
+
+/** Spoolman writes do not need Klipper to be ready, and they do not move filament. */
+function prepareSpool(state: PrinterState, command: Extract<PrinterCommand, { kind: 'set_active_spool' | 'clear_active_spool' }>): Prepared {
+  if (state.status === 'unconfigured' || state.transport !== 'connected') return fail('Printer is offline');
+  if (jobActive(state)) return fail('Spool changes are locked while a print is running');
+  if (command.kind === 'clear_active_spool') {
+    return ok({
+      method: 'server.spoolman.post_spool_id',
+      params: { spool_id: null },
+      summary: 'Clear active spool',
+      group: 'spoolman',
+      timeoutMs: 15 * SECOND,
+      confirm: {
+        title: 'Clear the active spool?',
+        body: 'This only unsets the spool Moonraker has selected. Filament in the toolhead is not moved.',
+        confirmLabel: 'Clear spool',
+        tone: 'warn',
+      },
+    });
+  }
+  let id: number | null;
+  try {
+    id = spoolIdValue(command.spoolId);
+  } catch {
+    return fail('That spool id cannot be used');
+  }
+  if (id === null) return fail('That spool id cannot be used');
+  const name = spoolLabel(command.name, id);
+  return ok({
+    method: 'server.spoolman.post_spool_id',
+    params: { spool_id: id },
+    summary: `Set active spool to ${name}`,
+    group: 'spoolman',
+    timeoutMs: 15 * SECOND,
+    confirm: {
+      title: `Use ${name}?`,
+      body: `${name} becomes the active spool for this printer. Filament in the toolhead is not moved.`,
+      confirmLabel: 'Set active spool',
+      tone: 'primary',
+    },
+  });
 }

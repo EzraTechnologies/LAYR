@@ -2,9 +2,10 @@ import type { PrinterProfile } from '../config';
 import { mapThumbnails, pickThumbnail } from '../files/files';
 import { MoonrakerClient, type CallOptions, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
 import { mergeStatus, toNumber } from '../moonraker/mapping';
-import type { ConfigSettings, FileMetadata } from '../moonraker/types';
+import type { ConfigSettings, FileMetadata, ServerInfo } from '../moonraker/types';
+import type { SpoolmanNotice } from '../spoolman/api';
 import { assembleState, type AssembleInputs } from './assemble';
-import type { PrinterState } from './model';
+import type { PrinterState, TransportState } from './model';
 import type { PrinterConnection, PrinterSource } from './source';
 
 export interface LiveSourceOptions {
@@ -51,6 +52,9 @@ export class LiveSource implements PrinterSource, PrinterConnection {
   readonly #ready = new Listeners<void>();
   readonly #gcode = new Listeners<string>();
   readonly #files = new Listeners<FileChange>();
+  readonly #transport = new Listeners<TransportState>();
+  readonly #serverInfo = new Listeners<ServerInfo>();
+  readonly #spoolman = new Listeners<SpoolmanNotice>();
 
   constructor(profile: PrinterProfile & { moonrakerUrl: string }, options: LiveSourceOptions = {}) {
     this.printerId = profile.id;
@@ -143,6 +147,18 @@ export class LiveSource implements PrinterSource, PrinterConnection {
     return this.#files.add(listener);
   }
 
+  onTransport(listener: (state: TransportState) => void): () => void {
+    return this.#transport.add(listener);
+  }
+
+  onServerInfo(listener: (info: ServerInfo) => void): () => void {
+    return this.#serverInfo.add(listener);
+  }
+
+  onSpoolmanNotice(listener: (notice: SpoolmanNotice) => void): () => void {
+    return this.#spoolman.add(listener);
+  }
+
   #now(): number {
     return this.#options.client?.now?.() ?? Date.now();
   }
@@ -158,6 +174,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         if (event.state !== 'connected') inputs.klippy = 'unknown';
         // Connection changes are shown immediately; they are rare.
         this.#emitNow();
+        this.#transport.emit(event.state);
         return;
       case 'klippy':
         inputs.klippy = event.state;
@@ -189,6 +206,12 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         return;
       case 'filelist_changed':
         this.#files.emit({ action: event.action, path: event.path, root: event.root });
+        return;
+      case 'server':
+        this.#serverInfo.emit(event.info);
+        return;
+      case 'spoolman':
+        this.#spoolman.emit(event.notice);
         return;
     }
   }
