@@ -2,6 +2,15 @@
   import Icon from '../components/Icon.svelte';
   import { isValidMoonrakerUrl, type AppConfig } from '../lib/config';
   import { app } from '../lib/context';
+  import { discoverIntegrations } from '../lib/integrations/discover';
+  import {
+    changerExclusivityNote,
+    integrationPresence,
+    integrationStatusText,
+    type IntegrationDiscovery,
+    type IntegrationId,
+  } from '../lib/integrations/preferences';
+  import { integrations } from '../lib/integrations/store.svelte';
   import { formatTemp } from '../lib/format';
   import { DIM_OPTIONS, type FilesViewMode } from '../lib/settings.svelte';
 
@@ -64,6 +73,49 @@
     settings.update({ displayName: value.trim() });
   }
 
+  const INTEGRATIONS: Array<{ id: IntegrationId; label: string }> = [
+    { id: 'spoolman', label: 'Spoolman' },
+    { id: 'happyHare', label: 'Happy Hare' },
+    { id: 'afc', label: 'AFC' },
+  ];
+
+  let discovery = $state<IntegrationDiscovery | null>(null);
+  let discoveryPending = $state(false);
+  const anyIntegration = $derived(integrations.value.spoolman || integrations.value.happyHare || integrations.value.afc);
+  const printerReady = $derived(printerState.transport === 'connected' && printerState.klippy === 'ready');
+  const jobBusy = $derived(printerState.status === 'printing' || printerState.status === 'paused');
+
+  function integrationStatus(id: IntegrationId): string {
+    const failed = id === 'spoolman' && (discovery?.failedComponents?.includes('spoolman') ?? false);
+    return integrationStatusText({
+      enabled: integrations.value[id],
+      connected: printerReady,
+      presence: integrationPresence(id, discovery),
+      pending: discoveryPending && discovery === null,
+      failed,
+    });
+  }
+
+  $effect(() => {
+    if (!anyIntegration || !printerReady) {
+      discovery = null;
+      discoveryPending = false;
+      return;
+    }
+    const connection = store.source.connection;
+    if (!connection) return;
+    discoveryPending = true;
+    let cancelled = false;
+    void discoverIntegrations((method, params) => connection.call(method, params)).then((found) => {
+      if (cancelled) return;
+      discovery = found;
+      discoveryPending = false;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   const allSensors = $derived(
     [printerState.extruder, printerState.bed, printerState.chamber, ...printerState.sensors].filter((s) => s !== null),
   );
@@ -114,6 +166,38 @@
   </section>
 
   <div class="col">
+    <section class="card panel" aria-labelledby="set-integrations">
+      <h2 id="set-integrations" class="eyebrow">Integrations</h2>
+      <p class="hint">
+        Off until you turn one on. Saved for this printer only. Spoolman can stay on with either changer, or with both off.
+      </p>
+      <div class="integrations" role="group" aria-labelledby="set-integrations">
+        {#each INTEGRATIONS as item (item.id)}
+          {@const status = integrationStatus(item.id)}
+          <div class="integration">
+            <button
+              type="button"
+              class="btn ghost toggle"
+              role="switch"
+              data-integration={item.id}
+              aria-checked={integrations.value[item.id]}
+              aria-label={`${item.label}. ${status}`}
+              onclick={() => integrations.set(item.id, !integrations.value[item.id])}
+            >
+              <span class="switch" aria-hidden="true"></span>
+              <span class="toggle-name">{item.label}</span>
+            </button>
+            <p class="hint integration-status">{status}</p>
+          </div>
+        {/each}
+      </div>
+      <p class="hint">{changerExclusivityNote(integrations.value)}</p>
+      <p class="hint">Turning a switch does not move the printer or edit Klipper. A feature appears only after it is on and this printer reports it.</p>
+      {#if jobBusy}
+        <p class="hint">A print is active. These switches only change what LAYR shows. They do not pause or move the printer.</p>
+      {/if}
+    </section>
+
     <section class="card panel" aria-labelledby="set-display">
       <h2 id="set-display" class="eyebrow">Display</h2>
       <span class="label">Dim screen after</span>
@@ -304,6 +388,29 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .integrations {
+    display: grid;
+    gap: 8px;
+  }
+
+  .integration {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .integrations .toggle {
+    width: 100%;
+  }
+
+  .toggle-name {
+    min-width: 0;
+  }
+
+  .integration-status {
+    padding-left: 2px;
   }
 
   .toggles {
