@@ -1,11 +1,18 @@
 <script lang="ts">
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
+  import { integrations } from '../lib/integrations/store.svelte';
   import EStopButton from './EStopButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
-  const { store, settings } = app();
+  const { store, settings, printer } = app();
   const printerState = store.state;
+  integrations.bind(printer.id, printer.moonrakerUrl);
+
+  $effect(() => {
+    if (integrations.statusRevision === 0) return;
+    store.source.connection?.reconnect();
+  });
   const clock = $derived(formatClock(printerState.now));
   const name = $derived(settings.value.displayName.trim() || printerState.printerName);
 </script>
