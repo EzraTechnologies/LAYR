@@ -102,8 +102,6 @@ const SHOTS: Shot[] = [
   },
   { name: 'move', route: 'move', options: { scenario: 'ready', homed: true } },
   { name: 'move-printing', route: 'move', options: { scenario: 'printing' } },
-  { name: 'heat', route: 'heat', options: { scenario: 'printing' } },
-  { name: 'extrude', route: 'extrude', options: { scenario: 'paused' } },
   {
     name: 'afc',
     route: 'afc',
@@ -137,6 +135,8 @@ const SHOTS: Shot[] = [
       await expect(page.getByRole('heading', { name: 'AFC is not installed' })).toBeVisible();
     },
   },
+  { name: 'heat', route: 'heat', options: { scenario: 'printing' } },
+  { name: 'extrude', route: 'extrude', options: { scenario: 'paused' } },
   {
     name: 'home-spool',
     route: 'home',

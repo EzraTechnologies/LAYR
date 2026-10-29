@@ -64,11 +64,6 @@ They are not a Box Turtle or any other physical unit.
   An unload from this screen clears that spool only when Klipper accepts the macro. Home and the
   file detail mention the same spool when it is known. A missing, offline, or unauthorized Spoolman
   does not invent weights, and a print locks spool changes.
-- **AFC** (only when Settings → AFC is on for this printer and Klipper lists an `AFC` object): units, lanes, what is loaded, loading state,
-  and errors from the AFC add-on. The switch defaults off. Turning it on turns Happy Hare off, and both can stay off.
-  Load, tool change, unload, hub load, and eject are the documented
-  AFC commands, each confirmed first, and only if `printer.gcode.help` lists that command. Printers
-  without AFC keep the same navigation as before. LAYR does not install AFC, and the Qt UI does not drive it.
 - **Fans**: part cooling and other controllable fans, plus lights when the config actually has them.
   Sliders send a command when released.
 - **Macros**: discovered from the printer. Names starting with `_` are hidden unless you ask for them.
@@ -159,6 +154,12 @@ Copy `.env.example` to `.env.local`. All variables are optional.
 URL precedence: query parameter, then saved setting, then the build variable. If none is set, LAYR does
 not connect.
 
+- **AFC** (only when Settings → AFC is on for this printer and Klipper lists an `AFC` object): units, lanes, what is loaded, loading state,
+  and errors from the AFC add-on. The switch defaults off. Turning it on turns Happy Hare off, and both can stay off.
+  Load, tool change, unload, hub load, and eject are the documented
+  AFC commands, each confirmed first, and only if `printer.gcode.help` lists that command. Printers
+  without AFC keep the same navigation as before. LAYR does not install AFC, and the Qt UI does not drive it.
+
 ### Moonraker access
 
 LAYR never edits `moonraker.conf`. Depending on how you serve it, you may need one of these yourself:
@@ -233,17 +234,17 @@ that component is enabled and Settings → Spoolman is on for this printer. An M
 src/
   App.svelte                    Hash routing, confirmation, toasts, dim overlay
   components/                   Nav rail, job, temperatures, jog helpers, keyboard, e-stop
-  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, MMU, AFC
+  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, MMU
   lib/
     config.ts                   URL resolution. No implicit endpoint.
     mmu/happyhare.ts            Happy Hare status parsing and confirmed MMU commands
     moonraker/                  WebSocket client, subscriptions, status and control mapping
     printer/                    PrinterState, live source, throttled store
+    afc/                        Optional AFC status mapping. Subscribed only when AFC is switched on.
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
     spoolman/                   Optional Chromium Spoolman client, scoped to the active printer.
-    afc/                        Optional AFC status mapping. Subscribed only when AFC is switched on.
 deploy/                         check, install, display switch, rollback, uninstall, HDMI pointer preflight
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
@@ -272,6 +273,10 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 - WPE / Cog is optional, off by default, and was not launched on Bookworm hardware here. Debian
   Bookworm's `wpewebkit` package has no security support. WebKitGTK is a different port and is not used.
 - One printer per instance.
+- AFC on the Svelte screen was checked against the AFCProject `get_status` fields and a mocked Moonraker
+  (unit tests, Playwright, and the screenshots below). It has not been run on a printer with AFC
+  installed, and it has not been tried on a Raspberry Pi. Do not treat a fixture screenshot as a
+  hardware pass. LAYR will not install AFC or edit `printer.cfg` / `moonraker.conf`.
 - Progress comes from `display_status.progress` (falling back to `virtual_sdcard.progress`) and can
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
@@ -281,10 +286,6 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
   from `color_hex`. Picture bytes inside the spool JSON are not shown. The catalogue is dropped when
   that Moonraker disconnects or the printer URL changes, so one printer's spools are not shown as
   another's. The native Qt Filament screen is unchanged and still has not been tested on a Pi.
-- AFC on the Svelte screen was checked against the AFCProject `get_status` fields and a mocked Moonraker
-  (unit tests, Playwright, and the screenshots below). It has not been run on a printer with AFC
-  installed, and it has not been tried on a Raspberry Pi. Do not treat a fixture screenshot as a
-  hardware pass. LAYR will not install AFC or edit `printer.cfg` / `moonraker.conf`.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.
