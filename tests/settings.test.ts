@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseFilesViewMode, parseSettings } from '../src/lib/settings.svelte';
+import { FILES_VIEW_OPTIONS, parseFilesViewMode, parseSettings } from '../src/lib/settings.svelte';
 
 describe('display name', () => {
   it('defaults to empty so the host name is used, and keeps a saved name', () => {
@@ -30,6 +30,19 @@ describe('files view mode', () => {
     expect(parseSettings('{"filesViewMode":"folders","dimAfterMinutes":5}').filesViewMode).toBe('folders');
     expect(parseSettings('{"filesViewMode":"folder"}').dimAfterMinutes).toBe(0);
     expect(parseSettings('{"filesViewMode":"folder"}').filesViewMode).toBe('folders');
+  });
+
+  it('labels the stored folders mode Thumbnails and does not persist that word', () => {
+    expect(FILES_VIEW_OPTIONS).toEqual([
+      { id: 'list', label: 'List' },
+      { id: 'folders', label: 'Thumbnails' },
+    ]);
+    expect(parseFilesViewMode('thumbnails')).toBe('list');
+    expect(parseFilesViewMode('Thumbnails')).toBe('list');
+    expect(parseSettings('{"filesViewMode":"thumbnails","displayName":"Kept"}')).toMatchObject({
+      filesViewMode: 'list',
+      displayName: 'Kept',
+    });
   });
 
   it('ignores unknown values without dropping the rest of the saved settings', () => {

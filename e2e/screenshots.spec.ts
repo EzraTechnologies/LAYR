@@ -61,7 +61,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready' },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
       await expect(page.getByRole('img', { name: /Voron_Design_Cube/ })).toBeVisible();
     },
@@ -71,7 +71,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready', files: withPartsFolder() },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /stealthburner/ }).click();
       await expect(page.getByRole('heading', { name: 'stealthburner' })).toBeVisible();
       await expect(page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /parts/ })).toBeVisible();
@@ -83,7 +83,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready', emptyDirs: ['archive'] },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /archive/ }).click();
       await expect(page.getByText('This folder is empty')).toBeVisible();
     },
