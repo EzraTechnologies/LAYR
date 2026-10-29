@@ -10,12 +10,13 @@
   import { ConsoleLog } from './lib/console/console.svelte';
   import { setApp } from './lib/context';
   import { FileBrowser } from './lib/files/browser.svelte';
+  import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
   import { parseRoute, type RouteId } from './lib/routes';
-import { SettingsStore } from './lib/settings.svelte';
-import { SpoolmanLive } from './lib/spoolman/live.svelte';
-import { Ui } from './lib/ui.svelte';
+  import { SettingsStore } from './lib/settings.svelte';
+  import { SpoolmanLive } from './lib/spoolman/live.svelte';
+  import { Ui } from './lib/ui.svelte';
   import Console from './views/Console.svelte';
   import Dashboard from './views/Dashboard.svelte';
   import Extrude from './views/Extrude.svelte';
@@ -61,7 +62,12 @@ import { Ui } from './lib/ui.svelte';
   onMount(() => {
     window.addEventListener('hashchange', onHashChange);
     store.start();
-    spoolman.start(connection);
+  });
+
+  $effect(() => {
+    if (integrations.value.spoolman) spoolman.start(connection);
+    else spoolman.stop();
+    return () => spoolman.stop();
   });
 
   onDestroy(() => {

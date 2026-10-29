@@ -53,6 +53,8 @@ export class SpoolmanSession implements SpoolmanService {
   #generation = 0;
   #probed = false;
   #seen = false;
+  /** False after Settings turns Spoolman off, until `activate` runs again. */
+  #active = true;
   readonly #onChange: (snapshot: SpoolmanSnapshot) => void;
 
   constructor(io: SpoolmanIo, onChange: (snapshot: SpoolmanSnapshot) => void = () => {}) {
@@ -63,6 +65,24 @@ export class SpoolmanSession implements SpoolmanService {
 
   get endpoint(): string {
     return this.#io.endpoint;
+  }
+
+  /** Lets status and catalogue reads run. Settings calls this when Spoolman is switched on. */
+  activate(): void {
+    this.#active = true;
+  }
+
+  /**
+   * Stops catalogue reads and hides Spoolman. Used when the Settings switch is off.
+   * In-flight replies are dropped and do not move filament.
+   */
+  suspend(): void {
+    this.#active = false;
+    this.#epoch += 1;
+    this.#generation += 1;
+    this.#probed = false;
+    this.#seen = false;
+    this.#publish(emptySnapshot(this.#io.printerId, this.#io.endpoint));
   }
 
   /** Drops the catalogue. Used when Moonraker disconnects or the printer URL changes. */
@@ -95,7 +115,7 @@ export class SpoolmanSession implements SpoolmanService {
   }
 
   async onServerInfo(info: ServerInfo): Promise<void> {
-    if (this.#probed) return;
+    if (!this.#active || this.#probed) return;
     this.#probed = true;
     const failed = Array.isArray(info.failed_components) && info.failed_components.includes('spoolman');
     if (failed) {
@@ -111,7 +131,7 @@ export class SpoolmanSession implements SpoolmanService {
   }
 
   onNotice(notice: SpoolmanNotice): void {
-    if (!this.snapshot.tracked || this.snapshot.phase === 'absent' || this.snapshot.phase === 'failed') return;
+    if (!this.#active || !this.snapshot.tracked || this.snapshot.phase === 'absent' || this.snapshot.phase === 'failed') return;
     if (notice.kind === 'link') {
       if (!notice.connected) {
         this.#generation += 1;
@@ -132,6 +152,7 @@ export class SpoolmanSession implements SpoolmanService {
   }
 
   async refresh(): Promise<void> {
+    if (!this.#active) return;
     const call = this.#io.call;
     if (!call) return;
     const epoch = this.#epoch;

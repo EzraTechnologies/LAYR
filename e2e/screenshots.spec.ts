@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { openWithMock, VIEWPORTS } from './helpers';
-import { defaultFiles, type MockFile, type MockOptions } from './mockMoonraker';
+import { defaultFiles, MOONRAKER, type MockFile, type MockOptions } from './mockMoonraker';
 
 /**
  * Regenerates docs/screenshots from the real production bundle connected to the mock Moonraker in
@@ -196,6 +197,7 @@ test.describe('screenshots @screenshot', () => {
     for (const shot of SHOTS) {
       test(`${vp.name} ${shot.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
+        if (shot.name.includes('spool')) await seedIntegrations(page, { spoolman: true }, MOONRAKER);
         await openWithMock(page, shot.route, { ...shot.options, fixedClock: true });
         await shot.prepare?.(page);
         await page.evaluate(() => document.fonts.ready);

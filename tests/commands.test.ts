@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normaliseConsoleInput, prepareCommand, type PrinterCommand, type Prepared } from '../src/lib/actions/commands';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { readyState, withJob } from './stateFixture';
 
 function plan(result: Prepared) {
@@ -278,6 +279,11 @@ describe('print, files and macros', () => {
   });
 
   it('confirms spool selection and refuses it during a print', () => {
+    resetIntegrationRuntime();
+    expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 7, name: 'Galaxy Black' }, readyState()))).toBe(
+      'Turn Spoolman on in Settings before changing the active spool',
+    );
+    setIntegrationRuntime({ spoolman: true, happyHare: false, afc: false });
     const selected = plan(prepareCommand({ kind: 'set_active_spool', spoolId: 7, name: 'Galaxy Black' }, readyState()));
     expect(selected.method).toBe('server.spoolman.post_spool_id');
     expect(selected.params).toEqual({ spool_id: 7 });
@@ -290,6 +296,7 @@ describe('print, files and macros', () => {
     expect(blocked(prepareCommand({ kind: 'clear_active_spool' }, withJob(readyState(), 'paused')))).toMatch(/locked/);
     expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 0, name: 'Nope' }, readyState()))).toMatch(/cannot be used/);
     expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 1.5, name: 'Nope' }, readyState()))).toMatch(/cannot be used/);
+    resetIntegrationRuntime();
   });
 });
 

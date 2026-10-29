@@ -1,12 +1,50 @@
 import { expect, test } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
-import type { MockMoonraker } from './mockMoonraker';
+import { MOONRAKER, type MockMoonraker } from './mockMoonraker';
 
 async function spoolPosts(mock: MockMoonraker) {
   return mock.calls.filter((call) => call.method === 'server.spoolman.post_spool_id');
 }
 
+test.describe('Spoolman switched off', () => {
+  test('keeps the original Extrude screen and does not call Spoolman', async ({ page }) => {
+    const mock = await openWithMock(page, 'extrude', { scenario: 'ready', homed: true, spoolman: 'ready' });
+    await expect(page.getByText('Spool tracking with Spoolman is planned for a later release.')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Galaxy Black/ })).toHaveCount(0);
+    expect(mock.calls.some((call) => call.method.startsWith('server.spoolman'))).toBe(false);
+    expect(mock.scripts).toEqual([]);
+  });
+});
+
+test.describe('Spoolman switched off after use', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedIntegrations(page, { spoolman: true }, MOONRAKER);
+  });
+
+  test('turning the switch off hides the spool and stops Spoolman calls', async ({ page }) => {
+    const mock = await openWithMock(page, 'extrude', { scenario: 'ready', homed: true, spoolman: 'ready' });
+    await expect(page.getByRole('button', { name: /Galaxy Black/ })).toBeVisible();
+    const before = mock.calls.filter((call) => call.method.startsWith('server.spoolman')).length;
+    expect(before).toBeGreaterThan(0);
+    await page.getByRole('link', { name: 'Settings' }).click();
+    const toggle = page.locator('[data-integration="spoolman"]');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await page.getByRole('link', { name: 'Extrude' }).click();
+    await expect(page.getByText('Spool tracking with Spoolman is planned for a later release.')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Galaxy Black/ })).toHaveCount(0);
+    await page.waitForTimeout(400);
+    expect(mock.calls.filter((call) => call.method.startsWith('server.spoolman'))).toHaveLength(before);
+    expect(mock.scripts).toEqual([]);
+  });
+});
+
 test.describe('Spoolman', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedIntegrations(page, { spoolman: true }, MOONRAKER);
+  });
+
   test('printers without Spoolman keep the current extrude screen and send no spool calls', async ({ page }) => {
     const mock = await openWithMock(page, 'extrude', { scenario: 'ready', homed: true });
     await expect(page.getByText('Spool tracking with Spoolman is planned for a later release.')).toBeVisible();

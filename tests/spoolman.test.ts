@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CommandGateway } from '../src/lib/actions/gateway';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { RpcError } from '../src/lib/moonraker/client';
 import type { PrinterConnection } from '../src/lib/printer/source';
 import {
@@ -119,6 +120,33 @@ describe('Spoolman session', () => {
     expect(session.snapshot.message).toMatch(/hidden/);
   });
 
+  it('hides Spoolman and ignores later reads after the switch turns it off', async () => {
+    const calls: string[] = [];
+    const session = new SpoolmanSession(scripted(async (method) => {
+      calls.push(method);
+      if (method === 'server.spoolman.status') return { spoolman_connected: true, spool_id: 4 };
+      if (method === 'server.spoolman.get_spool_id') return { spool_id: 4 };
+      return { response: [raw(4, { name: 'Galaxy Black' })] };
+    }));
+    await session.onServerInfo({ components: ['spoolman'] });
+    expect(session.snapshot.tracked).toBe(true);
+    expect(session.snapshot.spools[0]?.name).toBe('Galaxy Black');
+    const seen = calls.length;
+    session.suspend();
+    expect(session.snapshot.tracked).toBe(false);
+    expect(session.snapshot.phase).toBe('idle');
+    expect(session.snapshot.spools).toEqual([]);
+    await session.refresh();
+    session.onNotice({ kind: 'active', spoolId: 9, known: true });
+    await session.onServerInfo({ components: ['spoolman'] });
+    expect(calls).toHaveLength(seen);
+    expect(session.snapshot.tracked).toBe(false);
+    session.activate();
+    await session.onServerInfo({ components: ['spoolman'] });
+    expect(session.snapshot.tracked).toBe(true);
+    expect(session.snapshot.spools[0]?.name).toBe('Galaxy Black');
+  });
+
   it('loads every list page', async () => {
     const session = new SpoolmanSession(scripted(async (method, params) => {
       if (method === 'server.spoolman.status') return { spoolman_connected: true, spool_id: 1 };
@@ -218,6 +246,7 @@ describe('Spoolman session', () => {
   });
 
   it('writes only through a confirmed gateway, and clears only after Klipper accepts the unload', async () => {
+    setIntegrationRuntime({ spoolman: true, happyHare: false, afc: false });
     let state = readyState({ printerId: 'p1' });
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
     const connection: PrinterConnection = {
@@ -281,5 +310,6 @@ describe('Spoolman session', () => {
     expect(await session.clearAfterUnload('p1', { kind: 'confirmed-success' })).toBe('cleared');
     expect(calls.at(-1)).toEqual({ method: 'server.spoolman.post_spool_id', params: { spool_id: null } });
     expect(session.snapshot.activeId).toBeNull();
+    resetIntegrationRuntime();
   });
 });

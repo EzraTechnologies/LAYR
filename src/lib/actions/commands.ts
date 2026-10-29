@@ -1,3 +1,4 @@
+import { integrationEnabled } from '../integrations/runtime';
 import { objectSuffix } from '../moonraker/objects';
 import { spoolIdValue } from '../spoolman/api';
 import {
@@ -547,6 +548,7 @@ function spoolLabel(name: string, id: number): string {
 /** Spoolman writes do not need Klipper to be ready, and they do not move filament. */
 function prepareSpool(state: PrinterState, command: Extract<PrinterCommand, { kind: 'set_active_spool' | 'clear_active_spool' }>): Prepared {
   if (state.status === 'unconfigured' || state.transport !== 'connected') return fail('Printer is offline');
+  if (!integrationEnabled('spoolman')) return fail('Turn Spoolman on in Settings before changing the active spool');
   if (jobActive(state)) return fail('Spool changes are locked while a print is running');
   if (command.kind === 'clear_active_spool') {
     return ok({

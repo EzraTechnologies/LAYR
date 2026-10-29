@@ -37,7 +37,9 @@ export class SpoolmanLive {
   }
 
   start(connection: PrinterConnection | null): void {
+    this.stop();
     if (!connection) return;
+    this.#session.activate();
     this.#stop.push(
       connection.onTransport((state: TransportState) => {
         if (state !== 'connected') this.#session.dropConnection();
@@ -49,12 +51,21 @@ export class SpoolmanLive {
       }),
     );
     this.#stop.push(connection.onSpoolmanNotice((notice) => this.#session.onNotice(notice)));
+    // A switch turned on after the socket is up has already missed the first server.info.
+    if (connection.connected) {
+      void connection
+        .call<ServerInfo>('server.info')
+        .then((info) => this.#session.onServerInfo(info))
+        .catch(() => {
+          // The socket's next server.info still updates the session. This read does not move filament.
+        });
+    }
   }
 
   stop(): void {
     for (const unsubscribe of this.#stop) unsubscribe();
     this.#stop = [];
-    this.#session.dropConnection();
+    this.#session.suspend();
   }
 
   get tracked(): boolean {
