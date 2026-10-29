@@ -39,6 +39,15 @@ describe('resolveConfig', () => {
     expect(isValidMoonrakerUrl('ws://pi.local:7125')).toBe(true);
   });
 
+  it('keeps the Moonraker URL when the kiosk adds layr_build', () => {
+    const c = resolveConfig(
+      inputs({ search: '?moonraker=http://q:7125&layr_build=20261028T010000Z' }),
+    );
+    expect(activePrinter(c).moonrakerUrl).toBe('http://q:7125');
+    expect(c.urlSource).toBe('query');
+    expect(c).not.toHaveProperty('layrBuild');
+  });
+
   it('ignores the removed demo switches', () => {
     for (const search of ['?demo=printing', '?demo=1', '?demo']) {
       const c = resolveConfig(inputs({ search, env: { VITE_LAYR_DEMO: 'printing' } }));

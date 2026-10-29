@@ -34,6 +34,11 @@ if [ "$PURGE" = 1 ]; then
 else
   echo "Keeps $LAYR_HOME (pass --purge to delete it)."
 fi
+if [ -f "$HDMI_POINTER_RULE_PATH" ]; then
+  echo "Leaves the udev rule at $HDMI_POINTER_RULE_PATH in place."
+  echo "Uninstall does not delete that file. A rule already on this Pi stays until you remove it yourself."
+  echo "A LAYR-managed rule can be removed with ./deploy/layr-hdmi-input.sh remove"
+fi
 confirm "Uninstall LAYR?" || die "Cancelled"
 
 if unit_exists "$KIOSK_UNIT"; then

@@ -136,8 +136,9 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 
 ## Raspberry Pi install
 
-This has **not** been run on a Pi. Test on a spare card first, and test in a browser before the kiosk.
-`deploy/check-device.sh` only reads the system.
+Test on a spare card first, and test in a browser before the kiosk. A Pi 4 with a BTT HDMI7 has
+already shown the Chromium UI. The installer in this tree still needs the checks in
+[docs/pi-test.md](docs/pi-test.md). `deploy/check-device.sh` only reads the system.
 
 1. On a workstation: `npm ci && npm run build`.
 2. Copy the repo (or at least `dist/` and `deploy/`) to the Pi.
@@ -148,14 +149,22 @@ This has **not** been run on a Pi. Test on a spare card first, and test in a bro
    It copies the launcher into `~/layr/bin/` and refreshes that copy on every later install.
    KlipperScreen is not touched. No printer file is edited. Klipper and Moonraker are not restarted.
    If the web server was already running, only `layr-web.service` is restarted so the new files are served.
-   A later install does not disable or restart a kiosk you already enabled with `to-layr`.
+   A later install does not disable or restart a kiosk you already enabled with `to-layr` unless you
+   pass `--reload-kiosk`. That flag restarts `layr-kiosk.service` only when it is already active.
+   It does not start a disabled kiosk, and it does not restart Klipper or Moonraker.
+   The kiosk URL includes `layr_build`, set to the release directory name under `~/layr/releases/`.
+   A different release is a different URL, so Chromium loads that bundle instead of the previous page.
+   The Moonraker query and `#/home` route stay. The Chromium profile (display name, Hide pointer) stays,
+   because the origin does not change.
 4. Open `http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home` in Chromium and work through
    [docs/trident-checklist.md](docs/trident-checklist.md).
 5. Only then, if you want LAYR on the panel: `./deploy/layr-display.sh to-layr`.
    That disables KlipperScreen (it stays installed) and starts cage + Chromium on tty7.
    `./deploy/layr-display.sh to-klipperscreen` switches back.
-6. `./deploy/rollback.sh` restores the previous UI build. `./deploy/uninstall.sh` removes the LAYR
-   units and, if LAYR had disabled KlipperScreen, enables it again. `--purge` also deletes `~/layr`.
+6. `./deploy/rollback.sh` points `~/layr/current` at the previous release. The next kiosk start uses
+   that directory name as `layr_build`. Add `--reload-kiosk` to restart an already active kiosk.
+   `./deploy/uninstall.sh` removes the LAYR units and, if LAYR had disabled KlipperScreen, enables it
+   again. `--purge` also deletes `~/layr`. Uninstall does not delete a udev rule.
 
 The kiosk does not force a resolution. cage uses the connector's preferred mode. The Pi model and the
 panel's native mode are read by `check-device.sh` because they are not known in this repository.
@@ -169,7 +178,11 @@ Hide pointer asks the page to use a transparent cursor. On Cage, the BTT HDMI7's
 a pointer, so the compositor can keep drawing an arrow after CSS `cursor: none`. When the setting is
 on, the kiosk starts Cage with a blank cursor theme (`WLR_NO_HARDWARE_CURSORS=1`). Touch is not
 disabled, and a physical mouse still clicks. With the setting off, the normal cursor theme is left
-alone. This has not been confirmed on the HDMI7. Restarting `layr-kiosk.service` applies the theme;
+alone. On a Pi 4 with Cage 0.2.0, that theme does not hide the separate `vc4-hdmi-0` and `vc4-hdmi-1`
+pointing sticks. `./deploy/layr-hdmi-input.sh` can ignore those names only, and only if you opt in.
+It does not match the touchscreen or a USB mouse. Install does not write that rule unless you pass
+`--ignore-hdmi-pointers`. A rule file already on the Pi is left in place. See
+[docs/pi-test.md](docs/pi-test.md). Restarting `layr-kiosk.service` applies the theme;
 that does not restart Klipper.
 
 ## Native Qt prototype
@@ -191,7 +204,7 @@ src/
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
     spoolman/types.ts           Svelte contract only. Qt implements the same rules.
-deploy/                         check, install, display switch, rollback, uninstall
+deploy/                         check, install, display switch, rollback, uninstall, HDMI pointer preflight
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
 ```
@@ -209,10 +222,12 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 
 ## Known limitations
 
-- Not yet run on a Raspberry Pi, a BTT panel, or a Voron Trident. Live speed and flow are
-  Klipper's reported `motion_report` values (interpolated by Klipper), not a separate sensor.
-- The Cage pointer workaround (blank cursor theme) is not confirmed on the BTT HDMI7. CSS hiding
-  works in a normal browser. The kiosk path is what still needs a hardware check.
+- Not yet run on a Voron Trident. A Pi 4 with a BTT HDMI7 has shown the Chromium UI. Live speed
+  and flow are Klipper's reported `motion_report` values (interpolated by Klipper), not a separate sensor.
+- The blank cursor theme does not remove the Pi `vc4-hdmi` ghost pointer under Cage 0.2.0. The
+  opt-in udev rule in `deploy/layr-hdmi-input.sh` matches the rule that did, on a Pi 4 with a BTT
+  HDMI7. Run the checks in [docs/pi-test.md](docs/pi-test.md) before relying on it. CSS hiding still
+  works in a normal browser. Do not disable the touchscreen or a physical mouse.
 - WPE / Cog is optional, off by default, and was not launched on Bookworm hardware here. Debian
   Bookworm's `wpewebkit` package has no security support. WebKitGTK is a different port and is not used.
 - One printer per instance.

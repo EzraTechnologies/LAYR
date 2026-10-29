@@ -54,6 +54,14 @@ else
   echo "  /proc/bus/input/devices not readable"
 fi
 
+section "HDMI phantom pointers (read only)"
+if [ -x ./layr-hdmi-input.sh ]; then
+  ./layr-hdmi-input.sh status || true
+else
+  echo "  layr-hdmi-input.sh is missing"
+fi
+echo "  This section does not install a udev rule. Apply is opt-in: ./layr-hdmi-input.sh apply"
+
 section "Display services"
 for unit in "$KS_UNIT" "$KIOSK_UNIT" "$WEB_UNIT"; do
   if unit_exists "$unit"; then

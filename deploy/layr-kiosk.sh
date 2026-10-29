@@ -14,7 +14,10 @@ LAYR_MOONRAKER_URL="${LAYR_MOONRAKER_URL:-http://localhost:7125}"
 LAYR_PROFILE="${LAYR_PROFILE:-$HOME/.config/layr-chromium}"
 LAYR_HOME="${LAYR_HOME:-$HOME/layr}"
 LAYR_STATE="${LAYR_STATE:-$LAYR_HOME/state}"
-PAGE="http://localhost:${LAYR_PORT}/?moonraker=${LAYR_MOONRAKER_URL}#/home"
+# layr_build is the release directory name. Rollback changes that name, so Chromium
+# loads the restored bundle instead of the page it already had open.
+PAGE=$(kiosk_page_url "$LAYR_PORT" "$LAYR_MOONRAKER_URL" "$LAYR_HOME")
+echo "Kiosk page: $PAGE"
 
 command -v cage >/dev/null || { echo "cage is not installed" >&2; exit 1; }
 
