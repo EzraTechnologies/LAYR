@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
-import type { AfcScenario } from './mockMoonraker';
+import { MOONRAKER, type AfcScenario } from './mockMoonraker';
 
 async function confirm(page: Page, label: string) {
   const dialog = page.getByRole('alertdialog');
@@ -9,7 +10,24 @@ async function confirm(page: Page, label: string) {
   await expect(dialog).toBeHidden();
 }
 
+test.describe('AFC switched off', () => {
+  test('ignores a listed AFC object until Settings turns AFC on', async ({ page }) => {
+    const mock = await openWithMock(page, 'afc', { scenario: 'ready', homed: true, afc: 'ready' });
+    await expect(page).toHaveURL(/#\/home$/);
+    await expect(page.getByRole('link', { name: 'AFC', exact: true })).toHaveCount(0);
+    const subscribed = mock.calls.find((call) => call.method === 'printer.objects.subscribe')?.params?.objects as Record<string, unknown>;
+    expect(subscribed).not.toHaveProperty('AFC');
+    expect(subscribed).not.toHaveProperty('AFC_lane lane1');
+    expect(mock.calls.some((call) => call.method === 'printer.gcode.help')).toBe(false);
+    expect(mock.scripts).toEqual([]);
+  });
+});
+
 test.describe('AFC', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedIntegrations(page, { afc: true }, MOONRAKER);
+  });
+
   test('shows lanes from the subscription and sends a load only after confirmation', async ({ page }) => {
     const mock = await openWithMock(page, 'afc', { scenario: 'ready', homed: true, afc: 'ready' });
     await expect(page.getByRole('link', { name: 'AFC', exact: true })).toHaveAttribute('aria-current', 'page');
@@ -81,6 +99,27 @@ test.describe('AFC', () => {
     expect(mock.calls.some((call) => call.method === 'printer.gcode.help')).toBe(false);
     const subscribed = mock.calls.find((call) => call.method === 'printer.objects.subscribe')?.params?.objects as Record<string, unknown>;
     expect(subscribed).not.toHaveProperty('AFC');
+  });
+
+  test('turning AFC off drops the subscription and leaves the AFC screen', async ({ page }) => {
+    const mock = await openWithMock(page, 'afc', { scenario: 'ready', homed: true, afc: 'ready' });
+    await expect(page.getByRole('link', { name: 'AFC', exact: true })).toHaveAttribute('aria-current', 'page');
+    await page.getByRole('link', { name: 'Settings' }).click();
+    const toggle = page.locator('[data-integration="afc"]');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('link', { name: 'AFC', exact: true })).toHaveCount(0);
+    await expect.poll(() => {
+      const last = mock.calls.filter((call) => call.method === 'printer.objects.subscribe').at(-1);
+      const objects = (last?.params?.objects ?? null) as Record<string, unknown> | null;
+      return objects !== null && !Object.prototype.hasOwnProperty.call(objects, 'AFC') && !Object.prototype.hasOwnProperty.call(objects, 'AFC_lane lane1');
+    }).toBe(true);
+    await page.evaluate(() => {
+      location.hash = '#/afc';
+    });
+    await expect(page).toHaveURL(/#\/home$/);
+    expect(mock.scripts).toEqual([]);
+    expect(mock.controlCalls).toEqual([]);
   });
 
   for (const vp of VIEWPORTS) {

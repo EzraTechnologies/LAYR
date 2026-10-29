@@ -2,6 +2,7 @@ import type { KlippyState, TransportState } from '../printer/model';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
 import { AFC_OBJECT, afcCommandsFromHelp } from '../afc/objects';
+import { integrationEnabled } from '../integrations/runtime';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -385,9 +386,9 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
-      // One read, only when the AFC object exists. Status after this comes from the subscription.
+      // One read, only when AFC is switched on and the object exists. Status after this comes from the subscription.
       let afcCommands: string[] = [];
-      if (objects.includes(AFC_OBJECT)) {
+      if (objects.includes(AFC_OBJECT) && integrationEnabled('afc')) {
         try {
           afcCommands = afcCommandsFromHelp(await this.#call<unknown>('printer.gcode.help'));
         } catch {

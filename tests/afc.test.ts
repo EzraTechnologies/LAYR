@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import {
   afcLaneButtons,
   afcMotionBlock,
@@ -14,6 +15,13 @@ import { assembleState, type AssembleInputs } from '../src/lib/printer/assemble'
 import type { AfcLane, AfcStatus } from '../src/lib/afc/types';
 import { navItems, parseRoute, ROUTES } from '../src/lib/routes';
 import { readyState, withJob } from './stateFixture';
+
+function enableAfc(): void {
+  setIntegrationRuntime({ spoolman: false, happyHare: false, afc: true });
+}
+
+beforeEach(() => enableAfc());
+afterEach(() => resetIntegrationRuntime());
 
 function plan(result: Prepared) {
   if (!result.ok) throw new Error(`Expected ok, got: ${result.message}`);
@@ -83,6 +91,14 @@ function stateWith(overrides: Partial<AfcStatus> = {}) {
 }
 
 describe('AFC subscription', () => {
+  it('leaves the plan unchanged while AFC is switched off', () => {
+    resetIntegrationRuntime();
+    const plan = planSubscription(['extruder', 'AFC', 'AFC_lane lane1', 'AFC_BoxTurtle Turtle_1']);
+    expect(plan.objects).not.toHaveProperty('AFC');
+    expect(plan.objects).not.toHaveProperty('AFC_lane lane1');
+    expect(plan.objects).not.toHaveProperty('AFC_BoxTurtle Turtle_1');
+  });
+
   it('leaves the plan unchanged when the printer has no AFC object', () => {
     const without = planSubscription(['extruder', 'AFC_lane lane1', 'AFC_BoxTurtle Turtle_1', 'mmu']);
     const plain = planSubscription(['extruder']);
@@ -208,6 +224,30 @@ describe('AFC help and status mapping', () => {
     expect(bad?.error).toBe(true);
   });
 
+  it('is absent from the view model while the Settings switch is off', () => {
+    resetIntegrationRuntime();
+    const input: AssembleInputs = {
+      printerId: 'p',
+      configuredName: 'Trident',
+      hostname: 'trident',
+      transport: 'connected',
+      klippy: 'ready',
+      klippyMessage: null,
+      reconnectAttempt: 0,
+      nextRetryAt: null,
+      transportReason: null,
+      raw: { AFC: { current_state: 'Idle', current_load: null, error_state: false, lanes: [] } },
+      slicerEstimate: null,
+      missingObjects: [],
+      objects: ['AFC'],
+      afcCommands: [],
+      settings: {},
+      thumbnailPath: null,
+      now: 0,
+    };
+    expect(assembleState(input).afc).toBeNull();
+  });
+
   it('is absent from the view model when Klipper is not ready or the object is missing', () => {
     const input: AssembleInputs = {
       printerId: 'p',
@@ -237,6 +277,11 @@ describe('AFC help and status mapping', () => {
 describe('AFC lane commands', () => {
   it('confirms a load and sends only the documented command', () => {
     const state = stateWith({ currentLoad: null, lanes: [lane('lane4')] });
+    resetIntegrationRuntime();
+    expect(blocked(prepareCommand({ kind: 'afc', action: 'tool_load', lane: 'lane4' }, state))).toBe(
+      'Turn AFC on in Settings before moving a lane',
+    );
+    enableAfc();
     const prepared = prepareCommand({ kind: 'afc', action: 'tool_load', lane: 'lane4' }, state);
     expect(plan(prepared).params?.script).toBe('TOOL_LOAD LANE=lane4');
     expect(plan(prepared).group).toBe('afc');

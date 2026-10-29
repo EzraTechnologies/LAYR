@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { Backoff } from '../src/lib/moonraker/backoff';
 import {
   CONTROL_METHODS,
@@ -117,7 +118,24 @@ describe('MoonrakerClient', () => {
     client.stop();
   });
 
+  it('does not subscribe to AFC or ask for help while the switch is off', async () => {
+    resetIntegrationRuntime();
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'AFC', 'AFC_lane lane1'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, AFC: { current_state: 'Idle' } },
+    });
+    server.gcodeHelp = { TOOL_LOAD: 'Load lane into tool' };
+    const { client } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).not.toHaveProperty('AFC');
+    expect(server.subscribeParams?.objects).not.toHaveProperty('AFC_lane lane1');
+    expect(server.calls).not.toContain('printer.gcode.help');
+    client.stop();
+  });
+
   it('subscribes to AFC once and reads gcode help only when the AFC object exists', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: false, afc: true });
     const server = new FakeMoonraker({
       objects: ['webhooks', 'print_stats', 'extruder', 'AFC', 'AFC_lane lane1', 'AFC_stepper lane1', 'mmu'],
       status: {
@@ -145,9 +163,11 @@ describe('MoonrakerClient', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(server.calls.filter((method) => method === 'printer.gcode.help')).toHaveLength(1);
     client.stop();
+    resetIntegrationRuntime();
   });
 
   it('still publishes the AFC snapshot when gcode help is unavailable', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: false, afc: true });
     const server = new FakeMoonraker({
       objects: ['webhooks', 'extruder', 'AFC'],
       status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, AFC: { current_state: 'Idle', error_state: false } },
@@ -156,8 +176,10 @@ describe('MoonrakerClient', () => {
     client.start();
     await flush();
     expect(events.find((event) => event.type === 'snapshot')).toMatchObject({ afcCommands: [] });
+    expect(server.calls).toContain('printer.gcode.help');
     expect(server.calls).toContain('printer.objects.subscribe');
     client.stop();
+    resetIntegrationRuntime();
   });
 
   it('reconnects with bounded exponential backoff and resets after success', async () => {

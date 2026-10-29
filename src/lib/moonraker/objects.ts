@@ -4,6 +4,10 @@
  */
 
 import { afcSubscription } from '../afc/objects';
+import { integrationEnabled, linkStatusSubscription } from '../integrations/runtime';
+
+/** AFC objects are added or dropped when its Settings switch changes. */
+linkStatusSubscription();
 
 export const CORE_OBJECTS: Record<string, string[]> = {
   webhooks: ['state', 'state_message'],
@@ -122,8 +126,8 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     objects[name] = ['filament_detected', 'enabled'];
   }
 
-  // AFC is optional. With no `AFC` object the plan is unchanged.
-  Object.assign(objects, afcSubscription(available).objects);
+  // AFC is optional. The plan stays unchanged until the user turns AFC on and Klipper lists `AFC`.
+  if (integrationEnabled('afc')) Object.assign(objects, afcSubscription(available).objects);
 
   return { objects, missing };
 }

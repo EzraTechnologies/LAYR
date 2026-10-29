@@ -1,4 +1,5 @@
 import { AFC_LANE_NAME, type AfcCommandName } from '../afc/objects';
+import { integrationEnabled } from '../integrations/runtime';
 import type { AfcLane } from '../afc/types';
 import { objectSuffix } from '../moonraker/objects';
 import {
@@ -591,6 +592,7 @@ function laneStaged(lane: AfcLane): boolean {
 }
 
 function prepareAfc(state: PrinterState, action: AfcAction, lane: string): Prepared {
+  if (!integrationEnabled('afc')) return fail('Turn AFC on in Settings before moving a lane');
   const blocked = afcMotionBlock(state);
   if (blocked) return fail(blocked);
   const afc = state.afc;
