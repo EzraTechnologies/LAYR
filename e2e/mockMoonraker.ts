@@ -206,111 +206,6 @@ function toSpoolman(spool: MockSpool): Record<string, unknown> {
   return body;
 }
 
-export type AfcScenario = 'ready' | 'loading' | 'error';
-
-/** Documented AFC commands the mock reports from `printer.gcode.help` when an AFC fixture is installed. */
-export const AFC_HELP: Record<string, string> = {
-  TOOL_LOAD: 'Load lane into tool',
-  TOOL_UNLOAD: 'Unload from tool head',
-  CHANGE_TOOL: 'change filaments in tool head',
-  HUB_LOAD: 'Load lane into hub',
-  LANE_UNLOAD: 'Unload lane from extruder',
-};
-
-function afcLane(name: string, index: number, map: string, fields: Record<string, unknown>): Record<string, unknown> {
-  return {
-    name,
-    unit: 'Turtle_1',
-    hub: 'Turtle_1',
-    extruder: 'extruder',
-    buffer: 'Turtle_1',
-    buffer_status: 'Advancing',
-    lane: index,
-    map,
-    load: false,
-    prep: false,
-    tool_loaded: false,
-    loaded_to_hub: false,
-    material: '',
-    filament_name: '',
-    color: '',
-    weight: 0,
-    spool_id: null,
-    filament_status: 'Not Ready',
-    status: 'None',
-    runout_lane: null,
-    ...fields,
-  };
-}
-
-/** Fixture shaped like `afc.get_status` and `AFCLane.get_status`. Not a recording of a printer. */
-export function afcFixture(mode: AfcScenario): Status {
-  const loading = mode === 'loading';
-  const error = mode === 'error';
-  return {
-    AFC: {
-      current_load: loading ? null : 'lane2',
-      current_lane: loading ? 'lane4' : null,
-      next_lane: null,
-      current_state: loading ? 'Loading' : error ? 'Error' : 'Idle',
-      current_toolchange: mode === 'ready' ? 2 : 0,
-      number_of_toolchanges: mode === 'ready' ? 8 : 0,
-      error_state: error,
-      bypass_state: false,
-      position_saved: loading,
-      units: ['Box_Turtle Turtle_1'],
-      lanes: ['lane1', 'lane2', 'lane3', 'lane4'],
-      extruders: ['extruder'],
-      hubs: ['Turtle_1'],
-      buffers: ['Turtle_1'],
-      message: error ? { message: 'Filament failed to load to the toolhead', type: 'error' } : { message: '', type: '' },
-    },
-    'AFC_BoxTurtle Turtle_1': {
-      lanes: ['lane1', 'lane2', 'lane3', 'lane4'],
-      extruders: ['extruder'],
-      hubs: ['Turtle_1'],
-      buffers: ['Turtle_1'],
-    },
-    'AFC_lane lane1': afcLane('lane1', 1, 'T1', { runout_lane: 'lane2' }),
-    'AFC_lane lane2': afcLane('lane2', 2, 'T0', {
-      load: true,
-      prep: true,
-      tool_loaded: !loading,
-      loaded_to_hub: true,
-      material: 'ABS',
-      filament_name: 'Polymaker ABS',
-      color: '#3D441E',
-      weight: 497.2,
-      spool_id: 35,
-      filament_status: loading ? 'Ready' : 'In Tool',
-      status: loading ? 'Loaded' : 'Tooled',
-    }),
-    'AFC_lane lane3': afcLane('lane3', 3, 'T2', {
-      load: true,
-      prep: true,
-      loaded_to_hub: true,
-      material: 'PLA',
-      filament_name: 'Prusament PLA',
-      color: '#ff8800',
-      weight: 210,
-      spool_id: 12,
-      filament_status: 'Ready',
-      status: 'Loaded',
-    }),
-    'AFC_lane lane4': afcLane('lane4', 4, 'T3', {
-      load: true,
-      prep: true,
-      material: 'PETG',
-      filament_name: 'Polymaker PETG',
-      color: '#3ee0f0',
-      weight: 800,
-      spool_id: 4,
-      filament_status: loading ? 'Tool Loading' : 'Ready',
-      status: loading ? 'Tool Loading' : 'None',
-    }),
-  };
-}
-
 export interface MockOptions {
   scenario?: Scenario;
   homed?: boolean;
@@ -319,6 +214,13 @@ export interface MockOptions {
    * Omit `commands` to register load, unload, tool change, and recover.
    */
   mmu?: { status: Record<string, unknown>; commands?: string[] | null };
+  /** When set, the printer object list includes AFC and four lanes. */
+  afc?: AfcScenario;
+  /**
+   * Overrides `printer.gcode.help`. Null means the method is missing.
+   * Defaults to the documented AFC commands when `afc` is set, and to null otherwise.
+   */
+  afcHelp?: Record<string, string> | null;
   /** Saved on this browser before the page loads. Does not send printer commands. */
   seedSwitches?: { spoolman?: boolean; happyHare?: boolean; afc?: boolean };
   files?: MockFile[];
@@ -328,13 +230,6 @@ export interface MockOptions {
   status?: Status;
   /** Pre-filled `server.gcode_store`. */
   gcodeStore?: Array<{ message: string; time: number; type: 'command' | 'response' }>;
-  /** When set, the printer object list includes AFC and four lanes. */
-  afc?: AfcScenario;
-  /**
-   * Overrides `printer.gcode.help`. Null means the method is missing.
-   * Defaults to the documented AFC commands when `afc` is set, and to null otherwise.
-   */
-  afcHelp?: Record<string, string> | null;
   /** `absent` omits the Spoolman component. Other modes add it to `server.info`. */
   spoolman?: SpoolmanMode;
   spools?: MockSpool[];
@@ -357,8 +252,6 @@ export class MockMoonraker {
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
-  /** `printer.gcode.help` AFC entries. Null omits them. */
-  afcHelp: Record<string, string> | null = null;
   spoolmanMode: SpoolmanMode;
   spools: MockSpool[];
   activeSpoolId: number | null;
@@ -370,6 +263,8 @@ export class MockMoonraker {
   #saved: Record<string, boolean> = {};
   /** `printer.gcode.help`. `'error'` rejects the method. */
   mmuHelp: Record<string, string> | 'error' | null = null;
+  /** `printer.gcode.help` AFC entries. Null omits them. */
+  afcHelp: Record<string, string> | null = null;
   seedSwitches: { spoolman?: boolean; happyHare?: boolean; afc?: boolean } | null = null;
 
   constructor(options: MockOptions = {}) {
@@ -459,6 +354,41 @@ export class MockMoonraker {
   #respond(message: string): void {
     this.gcodeStore.push({ message, time: Date.now() / 1000, type: 'response' });
     this.notify('notify_gcode_response', [message]);
+  }
+
+/** Updates the fixture after a confirmed AFC command so the subscription can refresh the screen. */
+  #afcCommand(command: string, lane: string | null): void {
+    if (!lane || !this.status[`AFC_lane ${lane}`]) this.#fail(`Unknown lane ${lane ?? ''}`);
+    const current = this.status.AFC?.current_load;
+    const previous = typeof current === 'string' ? current : null;
+    if (command === 'TOOL_UNLOAD') {
+      this.update({
+        AFC: { current_load: null, current_state: 'Idle', current_lane: null },
+        [`AFC_lane ${lane}`]: { tool_loaded: false, filament_status: 'Ready', status: 'Loaded' },
+      });
+    } else if (command === 'TOOL_LOAD' || command === 'CHANGE_TOOL') {
+      const diff: Status = {
+        AFC: { current_load: lane, current_state: 'Idle', current_lane: null, error_state: false },
+        [`AFC_lane ${lane}`]: { tool_loaded: true, load: true, prep: true, filament_status: 'In Tool', status: 'Tooled' },
+      };
+      if (previous && previous !== lane) {
+        diff[`AFC_lane ${previous}`] = { tool_loaded: false, filament_status: 'Ready', status: 'Loaded' };
+      }
+      this.update(diff);
+    } else if (command === 'HUB_LOAD') {
+      this.update({
+        AFC: { current_state: 'Idle', current_lane: null },
+        [`AFC_lane ${lane}`]: { loaded_to_hub: true, load: true, prep: true, status: 'Loaded' },
+      });
+    } else {
+      const diff: Status = {
+        AFC: { current_state: 'Idle', current_lane: null },
+        [`AFC_lane ${lane}`]: { loaded_to_hub: false, tool_loaded: false, load: false, filament_status: 'Not Ready', status: 'None' },
+      };
+      if (previous === lane) diff.AFC = { ...diff.AFC, current_load: null };
+      this.update(diff);
+    }
+    this.#respond(`// ${command} done`);
   }
 
   async #handle(ws: WebSocketRoute, raw: string): Promise<void> {
@@ -616,41 +546,6 @@ export class MockMoonraker {
     };
   }
 
-  /** Updates the fixture after a confirmed AFC command so the subscription can refresh the screen. */
-  #afcCommand(command: string, lane: string | null): void {
-    if (!lane || !this.status[`AFC_lane ${lane}`]) this.#fail(`Unknown lane ${lane ?? ''}`);
-    const current = this.status.AFC?.current_load;
-    const previous = typeof current === 'string' ? current : null;
-    if (command === 'TOOL_UNLOAD') {
-      this.update({
-        AFC: { current_load: null, current_state: 'Idle', current_lane: null },
-        [`AFC_lane ${lane}`]: { tool_loaded: false, filament_status: 'Ready', status: 'Loaded' },
-      });
-    } else if (command === 'TOOL_LOAD' || command === 'CHANGE_TOOL') {
-      const diff: Status = {
-        AFC: { current_load: lane, current_state: 'Idle', current_lane: null, error_state: false },
-        [`AFC_lane ${lane}`]: { tool_loaded: true, load: true, prep: true, filament_status: 'In Tool', status: 'Tooled' },
-      };
-      if (previous && previous !== lane) {
-        diff[`AFC_lane ${previous}`] = { tool_loaded: false, filament_status: 'Ready', status: 'Loaded' };
-      }
-      this.update(diff);
-    } else if (command === 'HUB_LOAD') {
-      this.update({
-        AFC: { current_state: 'Idle', current_lane: null },
-        [`AFC_lane ${lane}`]: { loaded_to_hub: true, load: true, prep: true, status: 'Loaded' },
-      });
-    } else {
-      const diff: Status = {
-        AFC: { current_state: 'Idle', current_lane: null },
-        [`AFC_lane ${lane}`]: { loaded_to_hub: false, tool_loaded: false, load: false, filament_status: 'Not Ready', status: 'None' },
-      };
-      if (previous === lane) diff.AFC = { ...diff.AFC, current_load: null };
-      this.update(diff);
-    }
-    this.#respond(`// ${command} done`);
-  }
-
   #spoolProxy(params: Record<string, unknown>): Record<string, unknown> {
     if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
     if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
@@ -797,4 +692,109 @@ export class MockMoonraker {
     }
     return 'ok';
   }
+}
+
+export type AfcScenario = 'ready' | 'loading' | 'error';
+
+/** Documented AFC commands the mock reports from `printer.gcode.help` when an AFC fixture is installed. */
+export const AFC_HELP: Record<string, string> = {
+  TOOL_LOAD: 'Load lane into tool',
+  TOOL_UNLOAD: 'Unload from tool head',
+  CHANGE_TOOL: 'change filaments in tool head',
+  HUB_LOAD: 'Load lane into hub',
+  LANE_UNLOAD: 'Unload lane from extruder',
+};
+
+function afcLane(name: string, index: number, map: string, fields: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name,
+    unit: 'Turtle_1',
+    hub: 'Turtle_1',
+    extruder: 'extruder',
+    buffer: 'Turtle_1',
+    buffer_status: 'Advancing',
+    lane: index,
+    map,
+    load: false,
+    prep: false,
+    tool_loaded: false,
+    loaded_to_hub: false,
+    material: '',
+    filament_name: '',
+    color: '',
+    weight: 0,
+    spool_id: null,
+    filament_status: 'Not Ready',
+    status: 'None',
+    runout_lane: null,
+    ...fields,
+  };
+}
+
+/** Fixture shaped like `afc.get_status` and `AFCLane.get_status`. Not a recording of a printer. */
+export function afcFixture(mode: AfcScenario): Status {
+  const loading = mode === 'loading';
+  const error = mode === 'error';
+  return {
+    AFC: {
+      current_load: loading ? null : 'lane2',
+      current_lane: loading ? 'lane4' : null,
+      next_lane: null,
+      current_state: loading ? 'Loading' : error ? 'Error' : 'Idle',
+      current_toolchange: mode === 'ready' ? 2 : 0,
+      number_of_toolchanges: mode === 'ready' ? 8 : 0,
+      error_state: error,
+      bypass_state: false,
+      position_saved: loading,
+      units: ['Box_Turtle Turtle_1'],
+      lanes: ['lane1', 'lane2', 'lane3', 'lane4'],
+      extruders: ['extruder'],
+      hubs: ['Turtle_1'],
+      buffers: ['Turtle_1'],
+      message: error ? { message: 'Filament failed to load to the toolhead', type: 'error' } : { message: '', type: '' },
+    },
+    'AFC_BoxTurtle Turtle_1': {
+      lanes: ['lane1', 'lane2', 'lane3', 'lane4'],
+      extruders: ['extruder'],
+      hubs: ['Turtle_1'],
+      buffers: ['Turtle_1'],
+    },
+    'AFC_lane lane1': afcLane('lane1', 1, 'T1', { runout_lane: 'lane2' }),
+    'AFC_lane lane2': afcLane('lane2', 2, 'T0', {
+      load: true,
+      prep: true,
+      tool_loaded: !loading,
+      loaded_to_hub: true,
+      material: 'ABS',
+      filament_name: 'Polymaker ABS',
+      color: '#3D441E',
+      weight: 497.2,
+      spool_id: 35,
+      filament_status: loading ? 'Ready' : 'In Tool',
+      status: loading ? 'Loaded' : 'Tooled',
+    }),
+    'AFC_lane lane3': afcLane('lane3', 3, 'T2', {
+      load: true,
+      prep: true,
+      loaded_to_hub: true,
+      material: 'PLA',
+      filament_name: 'Prusament PLA',
+      color: '#ff8800',
+      weight: 210,
+      spool_id: 12,
+      filament_status: 'Ready',
+      status: 'Loaded',
+    }),
+    'AFC_lane lane4': afcLane('lane4', 4, 'T3', {
+      load: true,
+      prep: true,
+      material: 'PETG',
+      filament_name: 'Polymaker PETG',
+      color: '#3ee0f0',
+      weight: 800,
+      spool_id: 4,
+      filament_status: loading ? 'Tool Loading' : 'Ready',
+      status: loading ? 'Tool Loading' : 'None',
+    }),
+  };
 }
