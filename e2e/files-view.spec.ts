@@ -3,8 +3,8 @@ import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
 import { defaultFiles, type MockFile } from './mockMoonraker';
 
 /**
- * List stays the default. Folders is another view of the same Moonraker directory listing:
- * folder cards, then the G-code in that directory. Nothing here flattens or invents paths.
+ * List stays the default. Thumbnails (stored as filesViewMode "folders") is the same Moonraker
+ * directory listing: folder cards, then the G-code in that directory. Nothing here flattens or invents paths.
  */
 
 const UI_KEY = 'layr.ui';
@@ -60,7 +60,8 @@ test.describe('files view modes', () => {
     await expect(page.getByRole('list', { name: 'Files', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /SB_main_body/ })).toHaveCount(0);
 
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
+    await expect(page.getByRole('radiogroup', { name: 'File view' }).getByRole('radio')).toHaveText(['List', 'Thumbnails']);
     await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'G-code', exact: true })).toBeVisible();
     await expect(page.getByRole('list', { name: 'Files', exact: true })).toHaveCount(0);
@@ -93,8 +94,8 @@ test.describe('files view modes', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
 
     // The detail sheet covers the toolbar, so activate the control directly. Only the view preference changes.
-    await page.locator('.view button', { hasText: 'Folders' }).evaluate((button: HTMLButtonElement) => button.click());
-    await expect(page.locator('.view button', { hasText: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+    await page.locator('.view button', { hasText: 'Thumbnails' }).evaluate((button: HTMLButtonElement) => button.click());
+    await expect(page.locator('.view button', { hasText: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('.sort button', { hasText: 'Name' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('h2.path')).toHaveText('calibration');
     await expect(page.getByRole('dialog').getByRole('heading', { name: /first layer #2/ })).toBeVisible();
@@ -110,12 +111,13 @@ test.describe('files view modes', () => {
   test('the choice is saved and stays in sync with Settings', async ({ page }) => {
     await openWithMock(page, 'files', { scenario: 'ready' });
     await page.getByRole('radio', { name: 'Name' }).click();
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
     await expect.poll(() => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}').filesViewMode, UI_KEY)).toBe('folders');
 
     await page.getByRole('link', { name: 'Settings' }).click();
     const browsing = page.getByRole('radiogroup', { name: 'File browsing' });
-    await expect(browsing.getByRole('radio', { name: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+    await expect(browsing.getByRole('radio')).toHaveText(['List', 'Thumbnails']);
+    await expect(browsing.getByRole('radio', { name: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
     await browsing.getByRole('radio', { name: 'List' }).click();
 
     await page.getByRole('link', { name: 'Files' }).click();
@@ -123,10 +125,10 @@ test.describe('files view modes', () => {
     await expect(page.getByRole('list', { name: 'Files', exact: true })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Name' })).toHaveAttribute('aria-checked', 'true');
 
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
     await page.reload();
     await expect(page.getByRole('status', { name: /Printer status/ })).not.toHaveText(/Connecting|Offline|Not set up/);
-    await expect(page.getByRole('radio', { name: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('radio', { name: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
   });
 
@@ -146,7 +148,7 @@ test.describe('files view modes', () => {
       localStorage.setItem(key, JSON.stringify({ filesViewMode: 'folder', displayName: 'Kept name' }));
     }, UI_KEY);
     await openWithMock(page, 'files', { scenario: 'ready' });
-    await expect(page.getByRole('radio', { name: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('radio', { name: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Kept name' })).toBeVisible();
   });
@@ -157,7 +159,7 @@ test.describe('files view modes', () => {
       files: treeFiles(),
       emptyDirs: ['my parts #1/empty bin', 'orca/voron/trident/panels/left/hardware'],
     });
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
     await expect(page.getByRole('list', { name: 'Folders' }).getByRole('button')).toHaveText([/my parts #1/, /orca/]);
     await expect(page.getByRole('button', { name: /skirt/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /very_long_panel/ })).toHaveCount(0);
@@ -182,7 +184,7 @@ test.describe('files view modes', () => {
 
   test('folders mode still confirms print and delete, and blocks the active file', async ({ page }) => {
     const mock = await openWithMock(page, 'files', { scenario: 'ready' });
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
     await page.getByRole('button', { name: /cable_chain_mount_PETG/ }).click();
     await page.getByRole('button', { name: 'Print', exact: true }).click();
     await confirmDialog(page, 'Go back')();
@@ -194,7 +196,7 @@ test.describe('files view modes', () => {
 
   test('the file being printed cannot be started or deleted from folder cards', async ({ page }) => {
     const mock = await openWithMock(page, 'files', { scenario: 'printing' });
-    await page.getByRole('radio', { name: 'Folders' }).click();
+    await page.getByRole('radio', { name: 'Thumbnails' }).click();
     await page.getByRole('button', { name: /stealthburner/ }).click();
     await page.getByRole('button', { name: /SB_main_body/ }).click();
     await expect(page.getByRole('button', { name: 'Print', exact: true })).toBeDisabled();
@@ -212,7 +214,7 @@ for (const vp of VIEWPORTS) {
       await openWithMock(page, 'files', { scenario: 'ready' });
       await expect(page.getByRole('button', { name: /Voron_Design_Cube/ })).toBeVisible();
       await expectCleanLayout(page);
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await expect(page.getByRole('img', { name: /Voron_Design_Cube/ })).toBeVisible();
       await expectCleanLayout(page);
     });
@@ -223,7 +225,7 @@ for (const vp of VIEWPORTS) {
         files: treeFiles(),
         emptyDirs: ['my parts #1/empty bin', 'orca/voron/trident/panels/left/hardware'],
       });
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await expectCleanLayout(page);
 
       await page.getByRole('button', { name: /orca/ }).click();
@@ -249,11 +251,12 @@ for (const vp of VIEWPORTS) {
     test('settings file browsing control', async ({ page }) => {
       await openWithMock(page, 'settings', { scenario: 'ready' });
       const browsing = page.getByRole('radiogroup', { name: 'File browsing' });
+      await expect(browsing.getByRole('radio')).toHaveText(['List', 'Thumbnails']);
       await expect(browsing.getByRole('radio', { name: 'List' })).toHaveAttribute('aria-checked', 'true');
-      await browsing.getByRole('radio', { name: 'Folders' }).click();
+      await browsing.getByRole('radio', { name: 'Thumbnails' }).click();
       await expectCleanLayout(page);
       await page.getByRole('link', { name: 'Files' }).click();
-      await expect(page.getByRole('radio', { name: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+      await expect(page.getByRole('radio', { name: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
       await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
     });
   });
