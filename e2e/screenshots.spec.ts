@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { openWithMock, VIEWPORTS } from './helpers';
-import { defaultFiles, type MockFile, type MockOptions } from './mockMoonraker';
+import { defaultFiles, MOONRAKER, type MockFile, type MockOptions } from './mockMoonraker';
 
 /**
  * Regenerates docs/screenshots from the real production bundle connected to the mock Moonraker in
@@ -101,6 +102,66 @@ const SHOTS: Shot[] = [
   { name: 'move-printing', route: 'move', options: { scenario: 'printing' } },
   { name: 'heat', route: 'heat', options: { scenario: 'printing' } },
   { name: 'extrude', route: 'extrude', options: { scenario: 'paused' } },
+  {
+    name: 'home-spool',
+    route: 'home',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('link', { name: /Galaxy Black/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'home-printing-spool',
+    route: 'home',
+    options: { scenario: 'printing', spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByText(/Galaxy Black/)).toBeVisible();
+    },
+  },
+  {
+    name: 'extrude-spool',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: /Galaxy Black/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-browse',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /Galaxy Black/ }).click();
+      await expect(page.getByRole('dialog', { name: 'Spools' })).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-confirm',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /Galaxy Black/ }).click();
+      await page.getByRole('button', { name: /Arctic White/ }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-offline',
+    route: 'extrude',
+    options: { scenario: 'ready', spoolman: 'offline' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: /Spoolman offline/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'files-spool',
+    route: 'files',
+    options: { scenario: 'ready', spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /cable_chain_mount_PETG/ }).click();
+      await expect(page.getByText(/Active spool/)).toBeVisible();
+    },
+  },
   { name: 'fans', route: 'fans', options: { scenario: 'printing' } },
   { name: 'macros', route: 'macros', options: { scenario: 'ready' } },
   {
@@ -136,6 +197,7 @@ test.describe('screenshots @screenshot', () => {
     for (const shot of SHOTS) {
       test(`${vp.name} ${shot.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
+        if (shot.name.includes('spool')) await seedIntegrations(page, { spoolman: true }, MOONRAKER);
         await openWithMock(page, shot.route, { ...shot.options, fixedClock: true });
         await shot.prepare?.(page);
         await page.evaluate(() => document.fonts.ready);

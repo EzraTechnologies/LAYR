@@ -10,10 +10,12 @@
   import { ConsoleLog } from './lib/console/console.svelte';
   import { setApp } from './lib/context';
   import { FileBrowser } from './lib/files/browser.svelte';
+  import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
   import { parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
+  import { SpoolmanLive } from './lib/spoolman/live.svelte';
   import { Ui } from './lib/ui.svelte';
   import Console from './views/Console.svelte';
   import Dashboard from './views/Dashboard.svelte';
@@ -40,9 +42,10 @@
   const files = new FileBrowser(connection);
   const ui = new Ui(store.commands, consoleLog);
   const settings = new SettingsStore();
+  const spoolman = new SpoolmanLive(printer, connection, store.commands, (confirm) => ui.confirm(confirm));
 
   // svelte-ignore state_referenced_locally
-  setApp({ config, printer, store, ui, files, console: consoleLog, settings, consoleDraft: { value: '' } });
+  setApp({ config, printer, store, ui, files, console: consoleLog, settings, spoolman, consoleDraft: { value: '' } });
 
   let route = $state<RouteId>(parseRoute(location.hash));
 
@@ -61,8 +64,15 @@
     store.start();
   });
 
+  $effect(() => {
+    if (integrations.value.spoolman) spoolman.start(connection);
+    else spoolman.stop();
+    return () => spoolman.stop();
+  });
+
   onDestroy(() => {
     window.removeEventListener('hashchange', onHashChange);
+    spoolman.stop();
     store.stop();
     files.dispose();
     consoleLog.dispose();
