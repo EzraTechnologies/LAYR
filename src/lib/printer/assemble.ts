@@ -1,3 +1,4 @@
+import { mapAfc } from '../afc/map';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
 import type { ConfigSettings, RawStatus } from '../moonraker/types';
@@ -88,6 +89,7 @@ export function assembleState(input: AssembleInputs): PrinterState {
     limits: structuredClone(info.limits),
     idleState: typeof raw.idle_timeout?.state === 'string' ? raw.idle_timeout.state : null,
     missingObjects: connected ? input.missingObjects : [],
+    afc: connected ? mapAfc(raw, input.objects) : null,
     now: input.now,
   };
 }

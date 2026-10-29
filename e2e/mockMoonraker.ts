@@ -188,6 +188,34 @@ const CONTROL = new Set([
 ]);
 
 export type SpoolmanMode = 'absent' | 'ready' | 'offline' | 'error';
+/** `off` printers have no AFC objects. `unsupported` has lanes but not the documented motion commands. */
+export type AfcMode = 'off' | 'ready' | 'error' | 'busy' | 'unsupported';
+
+function afcStatus(mode: Exclude<AfcMode, 'off'>): Status {
+  const lanes = [
+    { name: 'lane1', map: 'T0', material: 'PLA', color: '#1c1c1c', weight: 812, filament_status: 'Ready', lane: 0, unit: 'BoxTurtle' },
+    { name: 'lane2', map: 'T1', material: 'ASA', color: '#ff6a00', weight: 420.4, filament_status: 'In Tool', lane: 1, unit: 'BoxTurtle', tool_loaded: true, load: true },
+    { name: 'lane3', map: 'T2', material: 'PETG', color: 'blue', weight: 0, filament_status: 'Not Ready', lane: 2, unit: 'BoxTurtle' },
+    { name: 'lane4', map: '', material: '', color: '', filament_status: '', lane: 3, unit: 'BoxTurtle' },
+  ];
+  const status: Status = {
+    AFC: {
+      current_load: mode === 'busy' ? '' : 'lane2',
+      current_lane: 'lane2',
+      current_state: mode === 'busy' ? 'Loading' : 'Idle',
+      error_state: mode === 'error',
+      bypass_state: false,
+      message: mode === 'error' ? { message: 'Lane sensor did not trigger', type: 'error' } : '',
+      lanes: lanes.map((lane) => lane.name),
+      units: ['BoxTurtle'],
+      hubs: ['hub'],
+      buffers: [],
+      extruders: ['extruder'],
+    },
+  };
+  for (const lane of lanes) status[`AFC_stepper ${lane.name}`] = { ...lane };
+  return status;
+}
 
 interface MockSpool {
   id: number;
@@ -216,6 +244,8 @@ export interface MockOptions {
   spoolman?: SpoolmanMode;
   /** Macro names that should be rejected by Klipper. */
   failMacros?: string[];
+  /** AFC Klipper objects. Off printers omit them, so the AFC screen stays out of the nav. */
+  afc?: AfcMode;
 }
 
 export class MockMoonraker {
@@ -228,6 +258,7 @@ export class MockMoonraker {
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
   spoolman: SpoolmanMode;
+  afc: AfcMode;
   activeSpoolId: number | null = 2;
   readonly failMacros: Set<string>;
   #ws: WebSocketRoute | null = null;
@@ -236,7 +267,9 @@ export class MockMoonraker {
 
   constructor(options: MockOptions = {}) {
     const scenario = options.scenario ?? 'ready';
+    this.afc = options.afc ?? 'off';
     this.status = baseStatus(scenario, options.homed ?? false);
+    if (this.afc !== 'off') Object.assign(this.status, afcStatus(this.afc));
     for (const [name, fields] of Object.entries(options.status ?? {})) this.status[name] = { ...this.status[name], ...fields };
     this.klippy = scenario === 'shutdown' ? 'shutdown' : scenario === 'startup' ? 'startup' : 'ready';
     this.files = options.files ?? defaultFiles();
@@ -409,6 +442,8 @@ export class MockMoonraker {
         return 'ok';
       case 'printer.gcode.script':
         return this.#script(String(params.script));
+      case 'printer.gcode.help':
+        return this.#gcodeHelp();
       default:
         throw new Error(`Method not found: ${method}`);
     }
@@ -432,6 +467,20 @@ export class MockMoonraker {
       disk_usage: { total: 30e9, used: 8e9, free: 22e9 },
       root_info: { name: 'gcodes', permissions: 'rw' },
     };
+  }
+
+  #gcodeHelp(): Record<string, string> {
+    const help: Record<string, string> = {};
+    for (const [name, macro] of Object.entries(MACROS)) help[name] = macro.description ?? '';
+    if (this.afc === 'ready' || this.afc === 'error' || this.afc === 'busy') {
+      help.CHANGE_TOOL = 'Switch to another lane';
+      help.TOOL_LOAD = 'Load a lane';
+      help.TOOL_UNLOAD = 'Unload the toolhead';
+      help.AFC_CLEAR_MESSAGE = 'Clear the AFC message';
+    } else if (this.afc === 'unsupported') {
+      help.AFC_CLEAR_MESSAGE = 'Clear the AFC message';
+    }
+    return help;
   }
 
   #fail(message: string): never {
@@ -542,6 +591,26 @@ export class MockMoonraker {
           break;
         case 'STATUS':
           this.#respond('// Klipper state: Ready');
+          break;
+        case 'CHANGE_TOOL':
+        case 'TOOL_LOAD': {
+          const lane = arg('LANE');
+          if (lane && this.status.AFC) {
+            this.update({
+              AFC: { current_load: lane, current_state: 'Idle' },
+              [`AFC_stepper ${lane}`]: { filament_status: 'In Tool', tool_loaded: true, load: true },
+            });
+          }
+          this.#respond(`// ${word} done`);
+          break;
+        }
+        case 'TOOL_UNLOAD':
+          if (this.status.AFC) this.update({ AFC: { current_load: '', current_state: 'Idle' } });
+          this.#respond(`// ${word} done`);
+          break;
+        case 'AFC_CLEAR_MESSAGE':
+          if (this.status.AFC) this.update({ AFC: { message: '', error_state: false } });
+          this.#respond('// AFC message cleared');
           break;
         default:
           if (word in MACROS) {

@@ -1,3 +1,5 @@
+import { prepareAfcCommand } from '../afc/plan';
+import type { AfcCommand } from '../afc/types';
 import { objectSuffix } from '../moonraker/objects';
 import type { SpoolmanFacts } from '../spoolman/types';
 import { prepareSpoolmanCommand } from '../spoolman/plan';
@@ -56,7 +58,8 @@ export type PrinterCommand =
   | { kind: 'set_active_spool'; spoolId: number }
   | { kind: 'clear_active_spool'; authorized?: boolean }
   /** Runs a parameter-free unload macro. The spool is cleared only after Klipper accepts it. */
-  | { kind: 'unload_for_spool_clear'; macro: string };
+  | { kind: 'unload_for_spool_clear'; macro: string }
+  | AfcCommand;
 
 export type CommandKind = PrinterCommand['kind'];
 
@@ -547,5 +550,10 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState, con
     case 'clear_active_spool':
     case 'unload_for_spool_clear':
       return prepareSpoolmanCommand(command, state, context.spoolman);
+    case 'afc_change_tool':
+    case 'afc_load':
+    case 'afc_unload':
+    case 'afc_clear_message':
+      return prepareAfcCommand(command, state, context.gcodeCommands);
   }
 }

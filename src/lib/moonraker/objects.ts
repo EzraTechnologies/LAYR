@@ -1,6 +1,9 @@
+import { afcSubscriptionObjects } from '../afc/map';
+
 /**
  * Klipper objects LAYR subscribes to, and the fields requested from each.
  * Requesting explicit fields (instead of `null` = everything) keeps WebSocket traffic and UI updates low.
+ * AFC objects are the exception: versions disagree on field names, so a present object is subscribed in full.
  */
 
 export const CORE_OBJECTS: Record<string, string[]> = {
@@ -63,7 +66,8 @@ const MAX_FANS = 8;
 const MAX_LIGHTS = 6;
 
 export interface SubscriptionPlan {
-  objects: Record<string, string[]>;
+  /** `null` asks Moonraker for every field. Used for AFC, whose status keys vary by version. */
+  objects: Record<string, string[] | null>;
   /** Core objects that this printer does not provide. */
   missing: string[];
 }
@@ -87,7 +91,7 @@ export function isFanObject(name: string): boolean {
  */
 export function planSubscription(available: readonly string[]): SubscriptionPlan {
   const availableSet = new Set(available);
-  const objects: Record<string, string[]> = {};
+  const objects: Record<string, string[] | null> = {};
   const missing: string[] = [];
 
   for (const [name, fields] of Object.entries(CORE_OBJECTS)) {
@@ -119,6 +123,7 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
   for (const name of available.filter((n) => startsWithAny(n, FILAMENT_SENSOR_PREFIXES))) {
     objects[name] = ['filament_detected', 'enabled'];
   }
+  for (const name of afcSubscriptionObjects(available)) objects[name] = null;
 
   return { objects, missing };
 }

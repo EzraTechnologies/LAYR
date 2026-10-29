@@ -11,9 +11,11 @@ deploy it over KlipperScreen until you have checked it in a browser. See
 [docs/trident-checklist.md](docs/trident-checklist.md).
 
 Spoolman (browse spools, set the active spool, clear it only after a confirmed unload) is in the
-Chromium UI when Moonraker reports a `spoolman` component. Printers without it keep the previous
-navigation. The native Qt controller has its own Filament screen for the same rules. Neither has
-been re-tested on a Pi for this change. See [docs/chromium-integrations.md](docs/chromium-integrations.md).
+Chromium UI when Moonraker reports a `spoolman` component. AFC lanes appear only when Klipper
+reports AFC objects, and the lane buttons are the commands that printer registers. Printers
+without those features keep the previous navigation. The native Qt controller has its own Filament
+screen for Spoolman and does not show AFC. None of this has been re-tested on a Pi. See
+[docs/chromium-integrations.md](docs/chromium-integrations.md).
 
 | 1024×600 | 800×480 |
 | --- | --- |
@@ -178,7 +180,7 @@ that does not restart Klipper.
 src/
   App.svelte                    Hash routing, confirmation, toasts, dim overlay
   components/                   Nav rail, job, temperatures, jog helpers, keyboard, e-stop
-  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings
+  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, optional Spools and AFC
   lib/
     config.ts                   URL resolution. No implicit endpoint.
     moonraker/                  WebSocket client, subscriptions, status and control mapping
@@ -187,6 +189,7 @@ src/
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
     spoolman/                   Moonraker Spoolman catalogue, confirmations, per-printer scope
+    afc/                        AFC object mapping and guarded lane commands
 deploy/                         check, install, display switch, rollback, uninstall
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket

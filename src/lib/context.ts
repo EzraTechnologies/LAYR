@@ -4,6 +4,7 @@ import type { ConsoleLog } from './console/console.svelte';
 import type { FileBrowser } from './files/browser.svelte';
 import type { PrinterStore } from './printer/store.svelte';
 import type { SettingsStore } from './settings.svelte';
+import type { GcodeHelp } from './integrations/gcodeHelp.svelte';
 import type { SpoolmanStore } from './spoolman/store.svelte';
 import type { Ui } from './ui.svelte';
 
@@ -16,6 +17,8 @@ export interface AppContext {
   console: ConsoleLog;
   settings: SettingsStore;
   spoolman: SpoolmanStore;
+  /** Registered Klipper commands from `printer.gcode.help`. Null until that read finishes. */
+  gcodeHelp: GcodeHelp;
   /** Text queued for the console input, e.g. a macro that needs parameters. */
   consoleDraft: { value: string };
 }

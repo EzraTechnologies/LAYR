@@ -65,6 +65,14 @@ const SHOTS: Shot[] = [
   { name: 'settings', route: 'settings', options: { scenario: 'ready' } },
   { name: 'filament', route: 'filament', options: { scenario: 'ready', homed: true, spoolman: 'ready' } },
   {
+    name: 'afc',
+    route: 'afc',
+    options: { scenario: 'ready', homed: true, afc: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: 'Change' }).first()).toBeVisible();
+    },
+  },
+  {
     name: 'home-spool',
     route: 'home',
     options: { scenario: 'ready', homed: true, spoolman: 'ready' },

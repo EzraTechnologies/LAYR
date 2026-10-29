@@ -10,6 +10,7 @@
   import { ConsoleLog } from './lib/console/console.svelte';
   import { setApp } from './lib/context';
   import { FileBrowser } from './lib/files/browser.svelte';
+  import { GcodeHelp } from './lib/integrations/gcodeHelp.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
   import { parseRoute, visibleRoutes, type RouteId } from './lib/routes';
@@ -24,6 +25,7 @@
   import Heat from './views/Heat.svelte';
   import Macros from './views/Macros.svelte';
   import Move from './views/Move.svelte';
+  import Afc from './views/Afc.svelte';
   import Filament from './views/Filament.svelte';
   import Settings from './views/Settings.svelte';
 
@@ -43,13 +45,19 @@
   const ui = new Ui(store.commands, consoleLog);
   const settings = new SettingsStore();
   const spoolman = new SpoolmanStore(printer.id, connection, store.commands, ui, (facts) => store.updateCommandContext({ spoolman: facts }));
+  const gcodeHelp = new GcodeHelp(connection, (names) => store.updateCommandContext({ gcodeCommands: names }));
 
   // svelte-ignore state_referenced_locally
-  setApp({ config, printer, store, ui, files, console: consoleLog, settings, spoolman, consoleDraft: { value: '' } });
+  setApp({ config, printer, store, ui, files, console: consoleLog, settings, spoolman, gcodeHelp, consoleDraft: { value: '' } });
 
   let route = $state<RouteId>(parseRoute(location.hash));
   const spoolPhase = $derived(spoolman.facts.phase);
-  const routes = $derived(visibleRoutes({ spoolman: spoolPhase === 'ready' || spoolPhase === 'offline' || spoolPhase === 'error' }));
+  const routes = $derived(
+    visibleRoutes({
+      spoolman: spoolPhase === 'ready' || spoolPhase === 'offline' || spoolPhase === 'error',
+      afc: store.state.afc !== null,
+    }),
+  );
 
   function onHashChange() {
     route = parseRoute(location.hash);
@@ -63,6 +71,10 @@
 
   $effect(() => {
     spoolman.observe(store.state.transport, store.state.klippy, store.state.printerId, store.state.reconnectAttempt);
+  });
+
+  $effect(() => {
+    gcodeHelp.observe(store.state.transport, store.state.klippy);
   });
 
   onMount(() => {
@@ -111,6 +123,8 @@
       <Extrude />
     {:else if route === 'filament'}
       <Filament />
+    {:else if route === 'afc'}
+      <Afc />
     {:else if route === 'fans'}
       <Fans />
     {:else if route === 'macros'}

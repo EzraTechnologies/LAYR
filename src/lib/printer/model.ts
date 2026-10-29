@@ -1,3 +1,5 @@
+import type { AfcSnapshot } from '../afc/types';
+
 /**
  * Printer view model. The live Moonraker source produces `PrinterState`; UI components only ever read this shape.
  */
@@ -189,6 +191,8 @@ export interface PrinterState {
   idleState: string | null;
   /** Requested Klipper objects that this printer does not provide. */
   missingObjects: string[];
+  /** AFC snapshot while Klipper is ready and an AFC object exists. Null otherwise, including offline. */
+  afc: AfcSnapshot | null;
   /** Epoch ms "now" used for clock/ETA rendering. */
   now: number;
 }
@@ -228,6 +232,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     limits: structuredClone(FALLBACK_LIMITS),
     idleState: null,
     missingObjects: [],
+    afc: null,
     now,
   };
 }

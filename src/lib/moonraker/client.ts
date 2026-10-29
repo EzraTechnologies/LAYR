@@ -41,6 +41,7 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.spoolman.status',
   'server.spoolman.get_spool_id',
   'server.spoolman.proxy',
+  'printer.gcode.help',
 ]);
 
 /**
