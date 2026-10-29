@@ -2,6 +2,9 @@ import type { KlippyState, TransportState } from '../printer/model';
 import { parseSpoolmanNotice, spoolmanParamsAllowed, type SpoolmanNotice } from '../spoolman/api';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
+import { AFC_OBJECT, afcCommandsFromHelp } from '../afc/objects';
+import { mmuCommandsFromHelp } from '../mmu/happyhare';
+import { integrationEnabled } from '../integrations/runtime';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -29,6 +32,7 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.connection.identify',
   'server.info',
   'server.gcode_store',
+  'printer.gcode.help',
   'printer.info',
   'printer.objects.list',
   'printer.objects.query',
@@ -103,6 +107,10 @@ export type ClientEvent =
       hostname: string | null;
       objects: string[];
       settings: ConfigSettings;
+      /** Documented AFC commands present in `printer.gcode.help`. Empty when AFC is not installed. */
+      afcCommands: string[];
+      /** Supported Happy Hare commands, or null when help was not queried or failed. */
+      gcodeCommands: string[] | null;
     }
   /** Incremental `notify_status_update` diff. */
   | { type: 'status'; diff: RawStatus }
@@ -391,6 +399,23 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
+      // One help read, and only for a changer that is switched on and listed.
+      // Happy Hare and AFC are exclusive, so this is a single query. Failure is not a disconnect.
+      let afcCommands: string[] = [];
+      let gcodeCommands: string[] | null = null;
+      const wantAfc = objects.includes(AFC_OBJECT) && integrationEnabled('afc');
+      const wantMmu = objects.includes('mmu') && integrationEnabled('happyHare');
+      if (wantAfc || wantMmu) {
+        try {
+          const help = await this.#call<unknown>('printer.gcode.help', undefined, 2500);
+          if (wantAfc) afcCommands = afcCommandsFromHelp(help);
+          if (wantMmu) gcodeCommands = mmuCommandsFromHelp(help);
+        } catch {
+          if (wantAfc) afcCommands = [];
+          if (wantMmu) gcodeCommands = null;
+        }
+      }
+      if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
         status: result.status ?? {},
@@ -398,6 +423,8 @@ export class MoonrakerClient {
         hostname: printer.hostname?.trim() || null,
         objects,
         settings,
+        afcCommands,
+        gcodeCommands,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);

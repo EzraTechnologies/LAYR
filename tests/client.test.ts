@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { Backoff } from '../src/lib/moonraker/backoff';
 import {
   CONTROL_METHODS,
@@ -82,6 +83,8 @@ describe('MoonrakerClient', () => {
     expect(subscribed).toContain('temperature_sensor chamber');
     expect(subscribed).not.toContain('heater_bed');
     expect(subscribed).not.toContain('display_status');
+    expect(subscribed).not.toContain('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
 
     const snapshot = events.find((e) => e.type === 'snapshot');
     expect(snapshot).toMatchObject({
@@ -113,8 +116,131 @@ describe('MoonrakerClient', () => {
     });
     expect(server.calls).not.toContain('printer.objects.query');
     const snapshot = events.find((e) => e.type === 'snapshot');
-    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } } });
+    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } }, gcodeCommands: null });
     client.stop();
+  });
+
+  it('does not subscribe to AFC or ask for help while the switch is off', async () => {
+    resetIntegrationRuntime();
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'AFC', 'AFC_lane lane1'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, AFC: { current_state: 'Idle' } },
+    });
+    server.gcodeHelp = { TOOL_LOAD: 'Load lane into tool' };
+    const { client } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).not.toHaveProperty('AFC');
+    expect(server.subscribeParams?.objects).not.toHaveProperty('AFC_lane lane1');
+    expect(server.calls).not.toContain('printer.gcode.help');
+    client.stop();
+  });
+
+  it('subscribes to AFC once and reads gcode help only when the AFC object exists', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: false, afc: true });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'print_stats', 'extruder', 'AFC', 'AFC_lane lane1', 'AFC_stepper lane1', 'mmu'],
+      status: {
+        webhooks: { state: 'ready' },
+        print_stats: { state: 'standby', filename: '' },
+        extruder: { temperature: 30, target: 0, power: 0 },
+        AFC: { current_state: 'Idle', current_load: null, error_state: false, lanes: ['lane1'] },
+        'AFC_lane lane1': { prep: true, load: true, filament_status: 'Ready' },
+      },
+    });
+    server.gcodeHelp = { TOOL_LOAD: 'Load lane into tool', G1: 'move' };
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    const objects = server.subscribeParams?.objects as Record<string, string[]>;
+    expect(objects.AFC).toContain('current_load');
+    expect(objects.AFC).toContain('error_state');
+    expect(objects['AFC_lane lane1']).toContain('filament_status');
+    expect(objects['AFC_stepper lane1']).toContain('prep');
+    expect(objects).not.toHaveProperty('mmu');
+    expect(server.calls.filter((method) => method === 'printer.gcode.help')).toEqual(['printer.gcode.help']);
+    expect(events.find((event) => event.type === 'snapshot')).toMatchObject({ afcCommands: ['TOOL_LOAD'] });
+
+    server.last.notify('notify_status_update', [{ AFC: { current_state: 'Loading', current_lane: 'lane1' } }]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.calls.filter((method) => method === 'printer.gcode.help')).toHaveLength(1);
+    client.stop();
+    resetIntegrationRuntime();
+  });
+
+  it('still publishes the AFC snapshot when gcode help is unavailable', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: false, afc: true });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'AFC'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, AFC: { current_state: 'Idle', error_state: false } },
+    });
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    expect(events.find((event) => event.type === 'snapshot')).toMatchObject({ afcCommands: [] });
+    expect(server.calls).toContain('printer.gcode.help');
+    expect(server.calls).toContain('printer.objects.subscribe');
+    client.stop();
+    resetIntegrationRuntime();
+  });
+
+  it('does not subscribe to Happy Hare or ask for help while the switch is off', async () => {
+    resetIntegrationRuntime();
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 1 } },
+    });
+    server.help = { MMU_LOAD: 'Load' };
+    const { client } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).not.toHaveProperty('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
+    client.stop();
+  });
+
+  it('subscribes to Happy Hare fields and keeps only registered commands', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: {
+        webhooks: { state: 'ready' },
+        extruder: { temperature: 30 },
+        mmu: { tool: 1, gate: 2, filament: 'Loaded', enabled: true },
+      },
+    });
+    server.help = { MMU_LOAD: 'Load', MMU_CHANGE_TOOL: 'Change', G28: 'Home', MMU_TEST_CONFIG: 'test' };
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    const objects = server.subscribeParams?.objects as Record<string, string[]>;
+    expect(objects.mmu).toContain('tool');
+    expect(objects.mmu).toContain('gate_status');
+    expect(objects.mmu).not.toContain('nfc');
+    expect(objects.mmu).not.toContain('sensors');
+    expect(server.calls).toContain('printer.gcode.help');
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toEqual(['MMU_LOAD', 'MMU_CHANGE_TOOL']);
+    client.stop();
+    resetIntegrationRuntime();
+  });
+
+  it('stays connected when Happy Hare command help fails', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 0 } },
+    });
+    server.help = 'error';
+    const { client, events, klippy } = setup(server);
+    client.start();
+    await flush();
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toBeNull();
+    expect(klippy()).toEqual(['ready']);
+    expect(server.calls).toContain('printer.gcode.help');
+    client.stop();
+    resetIntegrationRuntime();
   });
 
   it('reconnects with bounded exponential backoff and resets after success', async () => {

@@ -2,6 +2,7 @@
   import ConnectionCard from '../components/ConnectionCard.svelte';
   import FanSummary from '../components/FanSummary.svelte';
   import Icon from '../components/Icon.svelte';
+  import { mmuSummary } from '../lib/mmu/happyhare';
   import JobCard from '../components/JobCard.svelte';
   import TemperatureCard from '../components/TemperatureCard.svelte';
   import { app } from '../lib/context';
@@ -14,6 +15,7 @@
   const showSpoolStrip = $derived(!!spoolLine && printerState.status !== 'printing' && printerState.status !== 'paused');
 
   const online = $derived(printerState.status === 'ready' || printerState.status === 'printing' || printerState.status === 'paused');
+  const mmuLine = $derived(printerState.mmu ? mmuSummary(printerState.mmu) : '');
   const showJob = $derived(online || (printerState.status === 'error' && printerState.klippy === 'ready'));
   const unavailable = $derived(online ? 'Not configured' : 'No data');
   const alerts = $derived(log.alerts(printerState.now));
@@ -43,6 +45,12 @@
           </li>
         {/each}
       </ul>
+    {/if}
+    {#if printerState.mmu}
+      <a class="mmu-link card" href="#/mmu" title={mmuLine}>
+        <span class="mmu-kicker">Happy Hare</span>
+        <span class="mmu-summary" title={mmuLine}>{mmuLine}</span>
+      </a>
     {/if}
     {#if showJob}
       <JobCard />
@@ -101,6 +109,35 @@
     color: inherit;
     text-decoration: none;
     border-radius: var(--radius);
+  }
+
+  .mmu-link {
+    flex: none;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .mmu-kicker {
+    flex: none;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+
+  .mmu-summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: 600;
   }
 
   .alerts {

@@ -24,6 +24,8 @@ its own Filament screen for the same rules. Neither UI has been tested on a Pi.
 | ![Thumbnails, 1024×600](docs/screenshots/1024x600-files-folders.png) | ![Thumbnails, 800×480](docs/screenshots/800x480-files-folders.png) |
 | ![Spool on Extrude, 1024×600](docs/screenshots/1024x600-extrude-spool.png) | ![Spool browser, 800×480](docs/screenshots/800x480-spool-browse.png) |
 | ![Not set up, 1024×600](docs/screenshots/1024x600-not-set-up.png) | ![Offline, 800×480](docs/screenshots/800x480-offline.png) |
+| ![Happy Hare, 1024×600](docs/screenshots/1024x600-mmu.png) | ![Happy Hare, 800×480](docs/screenshots/800x480-mmu.png) |
+| ![MMU error, 1024×600](docs/screenshots/1024x600-mmu-error.png) | ![MMU printing, 800×480](docs/screenshots/800x480-mmu-printing.png) |
 
 Screenshots are captured from the production bundle talking to a mocked Moonraker
 (`npm run screenshots`). They are fixture data, not a recording of a printer.
@@ -69,6 +71,12 @@ There is no Demo mode. With no Moonraker URL, the UI stays on "not set up" and d
 temperatures or positions. A dropped connection shows Offline and keeps retrying; it never substitutes
 sample data.
 
+Happy Hare is an optional Chromium panel. It appears only when Settings → Happy Hare is on for this
+printer and Klipper lists an `mmu` object. The switch defaults off. Turning it on turns AFC off, and both
+can stay off. Tool, gate, filament, and errors come from that object's status. Load, unload, tool change,
+and recover run only when `printer.gcode.help` lists those commands, and only after a confirmation. See
+[docs/happy-hare.md](docs/happy-hare.md).
+
 ## Safety
 
 - Every printer-changing action goes through `prepareCommand` (`src/lib/actions/commands.ts`) and then
@@ -88,6 +96,7 @@ sample data.
   `printer.emergency_stop` instead of waiting in the G-code queue. Risky commands (restarts, meshes,
   `FORCE_MOVE`, and similar) get a stronger warning.
 - Emergency stop is not behind a dialog. The button has to be held so a stray tap does not fire it.
+- Happy Hare, when that Settings switch is on and the printer lists an `mmu` object, is optional on the Chromium UI. The Qt UI does not drive an MMU.
 - LAYR does not write `printer.cfg` or `moonraker.conf`, and the install scripts do not stop
   KlipperScreen unless you run `deploy/layr-display.sh to-layr`.
 
@@ -209,9 +218,10 @@ that component is enabled and Settings → Spoolman is on for this printer. An M
 src/
   App.svelte                    Hash routing, confirmation, toasts, dim overlay
   components/                   Nav rail, job, temperatures, jog helpers, keyboard, e-stop
-  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings
+  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, MMU
   lib/
     config.ts                   URL resolution. No implicit endpoint.
+    mmu/happyhare.ts            Happy Hare status parsing and confirmed MMU commands
     moonraker/                  WebSocket client, subscriptions, status and control mapping
     printer/                    PrinterState, live source, throttled store
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
@@ -242,6 +252,7 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
   opt-in udev rule in `deploy/layr-hdmi-input.sh` matches the rule that did, on a Pi 4 with a BTT
   HDMI7. Run the checks in [docs/pi-test.md](docs/pi-test.md) before relying on it. CSS hiding still
   works in a normal browser. Do not disable the touchscreen or a physical mouse.
+- Happy Hare on the Chromium UI is fixture-tested only. It has not been run against a real MMU, a tool change, or a 5-inch or 7-inch panel. See [docs/happy-hare.md](docs/happy-hare.md).
 - WPE / Cog is optional, off by default, and was not launched on Bookworm hardware here. Debian
   Bookworm's `wpewebkit` package has no security support. WebKitGTK is a different port and is not used.
 - One printer per instance.

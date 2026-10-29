@@ -13,7 +13,7 @@
   import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
-  import { parseRoute, type RouteId } from './lib/routes';
+  import { navItems, navigate, parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
   import { SpoolmanLive } from './lib/spoolman/live.svelte';
   import { Ui } from './lib/ui.svelte';
@@ -24,8 +24,10 @@
   import Files from './views/Files.svelte';
   import Heat from './views/Heat.svelte';
   import Macros from './views/Macros.svelte';
+  import Mmu from './views/Mmu.svelte';
   import Move from './views/Move.svelte';
   import Settings from './views/Settings.svelte';
+  import { integrationRouteHidden } from './lib/integrations/preferences';
 
   interface Props {
     config: AppConfig;
@@ -57,6 +59,10 @@
     const root = document.documentElement;
     root.classList.toggle('theme-black', settings.value.theme === 'black');
     root.classList.toggle('hide-cursor', settings.value.hideCursor);
+  });
+
+  $effect(() => {
+    if (integrationRouteHidden(route, integrations.value)) navigate('home');
   });
 
   onMount(() => {
@@ -95,7 +101,7 @@
 </script>
 
 <div class="app">
-  <NavRail current={route} />
+  <NavRail current={route} items={navItems(store.state.afc !== null, store.state.mmu !== null)} />
   <TopBar />
 
   <main class="content" id="main">
@@ -113,6 +119,8 @@
       <Fans />
     {:else if route === 'macros'}
       <Macros />
+    {:else if route === 'mmu'}
+      <Mmu />
     {:else if route === 'console'}
       <Console />
     {:else if route === 'settings'}

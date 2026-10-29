@@ -30,6 +30,7 @@ describe('format', () => {
 
   it('parses hash routes', () => {
     expect(parseRoute('#/files')).toBe('files');
+    expect(parseRoute('#/mmu')).toBe('mmu');
     expect(parseRoute('')).toBe('home');
     expect(parseRoute('#/nope')).toBe('home');
   });

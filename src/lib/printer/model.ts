@@ -1,3 +1,5 @@
+import type { AfcStatus } from '../afc/types';
+
 /**
  * Printer view model. The live Moonraker source produces `PrinterState`; UI components only ever read this shape.
  */
@@ -133,6 +135,67 @@ export interface FilamentSensor {
   enabled: boolean | null;
 }
 
+/** Documented Happy Hare `gate_status` values, plus an honest bucket for anything else. */
+export type MmuGateStatus = 'unknown' | 'empty' | 'available' | 'buffer' | 'unrecognized';
+
+/** One physical gate, using only values Happy Hare actually sent. */
+export interface MmuGate {
+  index: number;
+  status: MmuGateStatus | null;
+  /** Present when `status` is `unrecognized` and the raw value was an integer. */
+  statusCode: number | null;
+  filamentName: string | null;
+  material: string | null;
+  /** `#rrggbb` only. Empty Happy Hare colors are not painted as black. */
+  color: string | null;
+  colorName: string | null;
+  temperature: number | null;
+  spoolId: number | null;
+  /** Tool indexes whose tool-to-gate map entry points here. Empty when the map was not sent. */
+  tools: number[];
+}
+
+/**
+ * Happy Hare state for the Chromium UI. Null on `PrinterState` when the printer
+ * did not list an `mmu` object, or when Klipper is not ready (no stale values).
+ */
+export interface MmuState {
+  /** True once the `mmu` status object contained at least one field. */
+  statusSeen: boolean;
+  enabled: boolean | null;
+  homed: boolean | null;
+  /** `num_gates`, or the length of a reported gate/tool array when that count is missing. */
+  numGates: number | null;
+  /** `-1` unknown, `-2` bypass, `0..n` tool. Null when the field was absent. */
+  tool: number | null;
+  gate: number | null;
+  lastTool: number | null;
+  nextTool: number | null;
+  /** Coarse `filament` string when it is one of the three documented words. */
+  filament: 'Loaded' | 'Unloaded' | 'Unknown' | null;
+  /** `filament` text that was present but not one of those three words. */
+  filamentRaw: string | null;
+  /** State-machine code from `filament_pos` (or a legacy integer `filament_position`). */
+  filamentPos: number | null;
+  filamentPosition: string | null;
+  /** True when the coarse word and the state-machine code disagree. */
+  filamentDisagreement: boolean;
+  action: string | null;
+  printState: string | null;
+  /** `is_paused` / `is_locked` only when `print_state` was not sent. */
+  paused: boolean | null;
+  reasonForPause: string | null;
+  ttgReported: boolean;
+  gates: MmuGate[];
+  /** Reported gates past the on-screen cap. */
+  hiddenGates: number;
+  /**
+   * Supported commands present in `printer.gcode.help`.
+   * Null when that query failed. An empty list means the query succeeded and none were registered.
+   */
+  commands: readonly string[] | null;
+}
+
 export interface HeaterLimits {
   minTemp: number;
   maxTemp: number;
@@ -184,6 +247,13 @@ export interface PrinterState {
   lights: LightControl[];
   macros: MacroInfo[];
   filamentSensors: FilamentSensor[];
+  /**
+   * AFC add-on, when this printer's object list contains `AFC` and Klipper is ready.
+   * Null on printers without AFC, and whenever live object data is hidden.
+   */
+  afc: AfcStatus | null;
+  /** Happy Hare, when this printer listed the `mmu` object and Klipper is ready. */
+  mmu: MmuState | null;
   limits: PrinterLimits;
   /** `idle_timeout.state`: `Idle`, `Ready` or `Printing` (Klipper is busy executing G-code). */
   idleState: string | null;
@@ -225,6 +295,8 @@ export function createInitialState(printerId: string, printerName: string, now: 
     lights: [],
     macros: [],
     filamentSensors: [],
+    afc: null,
+    mmu: null,
     limits: structuredClone(FALLBACK_LIMITS),
     idleState: null,
     missingObjects: [],

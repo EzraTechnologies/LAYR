@@ -23,6 +23,7 @@ describe('connection gates', () => {
     { kind: 'set_temperature', heater: 'extruder', target: 200 },
     { kind: 'set_fan', fan: 'fan', speed: 1 },
     { kind: 'macro', name: 'LOAD_FILAMENT' },
+    { kind: 'mmu', action: 'load' },
     { kind: 'start_print', filename: 'a.gcode' },
     { kind: 'pause' },
     { kind: 'emergency_stop' },

@@ -43,6 +43,18 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 - [ ] While printing, Speed is Klipper's live mm/s (`motion_report.live_velocity`) and Flow is live mm³/s from extruder velocity × the configured filament diameter. They are not the M220/M221 percentages. Pause or a stopped extruder shows about 0, not the last percentage. A retract shows a negative flow. Tapping Speed or Flow adjusts the percentage behind that readout. Z offset is still the Z button, which opens Move. There is no Fine Tuning page.
 - [ ] Pause, resume, and cancel work. Cancel asks for confirmation and cannot be tapped twice into a second request.
 - [ ] Emergency stop needs a press-and-hold, heaters turn off, and the printer shows the Klipper error until firmware restart (which itself asks for confirmation).
+- [ ] If this printer has no Happy Hare MMU, or Settings → Happy Hare is off, the rail has no MMU item and `#/mmu` says no `mmu` object was listed. Nothing in that check moves filament.
+
+## Happy Hare (only when this printer already runs it)
+
+Skip this section when Settings → Happy Hare is off or Klipper does not list an `mmu` object. The switch defaults off, is stored per printer, and turning it on turns AFC off. Both can stay off. LAYR does not install Happy Hare and does not edit `printer.cfg` or `mmu.cfg`. These checks have not been done on hardware in this repo. Confirm them on a machine where a wrong tool change is safe (no print, bed clear).
+
+- [ ] With Happy Hare switched on and connected, the rail shows MMU and Home shows the reported tool, gate, and filament. Those match `MMU_STATUS` / Mainsail. Missing fields say they were not reported. Turning the switch off leaves the MMU screen and does not send motion.
+- [ ] Load, unload, and tool change are absent when `MMU_LOAD`, `MMU_UNLOAD`, or `MMU_CHANGE_TOOL` is not in `printer.gcode.help`.
+- [ ] Confirming Load sends only `MMU_LOAD`. Cancelling sends nothing. The same for Unload and `MMU_CHANGE_TOOL TOOL=n`.
+- [ ] While a print is running, those buttons stay disabled and no MMU G-code is sent.
+- [ ] With the MMU paused on a real error, the pause reason matches Happy Hare. Recover, if shown, sends only `MMU_RECOVER` after confirmation.
+- [ ] A printer without the `mmu` object never shows this screen's data and never calls `printer.gcode.help`.
 
 ## Macros and console
 

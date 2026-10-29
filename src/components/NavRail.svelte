@@ -1,15 +1,18 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { ROUTES, type RouteId } from '../lib/routes';
+  import { type NavItem, type RouteId } from '../lib/routes';
 
   interface Props {
     current: RouteId;
+    items: readonly NavItem[];
   }
 
-  let { current }: Props = $props();
+  let { current, items }: Props = $props();
+  const dense = $derived(items.length > 9);
+  const extra = $derived(items.some((item) => item.id === 'mmu'));
 </script>
 
-<nav class="rail" aria-label="Main">
+<nav class="rail" class:dense class:extra aria-label="Main">
   <div class="brand" aria-label="LAYR">
     <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
       <defs>
@@ -29,7 +32,7 @@
   </div>
 
   <ul>
-    {#each ROUTES as route (route.id)}
+    {#each items as route (route.id)}
       <li>
         <a
           href={`#/${route.id}`}
@@ -132,6 +135,14 @@
     color: var(--cyan);
   }
 
+  .rail.dense .wordmark {
+    display: none;
+  }
+
+  .rail.dense ul {
+    gap: 2px;
+  }
+
   @media (max-height: 640px) {
     .wordmark {
       display: none;
@@ -150,5 +161,31 @@
       gap: 0;
       padding: 2px;
     }
+
+    .rail.dense {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+
+    .rail.dense ul {
+      gap: 0;
+      grid-auto-rows: minmax(44px, 1fr);
+    }
+
+    .rail.dense a {
+      min-height: 44px;
+    }
+  }
+
+  /* A tenth item only exists when Happy Hare is present. Keep each target at least 44px. */
+  .rail.extra ul {
+    gap: 2px;
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+
+  .rail.extra a {
+    min-height: 0;
+    gap: 1px;
+    padding: 2px;
   }
 </style>

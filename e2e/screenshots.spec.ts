@@ -39,6 +39,8 @@ function withPartsFolder(): MockFile[] {
   ];
 }
 
+import { errorMmu, printingMmu, readyMmu } from './mmuFixture';
+
 const SHOTS: Shot[] = [
   { name: 'home-printing', route: 'home', options: { scenario: 'printing' } },
   { name: 'home-paused', route: 'home', options: { scenario: 'paused' } },
@@ -182,6 +184,39 @@ const SHOTS: Shot[] = [
   },
   { name: 'settings', route: 'settings', options: { scenario: 'ready' } },
   {
+    name: 'mmu',
+    route: 'mmu',
+    options: { scenario: 'ready', mmu: { status: readyMmu() }, seedSwitches: { happyHare: true } },
+    prepare: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Happy Hare' })).toBeVisible();
+      await expect(page.getByRole('radio', { name: 'Gate 2, Available, selected' })).toBeVisible();
+    },
+  },
+  {
+    name: 'mmu-error',
+    route: 'mmu',
+    options: { scenario: 'paused', mmu: { status: errorMmu() }, seedSwitches: { happyHare: true } },
+    prepare: async (page) => {
+      await expect(page.getByText('Filament clog on gate 2')).toBeVisible();
+    },
+  },
+  {
+    name: 'mmu-printing',
+    route: 'mmu',
+    options: { scenario: 'printing', mmu: { status: printingMmu() }, seedSwitches: { happyHare: true } },
+    prepare: async (page) => {
+      await expect(page.getByText('Not available while printing')).toBeVisible();
+    },
+  },
+  {
+    name: 'mmu-absent',
+    route: 'mmu',
+    options: { scenario: 'ready', seedSwitches: { happyHare: true } },
+    prepare: async (page) => {
+      await expect(page.getByRole('heading', { name: 'No Happy Hare MMU' })).toBeVisible();
+    },
+  },
+  {
     name: 'confirm-cancel',
     route: 'home',
     options: { scenario: 'printing' },
@@ -221,6 +256,14 @@ test.describe('screenshots @screenshot', () => {
       await page.goto('/?moonraker=http://127.0.0.1:9#/home');
       await expect(page.getByText(/Attempt \d+/)).toBeVisible({ timeout: 10_000 });
       await page.screenshot({ path: `docs/screenshots/${vp.name}-offline.png` });
+    });
+
+    test(`${vp.name} mmu-offline`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await seedIntegrations(page, { happyHare: true }, 'http://127.0.0.1:9');
+      await page.goto('/?moonraker=http://127.0.0.1:9#/mmu');
+      await expect(page.getByText('Printer is offline. MMU state is not shown')).toBeVisible({ timeout: 10_000 });
+      await page.screenshot({ path: `docs/screenshots/${vp.name}-mmu-offline.png` });
     });
   }
 });
