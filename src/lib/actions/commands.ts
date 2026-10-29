@@ -1,5 +1,3 @@
-import { AFC_LANE_NAME, type AfcCommandName } from '../afc/objects';
-import type { AfcLane } from '../afc/types';
 import { integrationEnabled } from '../integrations/runtime';
 import { objectSuffix } from '../moonraker/objects';
 import { spoolIdValue } from '../spoolman/api';
@@ -12,6 +10,8 @@ import {
   type HeaterReading,
   type PrinterState,
 } from '../printer/model';
+import { AFC_LANE_NAME, type AfcCommandName } from '../afc/objects';
+import type { AfcLane } from '../afc/types';
 import { prepareMmuMove } from '../mmu/happyhare';
 
 /**
@@ -26,6 +26,11 @@ export type PrinterCommand =
   | { kind: 'mmu'; action: 'unload' }
   | { kind: 'mmu'; action: 'recover' }
   | { kind: 'mmu'; action: 'change_tool'; tool: number }
+  /**
+   * One documented AFC lane command. `lane` is the AFC lane name, sent as `LANE=` with no other parameters.
+   * `tool_unload` still names the lane AFC currently has loaded.
+   */
+  | { kind: 'afc'; action: AfcAction; lane: string }
   | { kind: 'resume' }
   | { kind: 'cancel' }
   | { kind: 'emergency_stop' }
@@ -56,11 +61,6 @@ export type PrinterCommand =
   /** `value` is 0..1. */
   | { kind: 'set_light'; light: string; value: number }
   | { kind: 'macro'; name: string; /** Appended to the confirmation body. Does not change the G-code. */ note?: string }
-  /**
-   * One documented AFC lane command. `lane` is the AFC lane name, sent as `LANE=` with no other parameters.
-   * `tool_unload` still names the lane AFC currently has loaded.
-   */
-  | { kind: 'afc'; action: AfcAction; lane: string }
   /** Selects the active Spoolman spool for this printer. Does not move filament. */
   | { kind: 'set_active_spool'; spoolId: number; name: string }
   /** Unsets the active spool. Sent only after a confirmed unload, or its own confirmation. */
@@ -85,6 +85,149 @@ const AFC_ACTION_COMMAND: Record<AfcAction, AfcCommandName> = {
 
 export function afcScript(action: AfcAction, lane: string): string {
   return `${AFC_ACTION_COMMAND[action]} LANE=${lane}`;
+}
+
+export interface AfcButton {
+  action: AfcAction;
+  label: string;
+  /** Accessible name, including the lane. */
+  name: string;
+}
+
+/**
+ * Why every AFC motion is refused right now, or null when a lane may still be eligible.
+ * Per-lane refusals stay on the individual command.
+ */
+export function afcMotionBlock(state: PrinterState): string | null {
+  const gate = readyGate(state);
+  if (gate) return gate;
+  const afc = state.afc;
+  if (!afc) return 'AFC is not installed on this printer';
+  if (!afc.reported) return 'Waiting for AFC status';
+  if (jobActive(state)) return 'Not available during a print';
+  if (state.idleState === 'Printing') return 'Klipper is busy';
+  if (afc.error !== false) return afc.error === true ? 'AFC is reporting an error' : 'AFC did not report an error state';
+  if (afc.bypass === true) return 'Bypass is active';
+  if (afc.state === null) return 'AFC did not report its state';
+  if (afc.state !== 'Idle') return `AFC is ${afc.state}`;
+  if (!state.toolhead || !AXES.every((axis) => state.toolhead!.homedAxes.includes(axis))) return 'Home the printer first';
+  return null;
+}
+
+function afcLane(state: PrinterState, lane: string): AfcLane | null {
+  return state.afc?.lanes.find((item) => item.name === lane) ?? null;
+}
+
+/** Prep or the load sensor says filament is there. A missing sensor is not treated as ready. */
+function laneStaged(lane: AfcLane): boolean {
+  return lane.prep === true || lane.load === true;
+}
+
+function prepareAfc(state: PrinterState, action: AfcAction, lane: string): Prepared {
+  if (!integrationEnabled('afc')) return fail('Turn AFC on in Settings before moving a lane');
+  const blocked = afcMotionBlock(state);
+  if (blocked) return fail(blocked);
+  const afc = state.afc;
+  if (!afc) return fail('AFC is not installed on this printer');
+  if (!AFC_LANE_NAME.test(lane)) return fail('That lane name cannot be sent');
+  const found = afcLane(state, lane);
+  if (!found) return fail('That lane was not reported');
+  const commandName = AFC_ACTION_COMMAND[action];
+  if (!afc.commands.includes(commandName)) return fail('This AFC command is not available');
+
+  const loaded = afc.currentLoad;
+  if (!afc.currentLoadKnown) return fail('AFC did not report which lane is loaded');
+
+  if (action === 'tool_load') {
+    if (loaded) return fail('A lane is already loaded');
+    if (!found.detailReported) return fail('Lane status was not reported');
+    if (!laneStaged(found)) return fail('Lane is not ready');
+    if (found.toolLoaded === true) return fail('Lane is already in the tool');
+    return gcodeScript([afcScript(action, lane)], `Load ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
+      confirm: {
+        title: `Load ${lane} into the tool?`,
+        body: `AFC will load ${lane} into the toolhead. Filament will move, and the nozzle may heat.`,
+        confirmLabel: 'Load lane',
+        tone: 'warn',
+      },
+    });
+  }
+
+  if (action === 'change_tool') {
+    if (!loaded) return fail('No lane is loaded');
+    if (loaded === lane) return fail('That lane is already loaded');
+    if (!found.detailReported) return fail('Lane status was not reported');
+    if (!laneStaged(found)) return fail('Lane is not ready');
+    return gcodeScript([afcScript(action, lane)], `Change to ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
+      confirm: {
+        title: `Change to ${lane}?`,
+        body: `AFC will unload ${loaded} and load ${lane}. Filament will move.`,
+        confirmLabel: 'Change tool',
+        tone: 'warn',
+      },
+    });
+  }
+
+  if (action === 'tool_unload') {
+    if (loaded !== lane) return fail('That lane is not loaded in the tool');
+    return gcodeScript([afcScript(action, lane)], `Unload ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
+      confirm: {
+        title: `Unload ${lane} from the tool?`,
+        body: `AFC will unload ${lane} from the toolhead. Filament will move back.`,
+        confirmLabel: 'Unload lane',
+        tone: 'danger',
+      },
+    });
+  }
+
+  if (action === 'hub_load') {
+    if (!found.detailReported) return fail('Lane status was not reported');
+    if (found.prep !== true) return fail('Lane is not ready');
+    if (found.loadedToHub === true || found.toolLoaded === true || loaded === lane) return fail('Lane is already forward of the unit');
+    return gcodeScript([afcScript(action, lane)], `Load ${lane} to hub`, 'afc', MACRO_TIMEOUT_MS, {
+      confirm: {
+        title: `Load ${lane} to the hub?`,
+        body: `AFC will move ${lane} to the hub. It will not load the nozzle.`,
+        confirmLabel: 'Load to hub',
+        tone: 'warn',
+      },
+    });
+  }
+
+  if (!found.detailReported) return fail('Lane status was not reported');
+  if (found.loadedToHub !== true || found.toolLoaded === true || loaded === lane) return fail('That lane is not waiting at the hub');
+  return gcodeScript([afcScript(action, lane)], `Eject ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
+    confirm: {
+      title: `Eject ${lane}?`,
+      body: `AFC will eject ${lane} from the extruder path. Filament will move.`,
+      confirmLabel: 'Eject lane',
+      tone: 'danger',
+    },
+  });
+}
+
+/** Buttons for one lane. Hidden entirely while a global block is in force. */
+export function afcLaneButtons(state: PrinterState, lane: string): AfcButton[] {
+  if (afcMotionBlock(state)) return [];
+  const actions: AfcAction[] = ['tool_load', 'change_tool', 'hub_load', 'lane_unload'];
+  const labels: Record<AfcAction, string> = {
+    tool_load: 'Load',
+    tool_unload: 'Unload',
+    change_tool: 'Change',
+    hub_load: 'To hub',
+    lane_unload: 'Eject',
+  };
+  return actions
+    .filter((action) => prepareCommand({ kind: 'afc', action, lane }, state).ok)
+    .map((action) => ({ action, label: labels[action], name: `${labels[action]} ${lane}` }));
+}
+
+/** Header unload for the lane AFC says is in the tool, or null when that command cannot run. */
+export function afcUnloadButton(state: PrinterState): AfcButton | null {
+  const lane = state.afc?.currentLoad;
+  if (!lane) return null;
+  if (!prepareCommand({ kind: 'afc', action: 'tool_unload', lane }, state).ok) return null;
+  return { action: 'tool_unload', label: 'Unload', name: `Unload ${lane}` };
 }
 
 export interface Confirmation {
@@ -521,6 +664,8 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       });
     case 'mmu':
       return prepareMmu(state, command);
+    case 'afc':
+      return prepareAfc(state, command.action, command.lane);
     case 'start_print':
       if (jobActive(state)) return fail('A print is already in progress');
       if (!validFilePath(command.filename)) return fail('Invalid file path');
@@ -581,8 +726,6 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       return prepareLight(state, command.light, command.value);
     case 'macro':
       return prepareMacro(state, command.name, command.note);
-    case 'afc':
-      return prepareAfc(state, command.action, command.lane);
   }
 }
 
@@ -632,147 +775,4 @@ function prepareSpool(state: PrinterState, command: Extract<PrinterCommand, { ki
       tone: 'primary',
     },
   });
-}
-
-export interface AfcButton {
-  action: AfcAction;
-  label: string;
-  /** Accessible name, including the lane. */
-  name: string;
-}
-
-/**
- * Why every AFC motion is refused right now, or null when a lane may still be eligible.
- * Per-lane refusals stay on the individual command.
- */
-export function afcMotionBlock(state: PrinterState): string | null {
-  const gate = readyGate(state);
-  if (gate) return gate;
-  const afc = state.afc;
-  if (!afc) return 'AFC is not installed on this printer';
-  if (!afc.reported) return 'Waiting for AFC status';
-  if (jobActive(state)) return 'Not available during a print';
-  if (state.idleState === 'Printing') return 'Klipper is busy';
-  if (afc.error !== false) return afc.error === true ? 'AFC is reporting an error' : 'AFC did not report an error state';
-  if (afc.bypass === true) return 'Bypass is active';
-  if (afc.state === null) return 'AFC did not report its state';
-  if (afc.state !== 'Idle') return `AFC is ${afc.state}`;
-  if (!state.toolhead || !AXES.every((axis) => state.toolhead!.homedAxes.includes(axis))) return 'Home the printer first';
-  return null;
-}
-
-function afcLane(state: PrinterState, lane: string): AfcLane | null {
-  return state.afc?.lanes.find((item) => item.name === lane) ?? null;
-}
-
-/** Prep or the load sensor says filament is there. A missing sensor is not treated as ready. */
-function laneStaged(lane: AfcLane): boolean {
-  return lane.prep === true || lane.load === true;
-}
-
-function prepareAfc(state: PrinterState, action: AfcAction, lane: string): Prepared {
-  if (!integrationEnabled('afc')) return fail('Turn AFC on in Settings before moving a lane');
-  const blocked = afcMotionBlock(state);
-  if (blocked) return fail(blocked);
-  const afc = state.afc;
-  if (!afc) return fail('AFC is not installed on this printer');
-  if (!AFC_LANE_NAME.test(lane)) return fail('That lane name cannot be sent');
-  const found = afcLane(state, lane);
-  if (!found) return fail('That lane was not reported');
-  const commandName = AFC_ACTION_COMMAND[action];
-  if (!afc.commands.includes(commandName)) return fail('This AFC command is not available');
-
-  const loaded = afc.currentLoad;
-  if (!afc.currentLoadKnown) return fail('AFC did not report which lane is loaded');
-
-  if (action === 'tool_load') {
-    if (loaded) return fail('A lane is already loaded');
-    if (!found.detailReported) return fail('Lane status was not reported');
-    if (!laneStaged(found)) return fail('Lane is not ready');
-    if (found.toolLoaded === true) return fail('Lane is already in the tool');
-    return gcodeScript([afcScript(action, lane)], `Load ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
-      confirm: {
-        title: `Load ${lane} into the tool?`,
-        body: `AFC will load ${lane} into the toolhead. Filament will move, and the nozzle may heat.`,
-        confirmLabel: 'Load lane',
-        tone: 'warn',
-      },
-    });
-  }
-
-  if (action === 'change_tool') {
-    if (!loaded) return fail('No lane is loaded');
-    if (loaded === lane) return fail('That lane is already loaded');
-    if (!found.detailReported) return fail('Lane status was not reported');
-    if (!laneStaged(found)) return fail('Lane is not ready');
-    return gcodeScript([afcScript(action, lane)], `Change to ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
-      confirm: {
-        title: `Change to ${lane}?`,
-        body: `AFC will unload ${loaded} and load ${lane}. Filament will move.`,
-        confirmLabel: 'Change tool',
-        tone: 'warn',
-      },
-    });
-  }
-
-  if (action === 'tool_unload') {
-    if (loaded !== lane) return fail('That lane is not loaded in the tool');
-    return gcodeScript([afcScript(action, lane)], `Unload ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
-      confirm: {
-        title: `Unload ${lane} from the tool?`,
-        body: `AFC will unload ${lane} from the toolhead. Filament will move back.`,
-        confirmLabel: 'Unload lane',
-        tone: 'danger',
-      },
-    });
-  }
-
-  if (action === 'hub_load') {
-    if (!found.detailReported) return fail('Lane status was not reported');
-    if (found.prep !== true) return fail('Lane is not ready');
-    if (found.loadedToHub === true || found.toolLoaded === true || loaded === lane) return fail('Lane is already forward of the unit');
-    return gcodeScript([afcScript(action, lane)], `Load ${lane} to hub`, 'afc', MACRO_TIMEOUT_MS, {
-      confirm: {
-        title: `Load ${lane} to the hub?`,
-        body: `AFC will move ${lane} to the hub. It will not load the nozzle.`,
-        confirmLabel: 'Load to hub',
-        tone: 'warn',
-      },
-    });
-  }
-
-  if (!found.detailReported) return fail('Lane status was not reported');
-  if (found.loadedToHub !== true || found.toolLoaded === true || loaded === lane) return fail('That lane is not waiting at the hub');
-  return gcodeScript([afcScript(action, lane)], `Eject ${lane}`, 'afc', MACRO_TIMEOUT_MS, {
-    confirm: {
-      title: `Eject ${lane}?`,
-      body: `AFC will eject ${lane} from the extruder path. Filament will move.`,
-      confirmLabel: 'Eject lane',
-      tone: 'danger',
-    },
-  });
-}
-
-/** Buttons for one lane. Hidden entirely while a global block is in force. */
-export function afcLaneButtons(state: PrinterState, lane: string): AfcButton[] {
-  if (afcMotionBlock(state)) return [];
-  const actions: AfcAction[] = ['tool_load', 'change_tool', 'hub_load', 'lane_unload'];
-  const labels: Record<AfcAction, string> = {
-    tool_load: 'Load',
-    tool_unload: 'Unload',
-    change_tool: 'Change',
-    hub_load: 'To hub',
-    lane_unload: 'Eject',
-  };
-  return actions
-    .filter((action) => prepareCommand({ kind: 'afc', action, lane }, state).ok)
-    .map((action) => ({ action, label: labels[action], name: `${labels[action]} ${lane}` }));
-}
-
-/** Header unload for the lane AFC says is in the tool, or null when that command cannot run. */
-export function afcUnloadButton(state: PrinterState): AfcButton | null {
-  const lane = state.afc?.currentLoad;
-  if (!lane) return null;
-  if (!prepareCommand({ kind: 'afc', action: 'tool_unload', lane }, state).ok) return null;
-  return { action: 'tool_unload', label: 'Unload', name: `Unload ${lane}` };
 }
