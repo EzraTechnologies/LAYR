@@ -51,6 +51,8 @@ export function resolveConfig(inputs: ConfigInputs): AppConfig {
   const params = new URLSearchParams(inputs.search);
   const env = inputs.env;
 
+  // Extra query keys are ignored. The kiosk adds `layr_build` so a new release is a different
+  // URL (deploy/kiosk-lib.sh). That value is not configuration and does not change the route.
   const queryUrl = params.get('moonraker');
   let storedUrl: string | null = null;
   try {

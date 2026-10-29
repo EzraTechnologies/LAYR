@@ -57,7 +57,7 @@ for (const vp of VIEWPORTS) {
       expect(mock.calls.filter((call) => call.method === 'printer.objects.list')).toHaveLength(listed);
 
       await page.getByRole('radio', { name: 'True black' }).click();
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await expect(page.getByRole('switch', { name: 'Touch keyboard' })).toHaveAttribute('aria-checked', 'true');
       await switchFor(page, 'spoolman').click();
       await expect(switchFor(page, 'spoolman')).toHaveAttribute('aria-checked', 'true');
@@ -66,7 +66,7 @@ for (const vp of VIEWPORTS) {
 
       await page.reload();
       await expect(page.getByRole('radio', { name: 'True black' })).toHaveAttribute('aria-checked', 'true');
-      await expect(page.getByRole('radio', { name: 'Folders' })).toHaveAttribute('aria-checked', 'true');
+      await expect(page.getByRole('radio', { name: 'Thumbnails' })).toHaveAttribute('aria-checked', 'true');
       await expect(page.getByRole('switch', { name: 'Touch keyboard' })).toHaveAttribute('aria-checked', 'true');
       await expect(switchFor(page, 'spoolman')).toHaveAttribute('aria-checked', 'true');
       await expect(page.getByRole('switch', { name: 'Hide pointer' })).toHaveAttribute('aria-checked', 'false');
