@@ -1,4 +1,5 @@
 import type { Page, WebSocketRoute } from '@playwright/test';
+import { seedIntegrations } from './integrationSeed';
 import { partThumbnail } from './png';
 
 /**
@@ -313,6 +314,13 @@ export function afcFixture(mode: AfcScenario): Status {
 export interface MockOptions {
   scenario?: Scenario;
   homed?: boolean;
+  /**
+   * Happy Hare `mmu` object. `commands: null` makes `printer.gcode.help` fail.
+   * Omit `commands` to register load, unload, tool change, and recover.
+   */
+  mmu?: { status: Record<string, unknown>; commands?: string[] | null };
+  /** Saved on this browser before the page loads. Does not send printer commands. */
+  seedSwitches?: { spoolman?: boolean; happyHare?: boolean; afc?: boolean };
   files?: MockFile[];
   /** Directory paths relative to gcodes that exist even with no files inside them. */
   emptyDirs?: string[];
@@ -327,11 +335,6 @@ export interface MockOptions {
    * Defaults to the documented AFC commands when `afc` is set, and to null otherwise.
    */
   afcHelp?: Record<string, string> | null;
-  /**
-   * Happy Hare `mmu` object. `commands: null` makes `printer.gcode.help` fail.
-   * Omit `commands` to register load, unload, tool change, and recover.
-   */
-  mmu?: { status: Record<string, unknown>; commands?: string[] | null };
   /** `absent` omits the Spoolman component. Other modes add it to `server.info`. */
   spoolman?: SpoolmanMode;
   spools?: MockSpool[];
@@ -356,8 +359,6 @@ export class MockMoonraker {
   online = true;
   /** `printer.gcode.help` AFC entries. Null omits them. */
   afcHelp: Record<string, string> | null = null;
-  /** `printer.gcode.help`. `'error'` rejects the method. */
-  mmuHelp: Record<string, string> | 'error' | null = null;
   spoolmanMode: SpoolmanMode;
   spools: MockSpool[];
   activeSpoolId: number | null;
@@ -367,6 +368,9 @@ export class MockMoonraker {
   #ws: WebSocketRoute | null = null;
   #relative = false;
   #saved: Record<string, boolean> = {};
+  /** `printer.gcode.help`. `'error'` rejects the method. */
+  mmuHelp: Record<string, string> | 'error' | null = null;
+  seedSwitches: { spoolman?: boolean; happyHare?: boolean; afc?: boolean } | null = null;
 
   constructor(options: MockOptions = {}) {
     const scenario = options.scenario ?? 'ready';
@@ -380,11 +384,8 @@ export class MockMoonraker {
     this.klippy = scenario === 'shutdown' ? 'shutdown' : scenario === 'startup' ? 'startup' : 'ready';
     this.files = options.files ?? defaultFiles();
     this.emptyDirs = options.emptyDirs ?? [];
+    this.seedSwitches = options.seedSwitches ?? null;
     this.afcHelp = options.afcHelp !== undefined ? options.afcHelp : options.afc ? { ...AFC_HELP } : null;
-    this.gcodeStore = options.gcodeStore ?? [
-      { message: 'G28', time: T - 400, type: 'command' },
-      { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
-    ];
     if (options.mmu) {
       this.status.mmu = { ...options.mmu.status };
       const names = options.mmu.commands === undefined
@@ -392,6 +393,10 @@ export class MockMoonraker {
         : options.mmu.commands;
       this.mmuHelp = names === null ? 'error' : Object.fromEntries(names.map((name) => [name, name]));
     }
+    this.gcodeStore = options.gcodeStore ?? [
+      { message: 'G28', time: T - 400, type: 'command' },
+      { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
+    ];
     this.spoolmanMode = options.spoolman ?? 'absent';
     this.spools = options.spools ?? sampleSpools();
     this.activeSpoolId = options.activeSpoolId === undefined ? (this.spoolmanMode === 'ready' ? 7 : null) : options.activeSpoolId;
@@ -410,6 +415,7 @@ export class MockMoonraker {
   }
 
   async install(page: Page): Promise<void> {
+    if (this.seedSwitches) await seedIntegrations(page, this.seedSwitches, MOONRAKER);
     await page.routeWebSocket(/:7125\/websocket/, (ws) => {
       if (!this.online) {
         void ws.close();

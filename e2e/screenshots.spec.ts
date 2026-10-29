@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { seedIntegrations } from './integrationSeed';
 import { openWithMock, VIEWPORTS } from './helpers';
-import { errorMmu, printingMmu, readyMmu } from './mmuFixture';
 import { defaultFiles, MOONRAKER, type MockFile, type MockOptions } from './mockMoonraker';
 
 /**
@@ -39,6 +38,8 @@ function withPartsFolder(): MockFile[] {
     },
   ];
 }
+
+import { errorMmu, printingMmu, readyMmu } from './mmuFixture';
 
 const SHOTS: Shot[] = [
   { name: 'home-printing', route: 'home', options: { scenario: 'printing' } },
@@ -106,7 +107,7 @@ const SHOTS: Shot[] = [
   {
     name: 'afc',
     route: 'afc',
-    options: { scenario: 'ready', homed: true, afc: 'ready' },
+    options: { scenario: 'ready', homed: true, afc: 'ready', seedSwitches: { afc: true } },
     prepare: async (page) => {
       await expect(page.getByText('Loaded lane2')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Change lane4' })).toBeVisible();
@@ -115,7 +116,7 @@ const SHOTS: Shot[] = [
   {
     name: 'afc-loading',
     route: 'afc',
-    options: { scenario: 'ready', homed: true, afc: 'loading' },
+    options: { scenario: 'ready', homed: true, afc: 'loading', seedSwitches: { afc: true } },
     prepare: async (page) => {
       await expect(page.getByRole('status').filter({ hasText: 'Loading · lane4' })).toBeVisible();
     },
@@ -123,7 +124,7 @@ const SHOTS: Shot[] = [
   {
     name: 'afc-error',
     route: 'afc',
-    options: { scenario: 'ready', homed: true, afc: 'error' },
+    options: { scenario: 'ready', homed: true, afc: 'error', seedSwitches: { afc: true } },
     prepare: async (page) => {
       await expect(page.getByText('Filament failed to load to the toolhead')).toBeVisible();
     },
@@ -131,7 +132,7 @@ const SHOTS: Shot[] = [
   {
     name: 'afc-absent',
     route: 'afc',
-    options: { scenario: 'ready' },
+    options: { scenario: 'ready', seedSwitches: { afc: true } },
     prepare: async (page) => {
       await expect(page.getByRole('heading', { name: 'AFC is not installed' })).toBeVisible();
     },
@@ -218,7 +219,7 @@ const SHOTS: Shot[] = [
   {
     name: 'mmu',
     route: 'mmu',
-    options: { scenario: 'ready', mmu: { status: readyMmu() } },
+    options: { scenario: 'ready', mmu: { status: readyMmu() }, seedSwitches: { happyHare: true } },
     prepare: async (page) => {
       await expect(page.getByRole('heading', { name: 'Happy Hare' })).toBeVisible();
       await expect(page.getByRole('radio', { name: 'Gate 2, Available, selected' })).toBeVisible();
@@ -227,7 +228,7 @@ const SHOTS: Shot[] = [
   {
     name: 'mmu-error',
     route: 'mmu',
-    options: { scenario: 'paused', mmu: { status: errorMmu() } },
+    options: { scenario: 'paused', mmu: { status: errorMmu() }, seedSwitches: { happyHare: true } },
     prepare: async (page) => {
       await expect(page.getByText('Filament clog on gate 2')).toBeVisible();
     },
@@ -235,7 +236,7 @@ const SHOTS: Shot[] = [
   {
     name: 'mmu-printing',
     route: 'mmu',
-    options: { scenario: 'printing', mmu: { status: printingMmu() } },
+    options: { scenario: 'printing', mmu: { status: printingMmu() }, seedSwitches: { happyHare: true } },
     prepare: async (page) => {
       await expect(page.getByText('Not available while printing')).toBeVisible();
     },
@@ -243,7 +244,7 @@ const SHOTS: Shot[] = [
   {
     name: 'mmu-absent',
     route: 'mmu',
-    options: { scenario: 'ready' },
+    options: { scenario: 'ready', seedSwitches: { happyHare: true } },
     prepare: async (page) => {
       await expect(page.getByRole('heading', { name: 'No Happy Hare MMU' })).toBeVisible();
     },
@@ -264,9 +265,7 @@ test.describe('screenshots @screenshot', () => {
     for (const shot of SHOTS) {
       test(`${vp.name} ${shot.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
-        if (shot.name.startsWith('afc')) await seedIntegrations(page, { afc: true }, MOONRAKER);
-        else if (shot.name.startsWith('mmu')) await seedIntegrations(page, { happyHare: true }, MOONRAKER);
-        else if (shot.name.includes('spool')) await seedIntegrations(page, { spoolman: true }, MOONRAKER);
+        if (shot.name.includes('spool')) await seedIntegrations(page, { spoolman: true }, MOONRAKER);
         await openWithMock(page, shot.route, { ...shot.options, fixedClock: true });
         await shot.prepare?.(page);
         await page.evaluate(() => document.fonts.ready);

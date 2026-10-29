@@ -2,11 +2,11 @@
   import ConnectionCard from '../components/ConnectionCard.svelte';
   import FanSummary from '../components/FanSummary.svelte';
   import Icon from '../components/Icon.svelte';
+  import { mmuSummary } from '../lib/mmu/happyhare';
   import JobCard from '../components/JobCard.svelte';
   import TemperatureCard from '../components/TemperatureCard.svelte';
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
-  import { mmuSummary } from '../lib/mmu/happyhare';
   import { headlineFor } from '../lib/spoolman/present';
 
   const { store, console: log, spoolman } = app();

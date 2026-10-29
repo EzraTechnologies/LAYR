@@ -1,7 +1,6 @@
 import { AFC_LANE_NAME, type AfcCommandName } from '../afc/objects';
 import type { AfcLane } from '../afc/types';
 import { integrationEnabled } from '../integrations/runtime';
-import { prepareMmuMove } from '../mmu/happyhare';
 import { objectSuffix } from '../moonraker/objects';
 import { spoolIdValue } from '../spoolman/api';
 import {
@@ -13,6 +12,7 @@ import {
   type HeaterReading,
   type PrinterState,
 } from '../printer/model';
+import { prepareMmuMove } from '../mmu/happyhare';
 
 /**
  * Every action that can change the physical printer is a `PrinterCommand`. `prepareCommand` is the single place
@@ -21,6 +21,11 @@ import {
  */
 export type PrinterCommand =
   | { kind: 'pause' }
+  /** Happy Hare load, unload, tool change, or recover. The script is fixed; parameters are not typed in. */
+  | { kind: 'mmu'; action: 'load' }
+  | { kind: 'mmu'; action: 'unload' }
+  | { kind: 'mmu'; action: 'recover' }
+  | { kind: 'mmu'; action: 'change_tool'; tool: number }
   | { kind: 'resume' }
   | { kind: 'cancel' }
   | { kind: 'emergency_stop' }
@@ -56,11 +61,6 @@ export type PrinterCommand =
    * `tool_unload` still names the lane AFC currently has loaded.
    */
   | { kind: 'afc'; action: AfcAction; lane: string }
-  /** Happy Hare load, unload, tool change, or recover. The script is fixed; parameters are not typed in. */
-  | { kind: 'mmu'; action: 'load' }
-  | { kind: 'mmu'; action: 'unload' }
-  | { kind: 'mmu'; action: 'recover' }
-  | { kind: 'mmu'; action: 'change_tool'; tool: number }
   /** Selects the active Spoolman spool for this printer. Does not move filament. */
   | { kind: 'set_active_spool'; spoolId: number; name: string }
   /** Unsets the active spool. Sent only after a confirmed unload, or its own confirmation. */
@@ -241,6 +241,20 @@ export function jogRange(state: PrinterState, axis: Axis): { min: number; max: n
   return { min, max: th.axisMax[i]! };
 }
 
+function prepareMmu(state: PrinterState, command: Extract<PrinterCommand, { kind: 'mmu' }>): Prepared {
+  if (!integrationEnabled('happyHare')) return fail('Turn Happy Hare on in Settings before moving the MMU');
+  const result = prepareMmuMove(command, { mmu: state.mmu, jobState: state.job?.state ?? null });
+  if (!result.ok) return fail(result.message);
+  return gcodeScript([result.plan.script], result.plan.summary, 'mmu', MACRO_TIMEOUT_MS, {
+    confirm: {
+      title: result.plan.title,
+      body: result.plan.body,
+      confirmLabel: result.plan.confirmLabel,
+      tone: result.plan.tone,
+    },
+  });
+}
+
 function prepareJog(state: PrinterState, axis: Axis, distance: number, speed: number): Prepared {
   if (!AXES.includes(axis)) return fail('Unknown axis');
   if (!Number.isFinite(distance) || distance === 0) return fail('Choose a distance');
@@ -370,20 +384,6 @@ function prepareLight(state: PrinterState, lightName: string, value: number): Pr
       : `SET_LED LED=${name} RED=${fmt(v)} GREEN=${fmt(v)} BLUE=${fmt(v)} WHITE=${fmt(v)}`;
   const pct = Math.round(v * 100);
   return gcodeScript([line], `${light.label} ${pct === 0 ? 'off' : light.dimmable ? `${pct}%` : 'on'}`, `light:${light.object}`, 10 * SECOND);
-}
-
-function prepareMmu(state: PrinterState, command: Extract<PrinterCommand, { kind: 'mmu' }>): Prepared {
-  if (!integrationEnabled('happyHare')) return fail('Turn Happy Hare on in Settings before moving the MMU');
-  const result = prepareMmuMove(command, { mmu: state.mmu, jobState: state.job?.state ?? null });
-  if (!result.ok) return fail(result.message);
-  return gcodeScript([result.plan.script], result.plan.summary, 'mmu', MACRO_TIMEOUT_MS, {
-    confirm: {
-      title: result.plan.title,
-      body: result.plan.body,
-      confirmLabel: result.plan.confirmLabel,
-      tone: result.plan.tone,
-    },
-  });
 }
 
 function prepareMacro(state: PrinterState, name: string, note?: string): Prepared {
@@ -519,6 +519,8 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
           tone: 'danger',
         },
       });
+    case 'mmu':
+      return prepareMmu(state, command);
     case 'start_print':
       if (jobActive(state)) return fail('A print is already in progress');
       if (!validFilePath(command.filename)) return fail('Invalid file path');
@@ -579,8 +581,6 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       return prepareLight(state, command.light, command.value);
     case 'macro':
       return prepareMacro(state, command.name, command.note);
-    case 'mmu':
-      return prepareMmu(state, command);
     case 'afc':
       return prepareAfc(state, command.action, command.lane);
   }

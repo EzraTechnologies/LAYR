@@ -33,6 +33,16 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 - [ ] LOAD / UNLOAD appear only when those macros exist. The toast says the macro finished only after Klipper replies. A failed or cancelled run does not say the filament was unloaded.
 - [ ] With no `[spoolman]` section, Extrude still says spool tracking is planned for a later release, and printing, jogging, and heating behave as before.
 - [ ] Optional, and only if you already run Spoolman: turn Spoolman on under Settings for this printer. It is off by default, and a second printer address does not inherit it. Add the server in Moonraker's own configuration and restart Moonraker yourself. LAYR must not have edited `moonraker.conf`. On Extrude, confirm the active spool's material, colour, and remaining weight or length. Set a different spool only while the printer is idle, and only after the confirmation. Home and the file detail should name that same spool. Run Unload only if you mean to move filament. The active spool clears only after Klipper accepts that macro. Cancel the dialog, or fail the macro, and the previous spool stays. If Moonraker cannot reach Spoolman, the screen says so and does not show a weight.
+
+## Files and a short print
+
+- [ ] The file list matches Moonraker, including a folder. Sort by name and modified time.
+- [ ] Files opens in the compact list. List / Thumbnails on that screen and Settings → Files switch immediately and still match after a reload. Thumbnails shows the real subfolders as cards, then the G-code in that folder, with Back and the path. An empty folder says it is empty. Sorting, print, and delete are unchanged, and the choice does not create or move files. A device that already saved `folders` still opens on Thumbnails.
+- [ ] A file with a thumbnail shows it, including a file in a subfolder. A file without one shows the placeholder icon.
+- [ ] Start asks for confirmation, then the dashboard shows filename, the G-code thumbnail (including a file in a subfolder; a placeholder when there is none), progress, layer (when the slicer reports it), fans, and time remaining.
+- [ ] While printing, Speed is Klipper's live mm/s (`motion_report.live_velocity`) and Flow is live mm³/s from extruder velocity × the configured filament diameter. They are not the M220/M221 percentages. Pause or a stopped extruder shows about 0, not the last percentage. A retract shows a negative flow. Tapping Speed or Flow adjusts the percentage behind that readout. Z offset is still the Z button, which opens Move. There is no Fine Tuning page.
+- [ ] Pause, resume, and cancel work. Cancel asks for confirmation and cannot be tapped twice into a second request.
+- [ ] Emergency stop needs a press-and-hold, heaters turn off, and the printer shows the Klipper error until firmware restart (which itself asks for confirmation).
 - [ ] If this printer has no Happy Hare MMU, or Settings → Happy Hare is off, the rail has no MMU item and `#/mmu` says no `mmu` object was listed. Nothing in that check moves filament.
 - [ ] AFC, if this printer has the add-on: turn AFC on under Settings for this printer. It is off by default, stored per printer, and turning it on turns Happy Hare off. Both can stay off. The rail shows AFC only when that switch is on and Klipper lists an `AFC` object. Units, lanes, the loaded lane, and any AFC error match Mainsail or Fluidd. Load, change, unload, hub load, and eject each ask first, and cancelling sends nothing. During a print those buttons stay off. A printer without AFC, or with the switch off, has no AFC item and `#/afc` says it is not installed. This build has not been checked on a machine with AFC. Do not use it to move filament until the states above match the printer.
 
@@ -46,16 +56,6 @@ Skip this section when Settings → Happy Hare is off or Klipper does not list a
 - [ ] While a print is running, those buttons stay disabled and no MMU G-code is sent.
 - [ ] With the MMU paused on a real error, the pause reason matches Happy Hare. Recover, if shown, sends only `MMU_RECOVER` after confirmation.
 - [ ] A printer without the `mmu` object never shows this screen's data and never calls `printer.gcode.help`.
-
-## Files and a short print
-
-- [ ] The file list matches Moonraker, including a folder. Sort by name and modified time.
-- [ ] Files opens in the compact list. List / Thumbnails on that screen and Settings → Files switch immediately and still match after a reload. Thumbnails shows the real subfolders as cards, then the G-code in that folder, with Back and the path. An empty folder says it is empty. Sorting, print, and delete are unchanged, and the choice does not create or move files. A device that already saved `folders` still opens on Thumbnails.
-- [ ] A file with a thumbnail shows it, including a file in a subfolder. A file without one shows the placeholder icon.
-- [ ] Start asks for confirmation, then the dashboard shows filename, the G-code thumbnail (including a file in a subfolder; a placeholder when there is none), progress, layer (when the slicer reports it), fans, and time remaining.
-- [ ] While printing, Speed is Klipper's live mm/s (`motion_report.live_velocity`) and Flow is live mm³/s from extruder velocity × the configured filament diameter. They are not the M220/M221 percentages. Pause or a stopped extruder shows about 0, not the last percentage. A retract shows a negative flow. Tapping Speed or Flow adjusts the percentage behind that readout. Z offset is still the Z button, which opens Move. There is no Fine Tuning page.
-- [ ] Pause, resume, and cancel work. Cancel asks for confirmation and cannot be tapped twice into a second request.
-- [ ] Emergency stop needs a press-and-hold, heaters turn off, and the printer shows the Klipper error until firmware restart (which itself asks for confirmation).
 
 ## Macros and console
 

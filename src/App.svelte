@@ -10,7 +10,6 @@
   import { ConsoleLog } from './lib/console/console.svelte';
   import { setApp } from './lib/context';
   import { FileBrowser } from './lib/files/browser.svelte';
-  import { integrationRouteHidden } from './lib/integrations/preferences';
   import { integrations } from './lib/integrations/store.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
@@ -29,6 +28,7 @@
   import Mmu from './views/Mmu.svelte';
   import Move from './views/Move.svelte';
   import Settings from './views/Settings.svelte';
+  import { integrationRouteHidden } from './lib/integrations/preferences';
 
   interface Props {
     config: AppConfig;

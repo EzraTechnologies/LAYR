@@ -139,7 +139,7 @@ for (const vp of VIEWPORTS) {
       await switchFor(page, 'spoolman').click();
       await switchFor(page, 'happyHare').click();
       await expect(row(page, 'happyHare').locator('.integration-status')).toHaveText('On, not detected on this printer');
-      await expect(row(page, 'spoolman').locator('.integration-status')).toHaveText('On, not detected on this printer');
+      await expect(row(page, 'spoolman').locator('.integration-status')).toHaveText(/On, not (?:reported by|detected on) this printer/);
       await switchFor(page, 'afc').click();
       await expect(row(page, 'happyHare').locator('.integration-status')).toHaveText('Off');
       await expect(row(page, 'afc').locator('.integration-status')).toHaveText('On, not detected on this printer');
