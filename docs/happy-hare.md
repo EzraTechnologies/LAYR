@@ -1,6 +1,6 @@
 # Happy Hare on the Chromium UI
 
-Optional. The MMU item is added to the rail only while Klipper is ready and `printer.objects.list` contains an object named `mmu`. Printers without that object keep the previous rail, and LAYR does not call `printer.gcode.help` for them. AFC objects are not read and are not controlled.
+Optional. The MMU item is added to the rail only while Settings → Happy Hare is on for this printer, Klipper is ready, and `printer.objects.list` contains an object named `mmu`. The switch defaults off and is stored per printer. Turning it on turns AFC off. Both can stay off. Turning the switch off leaves the MMU screen and drops the `mmu` subscription. Toggling does not send motion. Printers without that object keep the previous rail, and LAYR does not call `printer.gcode.help` for them. AFC objects are not read and are not controlled.
 
 LAYR does not install Happy Hare, does not edit `printer.cfg`, `mmu.cfg`, or `moonraker.conf`, and does not restart Klipper or Moonraker. The native Qt UI is unchanged.
 

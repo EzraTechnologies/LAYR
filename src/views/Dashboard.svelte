@@ -7,9 +7,12 @@
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
   import { mmuSummary } from '../lib/mmu/happyhare';
+  import { headlineFor } from '../lib/spoolman/present';
 
-  const { store, console: log } = app();
+  const { store, console: log, spoolman } = app();
   const printerState = store.state;
+  const spoolLine = $derived(headlineFor(spoolman.snapshot, spoolman.activeSpool()));
+  const showSpoolStrip = $derived(!!spoolLine && printerState.status !== 'printing' && printerState.status !== 'paused');
 
   const online = $derived(printerState.status === 'ready' || printerState.status === 'printing' || printerState.status === 'paused');
   const mmuLine = $derived(printerState.mmu ? mmuSummary(printerState.mmu) : '');
@@ -20,6 +23,15 @@
 
 <div class="dashboard page">
   <div class="primary">
+    {#if showSpoolStrip && spoolLine}
+      <a class="spool-strip" href="#/extrude" title={spoolLine.titleAttr}>
+        <span class="swatch" class:empty={!spoolLine.color} style:background={spoolLine.color ?? 'transparent'} aria-hidden="true"></span>
+        <span class="copy">
+          <strong title={spoolLine.title}>{spoolLine.title}</strong>
+          <span title={spoolLine.detail}>{spoolLine.detail}</span>
+        </span>
+      </a>
+    {/if}
     {#if alerts.length > 0}
       <ul class="alerts" aria-label="Printer alerts">
         {#each alerts as alert (alert.id)}
@@ -168,5 +180,53 @@
     border: 0;
     padding: 0;
     color: var(--text-2);
+  }
+
+  .spool-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    min-height: 44px;
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .swatch {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+  }
+
+  .swatch.empty {
+    background: transparent !important;
+    border-style: dashed;
+  }
+
+  .copy {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .copy strong,
+  .copy span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .copy span {
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
   }
 </style>

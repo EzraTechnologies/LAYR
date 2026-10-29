@@ -1,13 +1,16 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
+  import SpoolBrowser from '../components/SpoolBrowser.svelte';
   import { MAX_EXTRUDE_MM, type PrinterCommand } from '../lib/actions/commands';
   import { app } from '../lib/context';
   import { findMacro, LOAD_MACROS, UNLOAD_MACROS } from '../lib/filament';
   import { formatClock, formatTemp } from '../lib/format';
   import type { MacroInfo } from '../lib/printer/model';
   import { navigate } from '../lib/routes';
+  import { unloadOutcomeFrom } from '../lib/spoolman/api';
+  import { headlineFor } from '../lib/spoolman/present';
 
-  const { store, ui, consoleDraft } = app();
+  const { store, ui, consoleDraft, spoolman } = app();
   const printerState = store.state;
 
   const LENGTHS = [1, 5, 10, 25, 50] as const;
@@ -18,6 +21,8 @@
 
   type MacroResult = { macro: string; status: 'ok' | 'failed' | 'unconfirmed'; message: string; time: number };
   let lastFilamentAction = $state<MacroResult | null>(null);
+  let browseSpools = $state(false);
+  const spoolLine = $derived(headlineFor(spoolman.snapshot, spoolman.activeSpool()));
 
   const extruder = $derived(printerState.extruder);
   const minTemp = $derived(printerState.limits.extruder.minExtrudeTemp);
@@ -32,18 +37,41 @@
   const extrudeCheck = $derived(ui.gateway.availability(extrudeCmd));
   const busy = $derived(ui.busyGroups.includes('extrude'));
 
+  function openSpools() {
+    if (spoolman.snapshot.phase === 'loading') return;
+    if (spoolman.snapshot.phase === 'ready') browseSpools = true;
+    else void spoolman.refresh();
+  }
+
   async function runFilamentMacro(macro: MacroInfo) {
     if (macro.requiredParams.length > 0) {
       consoleDraft.value = `${macro.name} ${macro.requiredParams.map((p) => `${p}=`).join(' ')}`;
       navigate('console');
       return;
     }
-    const outcome = await ui.run({ kind: 'macro', name: macro.name });
+    const clearing =
+      macro.name === unloadMacro?.name &&
+      spoolman.willClearOnUnload &&
+      printerState.status !== 'printing' &&
+      printerState.status !== 'paused';
+    const outcome = await ui.run({
+      kind: 'macro',
+      name: macro.name,
+      ...(clearing
+        ? { note: 'If Klipper accepts this unload, the active spool is cleared. A failed or unknown result keeps the spool.' }
+        : {}),
+    });
     // Only Klipper's "ok" reply counts as done; anything else is reported as failed or unknown.
     if (outcome.status === 'ok') {
       lastFilamentAction = { macro: macro.name, status: 'ok', message: 'Klipper reported the macro finished', time: Date.now() };
     } else if (outcome.status === 'failed' || outcome.status === 'unconfirmed') {
       lastFilamentAction = { macro: macro.name, status: outcome.status, message: outcome.message, time: Date.now() };
+    }
+    if (!clearing) return;
+    const result = await spoolman.clearAfterUnload(unloadOutcomeFrom(outcome));
+    if (result === 'cleared') ui.toast('ok', 'Active spool cleared');
+    else if (result === 'kept' && (outcome.status === 'ok' || outcome.status === 'unconfirmed')) {
+      ui.toast('warn', 'Active spool kept', spoolman.snapshot.message);
     }
   }
 </script>
@@ -155,10 +183,25 @@
           {/each}
         </ul>
       {/if}
-      <p class="hint">Spool tracking with Spoolman is planned for a later release.</p>
+      {#if spoolLine}
+        <button type="button" class="spool-row" title={spoolLine.titleAttr} disabled={spoolman.snapshot.phase === 'loading'} onclick={openSpools}>
+          <span class="swatch" class:empty={!spoolLine.color} style:background={spoolLine.color ?? 'transparent'} aria-hidden="true"></span>
+          <span class="copy">
+            <strong title={spoolLine.title}>{spoolLine.title}</strong>
+            <span title={spoolLine.detail}>{spoolLine.detail}</span>
+          </span>
+        </button>
+        {#if spoolman.snapshot.message && spoolman.snapshot.message !== 'No active spool.'}
+          <p class="hint">{spoolman.snapshot.message}</p>
+        {/if}
+      {:else}
+        <p class="hint">Spool tracking with Spoolman is planned for a later release.</p>
+      {/if}
     </section>
   </div>
 </div>
+
+<SpoolBrowser open={browseSpools} onClose={() => (browseSpools = false)} />
 
 <style>
   .extrude {
@@ -267,6 +310,52 @@
   .badge.off {
     color: var(--text-dim);
     background: var(--surface-3);
+  }
+
+  .spool-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-3);
+    color: inherit;
+    text-align: left;
+  }
+
+  .swatch {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+  }
+
+  .swatch.empty {
+    background: transparent !important;
+    border-style: dashed;
+  }
+
+  .copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .copy strong,
+  .copy span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .copy span {
+    color: var(--text-dim);
+    font-size: var(--fs-xs);
   }
 
   @media (max-width: 900px), (max-height: 540px) {

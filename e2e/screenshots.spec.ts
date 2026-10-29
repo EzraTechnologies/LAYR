@@ -63,7 +63,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready' },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
       await expect(page.getByRole('img', { name: /Voron_Design_Cube/ })).toBeVisible();
     },
@@ -73,7 +73,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready', files: withPartsFolder() },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /stealthburner/ }).click();
       await expect(page.getByRole('heading', { name: 'stealthburner' })).toBeVisible();
       await expect(page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /parts/ })).toBeVisible();
@@ -85,7 +85,7 @@ const SHOTS: Shot[] = [
     route: 'files',
     options: { scenario: 'ready', emptyDirs: ['archive'] },
     prepare: async (page) => {
-      await page.getByRole('radio', { name: 'Folders' }).click();
+      await page.getByRole('radio', { name: 'Thumbnails' }).click();
       await page.getByRole('list', { name: 'Folders' }).getByRole('button', { name: /archive/ }).click();
       await expect(page.getByText('This folder is empty')).toBeVisible();
     },
@@ -103,6 +103,66 @@ const SHOTS: Shot[] = [
   { name: 'move-printing', route: 'move', options: { scenario: 'printing' } },
   { name: 'heat', route: 'heat', options: { scenario: 'printing' } },
   { name: 'extrude', route: 'extrude', options: { scenario: 'paused' } },
+  {
+    name: 'home-spool',
+    route: 'home',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('link', { name: /Galaxy Black/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'home-printing-spool',
+    route: 'home',
+    options: { scenario: 'printing', spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByText(/Galaxy Black/)).toBeVisible();
+    },
+  },
+  {
+    name: 'extrude-spool',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: /Galaxy Black/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-browse',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /Galaxy Black/ }).click();
+      await expect(page.getByRole('dialog', { name: 'Spools' })).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-confirm',
+    route: 'extrude',
+    options: { scenario: 'ready', homed: true, spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /Galaxy Black/ }).click();
+      await page.getByRole('button', { name: /Arctic White/ }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+    },
+  },
+  {
+    name: 'spool-offline',
+    route: 'extrude',
+    options: { scenario: 'ready', spoolman: 'offline' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: /Spoolman offline/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'files-spool',
+    route: 'files',
+    options: { scenario: 'ready', spoolman: 'ready' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /cable_chain_mount_PETG/ }).click();
+      await expect(page.getByText(/Active spool/)).toBeVisible();
+    },
+  },
   { name: 'fans', route: 'fans', options: { scenario: 'printing' } },
   { name: 'macros', route: 'macros', options: { scenario: 'ready' } },
   {
@@ -172,6 +232,7 @@ test.describe('screenshots @screenshot', () => {
       test(`${vp.name} ${shot.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
         if (shot.name.startsWith('mmu')) await seedIntegrations(page, { happyHare: true }, MOONRAKER);
+        else if (shot.name.includes('spool')) await seedIntegrations(page, { spoolman: true }, MOONRAKER);
         await openWithMock(page, shot.route, { ...shot.options, fixedClock: true });
         await shot.prepare?.(page);
         await page.evaluate(() => document.fonts.ready);

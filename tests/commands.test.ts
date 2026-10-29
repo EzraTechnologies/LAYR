@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normaliseConsoleInput, prepareCommand, type PrinterCommand, type Prepared } from '../src/lib/actions/commands';
+import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integrations/runtime';
 import { readyState, withJob } from './stateFixture';
 
 function plan(result: Prepared) {
@@ -28,6 +29,8 @@ describe('connection gates', () => {
     { kind: 'emergency_stop' },
     { kind: 'gcode', script: 'STATUS' },
     { kind: 'delete_file', path: 'a.gcode' },
+    { kind: 'set_active_spool', spoolId: 4, name: 'Galaxy Black' },
+    { kind: 'clear_active_spool' },
   ];
 
   it.each(commands)('blocks $kind while offline', (command) => {
@@ -272,6 +275,29 @@ describe('print, files and macros', () => {
     expect(blocked(prepareCommand({ kind: 'macro', name: 'HEATSOAK' }, readyState()))).toMatch(/needs TEMP/);
     expect(blocked(prepareCommand({ kind: 'macro', name: 'NOT_A_MACRO' }, readyState()))).toBe('This macro is not available');
     expect(blocked(prepareCommand({ kind: 'macro', name: 'LOAD_FILAMENT\nM112' }, readyState()))).toBe('This macro is not available');
+    expect(plan(prepareCommand({ kind: 'macro', name: 'LOAD_FILAMENT', note: 'Clears the spool only if Klipper accepts it.' }, readyState())).confirm?.body).toMatch(/Clears the spool/);
+    expect(plan(prepareCommand({ kind: 'macro', name: 'LOAD_FILAMENT' }, readyState())).confirm?.body).not.toMatch(/spool/);
+  });
+
+  it('confirms spool selection and refuses it during a print', () => {
+    resetIntegrationRuntime();
+    expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 7, name: 'Galaxy Black' }, readyState()))).toBe(
+      'Turn Spoolman on in Settings before changing the active spool',
+    );
+    setIntegrationRuntime({ spoolman: true, happyHare: false, afc: false });
+    const selected = plan(prepareCommand({ kind: 'set_active_spool', spoolId: 7, name: 'Galaxy Black' }, readyState()));
+    expect(selected.method).toBe('server.spoolman.post_spool_id');
+    expect(selected.params).toEqual({ spool_id: 7 });
+    expect(selected.confirm?.confirmLabel).toBe('Set active spool');
+    expect(selected.group).toBe('spoolman');
+    const cleared = plan(prepareCommand({ kind: 'clear_active_spool' }, readyState()));
+    expect(cleared.params).toEqual({ spool_id: null });
+    expect(cleared.confirm?.confirmLabel).toBe('Clear spool');
+    expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 7, name: 'Galaxy Black' }, withJob(readyState(), 'printing')))).toMatch(/locked/);
+    expect(blocked(prepareCommand({ kind: 'clear_active_spool' }, withJob(readyState(), 'paused')))).toMatch(/locked/);
+    expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 0, name: 'Nope' }, readyState()))).toMatch(/cannot be used/);
+    expect(blocked(prepareCommand({ kind: 'set_active_spool', spoolId: 1.5, name: 'Nope' }, readyState()))).toMatch(/cannot be used/);
+    resetIntegrationRuntime();
   });
 });
 

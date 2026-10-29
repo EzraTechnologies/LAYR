@@ -4,6 +4,7 @@ import type { ConsoleLog } from './console/console.svelte';
 import type { FileBrowser } from './files/browser.svelte';
 import type { PrinterStore } from './printer/store.svelte';
 import type { SettingsStore } from './settings.svelte';
+import type { SpoolmanLive } from './spoolman/live.svelte';
 import type { Ui } from './ui.svelte';
 
 export interface AppContext {
@@ -14,6 +15,7 @@ export interface AppContext {
   files: FileBrowser;
   console: ConsoleLog;
   settings: SettingsStore;
+  spoolman: SpoolmanLive;
   /** Text queued for the console input, e.g. a macro that needs parameters. */
   consoleDraft: { value: string };
 }

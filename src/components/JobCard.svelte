@@ -2,12 +2,13 @@
   import { app } from '../lib/context';
   import { displayFilename, formatClock, formatDuration, formatFilament, formatFlow, formatSpeed } from '../lib/format';
   import { navigate } from '../lib/routes';
+  import { jobSpoolSuffix } from '../lib/spoolman/present';
   import { headline } from '../lib/statusMeta';
   import Icon from './Icon.svelte';
   import ProgressRing from './ProgressRing.svelte';
   import Thumb from './Thumb.svelte';
 
-  const { store, ui } = app();
+  const { store, ui, spoolman } = app();
   const printerState = store.state;
   const timeZone: string | undefined = undefined;
 
@@ -28,6 +29,8 @@
         ? String(job.currentLayer)
         : '—',
   );
+  const spoolSuffix = $derived(active ? jobSpoolSuffix(spoolman.snapshot, spoolman.activeSpool()) : null);
+  const filamentTitle = $derived(spoolSuffix ? `Filament used for this job. ${spoolSuffix}` : 'Filament used for this job');
   const paused = $derived(printerState.status === 'paused');
   const toggleCommand = $derived(paused ? ({ kind: 'resume' } as const) : ({ kind: 'pause' } as const));
   const toggleBusy = $derived(ui.isBusy(toggleCommand));
@@ -133,7 +136,7 @@
             </div>
           {/if}
         </div>
-        <p class="filament" title="Filament used for this job">Filament {formatFilament(job.filamentUsed)}</p>
+        <p class="filament" title={filamentTitle}>Filament {formatFilament(job.filamentUsed)}{spoolSuffix ? ` · ${spoolSuffix}` : ''}</p>
       </div>
     </div>
 

@@ -1,17 +1,16 @@
 /**
- * Spoolman integration contract for the Svelte app. The Svelte UI does not call this module.
- * The native Qt Filament screen implements the same rules in `native-qt/` (confirm a write, and
- * clear the active spool only after an unload Klipper has accepted).
+ * Spoolman integration for the Chromium app. Reads use Moonraker's documented Spoolman methods.
+ * Writes go through `CommandGateway` and are scoped to one `PrinterProfile`.
  *
- * Planned workflow:
- *  1. Browse available spools (Moonraker `server.spoolman.proxy` → Spoolman `GET /v1/spool`).
- *  2. Select the active spool for a printer (`server.spoolman.post_spool_id`), with confirmation.
- *  3. Clear the active spool only after an unload that the user has confirmed completed successfully
- *     (`server.spoolman.post_spool_id` with `spool_id: null`). A failed or cancelled unload keeps the spool.
+ * Workflow:
+ *  1. Browse spools (`server.spoolman.proxy` → Spoolman `GET /v1/spool`).
+ *  2. Select the active spool (`server.spoolman.post_spool_id`) only after confirmation.
+ *  3. Clear the active spool only after an unload Klipper has accepted
+ *     (`server.spoolman.post_spool_id` with `spool_id: null`). A failed, unconfirmed, or
+ *     cancelled unload keeps the spool.
  *
- * All of these are write operations and must go through a confirmed `CommandGateway` path and be scoped per
- * `PrinterProfile.id`. The unload outcome maps to the gateway result: only `status: 'ok'` (Klipper replied
- * "ok" to the unload macro) counts as `confirmed-success`; `failed` and `unconfirmed` must keep the spool.
+ * The unload outcome maps to the gateway result: only `status: 'ok'` (Klipper replied "ok"
+ * to the unload macro) counts as `confirmed-success`.
  */
 
 export interface SpoolSummary {
@@ -19,12 +18,20 @@ export interface SpoolSummary {
   name: string;
   material: string | null;
   vendor: string | null;
-  /** Hex colour without `#`, as stored by Spoolman. */
+  /** Hex colour without `#`, as stored by Spoolman. Null when Spoolman did not send a usable colour. */
   colorHex: string | null;
+  /** Grams remaining. Null when Spoolman omitted `remaining_weight`. */
   remainingWeightG: number | null;
+  /** Millimetres remaining. Null when Spoolman omitted `remaining_length`. */
+  remainingLengthMm: number | null;
+  archived: boolean;
 }
 
-export type UnloadOutcome = { kind: 'confirmed-success' } | { kind: 'failed'; reason: string } | { kind: 'cancelled' };
+export type UnloadOutcome =
+  | { kind: 'confirmed-success' }
+  | { kind: 'failed'; reason: string }
+  | { kind: 'unconfirmed'; reason: string }
+  | { kind: 'cancelled' };
 
 export interface SpoolmanService {
   listSpools(printerId: string): Promise<SpoolSummary[]>;
