@@ -17,6 +17,7 @@
   import { SettingsStore } from './lib/settings.svelte';
   import { SpoolmanLive } from './lib/spoolman/live.svelte';
   import { Ui } from './lib/ui.svelte';
+  import Afc from './views/Afc.svelte';
   import Console from './views/Console.svelte';
   import Dashboard from './views/Dashboard.svelte';
   import Extrude from './views/Extrude.svelte';
@@ -115,6 +116,8 @@
       <Heat />
     {:else if route === 'extrude'}
       <Extrude />
+    {:else if route === 'afc'}
+      <Afc />
     {:else if route === 'fans'}
       <Fans />
     {:else if route === 'macros'}

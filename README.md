@@ -30,6 +30,16 @@ its own Filament screen for the same rules. Neither UI has been tested on a Pi.
 Screenshots are captured from the production bundle talking to a mocked Moonraker
 (`npm run screenshots`). They are fixture data, not a recording of a printer.
 
+AFC screenshots use the same mock, with status shaped like the AFCProject `AFC` and `AFC_lane` objects.
+They are not a Box Turtle or any other physical unit.
+
+| 1024×600 | 800×480 |
+| --- | --- |
+| ![AFC lanes, 1024×600](docs/screenshots/1024x600-afc.png) | ![AFC lanes, 800×480](docs/screenshots/800x480-afc.png) |
+| ![AFC loading, 1024×600](docs/screenshots/1024x600-afc-loading.png) | ![AFC loading, 800×480](docs/screenshots/800x480-afc-loading.png) |
+| ![AFC error, 1024×600](docs/screenshots/1024x600-afc-error.png) | ![AFC error, 800×480](docs/screenshots/800x480-afc-error.png) |
+| ![AFC not installed, 1024×600](docs/screenshots/1024x600-afc-absent.png) | ![AFC not installed, 800×480](docs/screenshots/800x480-afc-absent.png) |
+
 ## What v0.2 does
 
 - **Home**: printer display name, connection and print state, progress, filename, the active
@@ -139,10 +149,16 @@ Copy `.env.example` to `.env.local`. All variables are optional.
 | --- | --- | --- |
 | URL parameter | `?moonraker=http://voron.local:7125` | Highest precedence. |
 | Settings screen | Moonraker URL field, then **Save** | Stored in `localStorage` on that device. **Reset** clears it. The API key is never stored there. |
-| Page | `#/home`, `#/files`, `#/move`, `#/heat`, `#/extrude`, `#/fans`, `#/macros`, `#/console`, `#/settings` | Hash routes. |
+| Page | `#/home`, `#/files`, `#/move`, `#/heat`, `#/extrude`, `#/afc`, `#/fans`, `#/macros`, `#/console`, `#/settings` | Hash routes. `#/afc` explains that AFC is not installed when the printer has no `AFC` object. The AFC item is added to the rail only when that object is present. |
 
 URL precedence: query parameter, then saved setting, then the build variable. If none is set, LAYR does
 not connect.
+
+- **AFC** (only when Settings → AFC is on for this printer and Klipper lists an `AFC` object): units, lanes, what is loaded, loading state,
+  and errors from the AFC add-on. The switch defaults off. Turning it on turns Happy Hare off, and both can stay off.
+  Load, tool change, unload, hub load, and eject are the documented
+  AFC commands, each confirmed first, and only if `printer.gcode.help` lists that command. Printers
+  without AFC keep the same navigation as before. LAYR does not install AFC, and the Qt UI does not drive it.
 
 ### Moonraker access
 
@@ -224,6 +240,7 @@ src/
     mmu/happyhare.ts            Happy Hare status parsing and confirmed MMU commands
     moonraker/                  WebSocket client, subscriptions, status and control mapping
     printer/                    PrinterState, live source, throttled store
+    afc/                        Optional AFC status mapping. Subscribed only when AFC is switched on.
     actions/                    prepareCommand (pure) and CommandGateway (the only write path)
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
@@ -256,6 +273,10 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 - WPE / Cog is optional, off by default, and was not launched on Bookworm hardware here. Debian
   Bookworm's `wpewebkit` package has no security support. WebKitGTK is a different port and is not used.
 - One printer per instance.
+- AFC on the Svelte screen was checked against the AFCProject `get_status` fields and a mocked Moonraker
+  (unit tests, Playwright, and the screenshots below). It has not been run on a printer with AFC
+  installed, and it has not been tried on a Raspberry Pi. Do not treat a fixture screenshot as a
+  hardware pass. LAYR will not install AFC or edit `printer.cfg` / `moonraker.conf`.
 - Progress comes from `display_status.progress` (falling back to `virtual_sdcard.progress`) and can
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
