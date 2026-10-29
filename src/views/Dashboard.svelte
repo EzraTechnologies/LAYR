@@ -6,11 +6,16 @@
   import TemperatureCard from '../components/TemperatureCard.svelte';
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
+  import { mmuSummary } from '../lib/mmu/happyhare';
+  import { headlineFor } from '../lib/spoolman/present';
 
-  const { store, console: log } = app();
+  const { store, console: log, spoolman } = app();
   const printerState = store.state;
+  const spoolLine = $derived(headlineFor(spoolman.snapshot, spoolman.activeSpool()));
+  const showSpoolStrip = $derived(!!spoolLine && printerState.status !== 'printing' && printerState.status !== 'paused');
 
   const online = $derived(printerState.status === 'ready' || printerState.status === 'printing' || printerState.status === 'paused');
+  const mmuLine = $derived(printerState.mmu ? mmuSummary(printerState.mmu) : '');
   const showJob = $derived(online || (printerState.status === 'error' && printerState.klippy === 'ready'));
   const unavailable = $derived(online ? 'Not configured' : 'No data');
   const alerts = $derived(log.alerts(printerState.now));
@@ -18,6 +23,15 @@
 
 <div class="dashboard page">
   <div class="primary">
+    {#if showSpoolStrip && spoolLine}
+      <a class="spool-strip" href="#/extrude" title={spoolLine.titleAttr}>
+        <span class="swatch" class:empty={!spoolLine.color} style:background={spoolLine.color ?? 'transparent'} aria-hidden="true"></span>
+        <span class="copy">
+          <strong title={spoolLine.title}>{spoolLine.title}</strong>
+          <span title={spoolLine.detail}>{spoolLine.detail}</span>
+        </span>
+      </a>
+    {/if}
     {#if alerts.length > 0}
       <ul class="alerts" aria-label="Printer alerts">
         {#each alerts as alert (alert.id)}
@@ -31,6 +45,12 @@
           </li>
         {/each}
       </ul>
+    {/if}
+    {#if printerState.mmu}
+      <a class="mmu-link card" href="#/mmu" title={mmuLine}>
+        <span class="mmu-kicker">Happy Hare</span>
+        <span class="mmu-summary" title={mmuLine}>{mmuLine}</span>
+      </a>
     {/if}
     {#if showJob}
       <JobCard />
@@ -91,6 +111,35 @@
     border-radius: var(--radius);
   }
 
+  .mmu-link {
+    flex: none;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .mmu-kicker {
+    flex: none;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+
+  .mmu-summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+
   .alerts {
     list-style: none;
     margin: 0;
@@ -131,5 +180,53 @@
     border: 0;
     padding: 0;
     color: var(--text-2);
+  }
+
+  .spool-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    min-height: 44px;
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .swatch {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+  }
+
+  .swatch.empty {
+    background: transparent !important;
+    border-style: dashed;
+  }
+
+  .copy {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .copy strong,
+  .copy span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .copy span {
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
   }
 </style>

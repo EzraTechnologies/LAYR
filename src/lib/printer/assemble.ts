@@ -1,5 +1,6 @@
 import { mapAfc } from '../afc/map';
 import { integrationEnabled } from '../integrations/runtime';
+import { parseMmu } from '../mmu/happyhare';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
 import type { ConfigSettings, RawStatus } from '../moonraker/types';
@@ -28,6 +29,11 @@ export interface AssembleInputs {
   settings: ConfigSettings;
   /** Thumbnail for the current job file, or null. Cleared when the filename changes. */
   thumbnailPath: string | null;
+  /**
+   * Supported Happy Hare commands from `printer.gcode.help`.
+   * Null when the printer has no `mmu` object or the help query failed.
+   */
+  gcodeCommands?: string[] | null;
   now: number;
 }
 
@@ -90,6 +96,10 @@ export function assembleState(input: AssembleInputs): PrinterState {
     macros: info.macros,
     filamentSensors: mapFilamentSensors(raw),
     afc: connected && integrationEnabled('afc') ? mapAfc(raw, input.objects, input.afcCommands) : null,
+    mmu:
+      connected && integrationEnabled('happyHare') && input.objects.includes('mmu')
+        ? parseMmu(raw.mmu, input.gcodeCommands ?? null)
+        : null,
     limits: structuredClone(info.limits),
     idleState: typeof raw.idle_timeout?.state === 'string' ? raw.idle_timeout.state : null,
     missingObjects: connected ? input.missingObjects : [],

@@ -1,18 +1,35 @@
 #!/usr/bin/env bash
 # Point ~/layr/current back at the release recorded by the previous install.sh.
-# Restarts layr-web if it is active. Does not change the kiosk, KlipperScreen, or printer configuration.
+# Restarts layr-web if it is active. Does not restart the kiosk unless --reload-kiosk
+# is passed. Does not change KlipperScreen, Klipper, Moonraker, or printer configuration.
 #
-#   ./deploy/rollback.sh [--dry-run] [--yes]
+#   ./deploy/rollback.sh [--dry-run] [--yes] [--reload-kiosk]
+#
+# The kiosk reads layr_build from the current release directory the next time it starts.
+# --reload-kiosk restarts layr-kiosk.service only when that unit is already active.
 set -euo pipefail
 cd "$(dirname "$0")" || exit 1
 # shellcheck source=deploy/lib.sh
 . ./lib.sh
 
+RELOAD_KIOSK=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./deploy/rollback.sh [--dry-run] [--yes] [--reload-kiosk]
+
+Point ~/layr/current at the previous release. layr-web is restarted if it is active.
+--reload-kiosk restarts layr-kiosk.service only when that unit is already active.
+Klipper, Moonraker, and KlipperScreen are not restarted.
+EOF
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
-    -h | --help) sed -n '2,6p' "$0"; exit 0 ;;
+    --reload-kiosk) RELOAD_KIOSK=1; shift ;;
+    -h | --help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
@@ -41,4 +58,12 @@ fi
 if unit_active "$WEB_UNIT"; then
   run sudo systemctl restart "$WEB_UNIT"
 fi
-info "Rolled back. Reload the browser tab. The display session was left as it was."
+if [ "$RELOAD_KIOSK" = 1 ]; then
+  reload_active_kiosk
+  info "Rolled back. layr_build follows the release directory now at $LAYR_HOME/current."
+else
+  info "Rolled back. The kiosk was not restarted, so the panel keeps the previous page until layr-kiosk starts again."
+  echo "The next start uses layr_build from the release directory now at $LAYR_HOME/current."
+  echo "Reload only the kiosk with: sudo systemctl restart layr-kiosk"
+  echo "Or: ./deploy/rollback.sh --reload-kiosk --yes"
+fi

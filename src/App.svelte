@@ -16,6 +16,7 @@
   import { PrinterStore } from './lib/printer/store.svelte';
   import { navItems, navigate, parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
+  import { SpoolmanLive } from './lib/spoolman/live.svelte';
   import { Ui } from './lib/ui.svelte';
   import Afc from './views/Afc.svelte';
   import Console from './views/Console.svelte';
@@ -25,6 +26,7 @@
   import Files from './views/Files.svelte';
   import Heat from './views/Heat.svelte';
   import Macros from './views/Macros.svelte';
+  import Mmu from './views/Mmu.svelte';
   import Move from './views/Move.svelte';
   import Settings from './views/Settings.svelte';
 
@@ -43,9 +45,10 @@
   const files = new FileBrowser(connection);
   const ui = new Ui(store.commands, consoleLog);
   const settings = new SettingsStore();
+  const spoolman = new SpoolmanLive(printer, connection, store.commands, (confirm) => ui.confirm(confirm));
 
   // svelte-ignore state_referenced_locally
-  setApp({ config, printer, store, ui, files, console: consoleLog, settings, consoleDraft: { value: '' } });
+  setApp({ config, printer, store, ui, files, console: consoleLog, settings, spoolman, consoleDraft: { value: '' } });
 
   let route = $state<RouteId>(parseRoute(location.hash));
 
@@ -68,8 +71,15 @@
     store.start();
   });
 
+  $effect(() => {
+    if (integrations.value.spoolman) spoolman.start(connection);
+    else spoolman.stop();
+    return () => spoolman.stop();
+  });
+
   onDestroy(() => {
     window.removeEventListener('hashchange', onHashChange);
+    spoolman.stop();
     store.stop();
     files.dispose();
     consoleLog.dispose();
@@ -92,7 +102,7 @@
 </script>
 
 <div class="app">
-  <NavRail current={route} items={navItems(store.state.afc !== null)} />
+  <NavRail current={route} items={navItems(store.state.afc !== null, store.state.mmu !== null)} />
   <TopBar />
 
   <main class="content" id="main">
@@ -112,6 +122,8 @@
       <Fans />
     {:else if route === 'macros'}
       <Macros />
+    {:else if route === 'mmu'}
+      <Mmu />
     {:else if route === 'console'}
       <Console />
     {:else if route === 'settings'}

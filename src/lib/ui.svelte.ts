@@ -1,4 +1,5 @@
 import { afcScript, type Confirmation, type PrinterCommand } from './actions/commands';
+import { mmuScript } from './mmu/happyhare';
 import type { CommandGateway, CommandOutcome } from './actions/gateway';
 import type { ConsoleLog } from './console/console.svelte';
 
@@ -75,6 +76,9 @@ export class Ui {
         const text =
           command.kind === 'gcode' ? command.script.trim() : command.kind === 'macro' ? command.name : afcScript(command.action, command.lane);
         this.#console.recordCommand(text);
+      } else if (command.kind === 'mmu') {
+        const line = mmuScript(command);
+        if (line) this.#console.recordCommand(line);
       }
       outcome = await this.#gateway.execute(command, { confirmed: true });
     }

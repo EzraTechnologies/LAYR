@@ -12,7 +12,7 @@
   } from '../lib/integrations/preferences';
   import { integrations } from '../lib/integrations/store.svelte';
   import { formatTemp } from '../lib/format';
-  import { DIM_OPTIONS, type FilesViewMode } from '../lib/settings.svelte';
+  import { DIM_OPTIONS, FILES_VIEW_OPTIONS } from '../lib/settings.svelte';
 
   interface Props {
     onSaveUrl: (url: string | null) => void;
@@ -26,11 +26,6 @@
   let urlDraft = $state(printer.moonrakerUrl ?? '');
   const urlValid = $derived(isValidMoonrakerUrl(urlDraft));
   const changed = $derived(urlDraft.trim() !== (printer.moonrakerUrl ?? ''));
-
-  const FILE_VIEWS: Array<{ id: FilesViewMode; label: string }> = [
-    { id: 'list', label: 'List' },
-    { id: 'folders', label: 'Folders' },
-  ];
 
   const SOURCE_LABEL: Record<AppConfig['urlSource'], string> = {
     query: 'URL parameter',
@@ -224,7 +219,7 @@
       </div>
       <span class="label">Files</span>
       <div class="seg" role="radiogroup" aria-label="File browsing">
-        {#each FILE_VIEWS as mode (mode.id)}
+        {#each FILES_VIEW_OPTIONS as mode (mode.id)}
           <button
             type="button"
             role="radio"
@@ -235,7 +230,7 @@
           </button>
         {/each}
       </div>
-      <p class="hint">Saved on this device. Folder cards show the current Moonraker directory.</p>
+      <p class="hint">Saved on this device. Thumbnails shows the current directory as cards.</p>
       <span class="label" id="name-label">Printer Name</span>
       <button type="button" class="btn ghost url-field" aria-labelledby="name-label" onclick={editName}>
         <span class="url-text" class:placeholder={!settings.value.displayName} title={effectiveName}>

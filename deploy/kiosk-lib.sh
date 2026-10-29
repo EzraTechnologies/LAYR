@@ -120,3 +120,54 @@ read_hide_cursor() {
     *) printf '0\n' ;;
   esac
 }
+
+# Percent-encode a query component. Unreserved characters stay readable.
+# python3 is already required by the installer and the cursor helpers.
+url_query_encode() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to build the kiosk URL" >&2
+    return 1
+  fi
+  python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.argv[1], safe="-._~"))' "$1"
+}
+
+# Basename of the resolved ~/layr/current release directory.
+# install.sh names that directory with a UTC timestamp. rollback.sh points current
+# at the previous directory, so the basename changes back with the release.
+# A missing path, a broken symlink, or a non-directory uses "unreleased" so the
+# kiosk can still start. The same directory always yields the same id.
+layr_build_id() {
+  local home target
+  home=${1:-${LAYR_HOME:-${HOME:-/tmp}/layr}}
+  target=""
+  if [ -L "$home/current" ] || [ -e "$home/current" ]; then
+    target=$(readlink -f "$home/current" 2>/dev/null || true)
+  fi
+  if [ -n "$target" ] && [ -d "$target" ]; then
+    basename "$target"
+    return 0
+  fi
+  printf 'unreleased\n'
+}
+
+# Full kiosk URL. The Moonraker value and the hash route are preserved.
+# layr_build is only a cache-buster: Chromium treats a different query as a different page,
+# so a new or rolled-back release is not executed from the previous bundle.
+# Settings stored in the Chromium profile stay, because the origin does not change.
+kiosk_page_url() {
+  local port moonraker home build encoded_moonraker encoded_build
+  port=${1:-${LAYR_PORT:-7180}}
+  moonraker=${2:-${LAYR_MOONRAKER_URL:-http://localhost:7125}}
+  home=${3:-${LAYR_HOME:-${HOME:-/tmp}/layr}}
+  case "$port" in
+    '' | *[!0-9]*)
+      echo "LAYR_PORT must be a number" >&2
+      return 1
+      ;;
+  esac
+  build=$(layr_build_id "$home")
+  encoded_moonraker=$(url_query_encode "$moonraker")
+  encoded_build=$(url_query_encode "$build")
+  printf 'http://localhost:%s/?moonraker=%s&layr_build=%s#/home\n' \
+    "$port" "$encoded_moonraker" "$encoded_build"
+}

@@ -9,9 +9,10 @@
 
   let { current, items }: Props = $props();
   const dense = $derived(items.length > 9);
+  const extra = $derived(items.some((item) => item.id === 'mmu'));
 </script>
 
-<nav class="rail" class:dense aria-label="Main">
+<nav class="rail" class:dense class:extra aria-label="Main">
   <div class="brand" aria-label="LAYR">
     <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
       <defs>
@@ -174,5 +175,17 @@
     .rail.dense a {
       min-height: 44px;
     }
+  }
+
+  /* A tenth item only exists when Happy Hare is present. Keep each target at least 44px. */
+  .rail.extra ul {
+    gap: 2px;
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+
+  .rail.extra a {
+    min-height: 0;
+    gap: 1px;
+    padding: 2px;
   }
 </style>

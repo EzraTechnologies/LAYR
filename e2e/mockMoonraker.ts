@@ -159,9 +159,51 @@ const CONTROL = new Set([
   'printer.restart',
   'printer.firmware_restart',
   'server.files.delete_file',
+  'server.spoolman.post_spool_id',
 ]);
 
-class RpcFailure extends Error {}
+class RpcFailure extends Error {
+  readonly code: number;
+  constructor(message: string, code = 400) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export type SpoolmanMode = 'absent' | 'ready' | 'offline' | 'unauthorized';
+
+export interface MockSpool {
+  id: number;
+  name: string;
+  material: string | null;
+  vendor: string | null;
+  /** Hex without `#`. Null when the fixture omits a colour. */
+  color: string | null;
+  remainingWeight: number | null;
+  /** Millimetres. Null when the fixture omits a length. */
+  remainingLength: number | null;
+  archived?: boolean;
+}
+
+/** Fixture spools. Not shipped in the app. */
+export function sampleSpools(): MockSpool[] {
+  return [
+    { id: 7, name: 'Galaxy Black', material: 'ASA', vendor: 'Polymaker', color: '1c1c1c', remainingWeight: 842.4, remainingLength: 311_200 },
+    { id: 8, name: 'Arctic White', material: 'PETG', vendor: 'Prusament', color: 'f4f4f4', remainingWeight: 210, remainingLength: 78_000 },
+    { id: 3, name: 'Clearance Red', material: 'PLA', vendor: null, color: 'd7263d', remainingWeight: null, remainingLength: null },
+  ];
+}
+
+function toSpoolman(spool: MockSpool): Record<string, unknown> {
+  const filament: Record<string, unknown> = { name: spool.name };
+  if (spool.material) filament.material = spool.material;
+  if (spool.color) filament.color_hex = spool.color;
+  if (spool.vendor) filament.vendor = { name: spool.vendor };
+  const body: Record<string, unknown> = { id: spool.id, archived: spool.archived === true, filament };
+  if (spool.remainingWeight != null) body.remaining_weight = spool.remainingWeight;
+  if (spool.remainingLength != null) body.remaining_length = spool.remainingLength;
+  return body;
+}
 
 export type AfcScenario = 'ready' | 'loading' | 'error';
 
@@ -285,6 +327,21 @@ export interface MockOptions {
    * Defaults to the documented AFC commands when `afc` is set, and to null otherwise.
    */
   afcHelp?: Record<string, string> | null;
+  /**
+   * Happy Hare `mmu` object. `commands: null` makes `printer.gcode.help` fail.
+   * Omit `commands` to register load, unload, tool change, and recover.
+   */
+  mmu?: { status: Record<string, unknown>; commands?: string[] | null };
+  /** `absent` omits the Spoolman component. Other modes add it to `server.info`. */
+  spoolman?: SpoolmanMode;
+  spools?: MockSpool[];
+  /** `null` is an explicit empty active spool. Omitted means spool 7 when Spoolman is ready. */
+  activeSpoolId?: number | null;
+  /** Omit `components` so LAYR probes `server.spoolman.status` instead. */
+  omitComponents?: boolean;
+  failedComponents?: string[];
+  /** Macro names that Klipper rejects. */
+  failScripts?: string[];
 }
 
 export class MockMoonraker {
@@ -297,8 +354,16 @@ export class MockMoonraker {
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
-  /** `printer.gcode.help` result. Null answers with method-not-found. */
+  /** `printer.gcode.help` AFC entries. Null omits them. */
   afcHelp: Record<string, string> | null = null;
+  /** `printer.gcode.help`. `'error'` rejects the method. */
+  mmuHelp: Record<string, string> | 'error' | null = null;
+  spoolmanMode: SpoolmanMode;
+  spools: MockSpool[];
+  activeSpoolId: number | null;
+  omitComponents: boolean;
+  failedComponents: string[];
+  failScripts: string[];
   #ws: WebSocketRoute | null = null;
   #relative = false;
   #saved: Record<string, boolean> = {};
@@ -320,6 +385,19 @@ export class MockMoonraker {
       { message: 'G28', time: T - 400, type: 'command' },
       { message: '// Klipper state: Ready', time: T - 390, type: 'response' },
     ];
+    if (options.mmu) {
+      this.status.mmu = { ...options.mmu.status };
+      const names = options.mmu.commands === undefined
+        ? ['MMU_LOAD', 'MMU_UNLOAD', 'MMU_CHANGE_TOOL', 'MMU_RECOVER']
+        : options.mmu.commands;
+      this.mmuHelp = names === null ? 'error' : Object.fromEntries(names.map((name) => [name, name]));
+    }
+    this.spoolmanMode = options.spoolman ?? 'absent';
+    this.spools = options.spools ?? sampleSpools();
+    this.activeSpoolId = options.activeSpoolId === undefined ? (this.spoolmanMode === 'ready' ? 7 : null) : options.activeSpoolId;
+    this.omitComponents = options.omitComponents ?? false;
+    this.failedComponents = options.failedComponents ?? [];
+    this.failScripts = options.failScripts ?? [];
   }
 
   /** Control (printer-changing) calls in order. */
@@ -386,7 +464,7 @@ export class MockMoonraker {
       const result = await this.#dispatch(msg.method, msg.params ?? {});
       reply(result);
     } catch (e) {
-      error(e instanceof Error ? e.message : String(e), e instanceof RpcFailure ? 400 : 500);
+      error(e instanceof Error ? e.message : String(e), e instanceof RpcFailure ? e.code : 500);
     }
   }
 
@@ -398,8 +476,39 @@ export class MockMoonraker {
     switch (method) {
       case 'server.connection.identify':
         return { connection_id: 101 };
-      case 'server.info':
-        return { klippy_connected: true, klippy_state: this.klippy, moonraker_version: 'v0.9.3' };
+      case 'server.info': {
+        const body: Record<string, unknown> = { klippy_connected: true, klippy_state: this.klippy, moonraker_version: 'v0.9.3' };
+        if (!this.omitComponents) {
+          const components = ['database', 'file_manager', 'klippy_apis', 'machine', 'data_store'];
+          if (this.spoolmanMode !== 'absent' && !this.failedComponents.includes('spoolman')) components.push('spoolman');
+          body.components = components;
+          body.failed_components = this.failedComponents;
+        }
+        return body;
+      }
+      case 'server.spoolman.status':
+        if (this.spoolmanMode === 'absent') throw new RpcFailure('Method not found', -32601);
+        if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
+        return {
+          spoolman_connected: this.spoolmanMode === 'ready',
+          pending_reports: [],
+          spool_id: this.spoolmanMode === 'ready' ? this.activeSpoolId : null,
+        };
+      case 'server.spoolman.get_spool_id':
+        if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
+        if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
+        return { spool_id: this.activeSpoolId };
+      case 'server.spoolman.post_spool_id': {
+        if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
+        if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
+        const id = params.spool_id;
+        this.activeSpoolId = typeof id === 'number' ? id : null;
+        const spoolId = this.activeSpoolId;
+        setTimeout(() => this.notify('notify_active_spool_set', [{ spool_id: spoolId }]), 20);
+        return { spool_id: spoolId };
+      }
+      case 'server.spoolman.proxy':
+        return this.#spoolProxy(params);
       case 'printer.info':
         return {
           state: this.klippy,
@@ -419,8 +528,9 @@ export class MockMoonraker {
       case 'server.gcode_store':
         return { gcode_store: this.gcodeStore };
       case 'printer.gcode.help':
-        if (!this.afcHelp) throw new Error('Method not found: printer.gcode.help');
-        return this.afcHelp;
+        if (this.mmuHelp === 'error') throw new RpcFailure('Method not found: printer.gcode.help');
+        if (!this.afcHelp && !this.mmuHelp) throw new RpcFailure('Method not found: printer.gcode.help');
+        return { ...(this.mmuHelp ?? {}), ...(this.afcHelp ?? {}) };
       case 'server.files.get_directory':
         return this.#directory(String(params.path ?? 'gcodes'));
       case 'server.files.metadata': {
@@ -533,6 +643,24 @@ export class MockMoonraker {
       this.update(diff);
     }
     this.#respond(`// ${command} done`);
+  }
+
+  #spoolProxy(params: Record<string, unknown>): Record<string, unknown> {
+    if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
+    if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
+    const path = String(params.path ?? '');
+    const query = typeof params.query === 'string' ? params.query : '';
+    if (path === '/v1/spool') {
+      const search = new URLSearchParams(query);
+      const offset = Number(search.get('offset') ?? '0');
+      const limit = Number(search.get('limit') ?? '100');
+      return { response: this.spools.slice(offset, offset + limit).map(toSpoolman), response_headers: {} };
+    }
+    const detail = /^\/v1\/spool\/(\d+)$/.exec(path);
+    if (!detail) throw new RpcFailure('Not found', 404);
+    const found = this.spools.find((spool) => spool.id === Number(detail[1]));
+    if (!found) throw new RpcFailure('Not found', 404);
+    return { response: toSpoolman(found), response_headers: {} };
   }
 
   #fail(message: string): never {
@@ -653,6 +781,7 @@ export class MockMoonraker {
           break;
         default:
           if (word in MACROS) {
+            if (this.failScripts.includes(word)) this.#fail(`${word} failed`);
             if (word.includes('FILAMENT')) await new Promise((r) => setTimeout(r, 250));
             this.#respond(`// ${word} done`);
             break;

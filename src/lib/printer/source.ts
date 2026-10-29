@@ -1,5 +1,7 @@
 import type { CallOptions } from '../moonraker/client';
-import type { PrinterState } from './model';
+import type { ServerInfo } from '../moonraker/types';
+import type { SpoolmanNotice } from '../spoolman/api';
+import type { PrinterState, TransportState } from './model';
 
 /**
  * A producer of `PrinterState` for one printer. The UI never talks to Moonraker directly; it subscribes to a
@@ -27,6 +29,10 @@ export interface PrinterConnection {
   onReady(listener: () => void): () => void;
   onGcodeResponse(listener: (message: string) => void): () => void;
   onFilelistChanged(listener: (change: { action: string; path: string | null; root: string | null }) => void): () => void;
+  onTransport(listener: (state: TransportState) => void): () => void;
+  /** Each successful `server.info`, including the component list. */
+  onServerInfo(listener: (info: ServerInfo) => void): () => void;
+  onSpoolmanNotice(listener: (notice: SpoolmanNotice) => void): () => void;
 }
 
 /** Emits a single "not configured" state and never touches the network. */

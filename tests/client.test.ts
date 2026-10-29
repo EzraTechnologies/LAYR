@@ -10,6 +10,7 @@ import {
   toWebSocketUrl,
   type ClientEvent,
 } from '../src/lib/moonraker/client';
+import { listProxyParams } from '../src/lib/spoolman/api';
 import { FakeMoonraker } from './fakeMoonraker';
 
 function setup(server: FakeMoonraker, extra: Partial<ConstructorParameters<typeof MoonrakerClient>[0]> = {}) {
@@ -82,6 +83,8 @@ describe('MoonrakerClient', () => {
     expect(subscribed).toContain('temperature_sensor chamber');
     expect(subscribed).not.toContain('heater_bed');
     expect(subscribed).not.toContain('display_status');
+    expect(subscribed).not.toContain('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
 
     const snapshot = events.find((e) => e.type === 'snapshot');
     expect(snapshot).toMatchObject({
@@ -113,8 +116,7 @@ describe('MoonrakerClient', () => {
     });
     expect(server.calls).not.toContain('printer.objects.query');
     const snapshot = events.find((e) => e.type === 'snapshot');
-    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } } });
-    expect(server.calls).not.toContain('printer.gcode.help');
+    expect(snapshot).toMatchObject({ settings: { extruder: { filament_diameter: '1.75' } }, gcodeCommands: null });
     client.stop();
   });
 
@@ -178,6 +180,65 @@ describe('MoonrakerClient', () => {
     expect(events.find((event) => event.type === 'snapshot')).toMatchObject({ afcCommands: [] });
     expect(server.calls).toContain('printer.gcode.help');
     expect(server.calls).toContain('printer.objects.subscribe');
+    client.stop();
+    resetIntegrationRuntime();
+  });
+
+  it('does not subscribe to Happy Hare or ask for help while the switch is off', async () => {
+    resetIntegrationRuntime();
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 1 } },
+    });
+    server.help = { MMU_LOAD: 'Load' };
+    const { client } = setup(server);
+    client.start();
+    await flush();
+    expect(server.subscribeParams?.objects).not.toHaveProperty('mmu');
+    expect(server.calls).not.toContain('printer.gcode.help');
+    client.stop();
+  });
+
+  it('subscribes to Happy Hare fields and keeps only registered commands', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: {
+        webhooks: { state: 'ready' },
+        extruder: { temperature: 30 },
+        mmu: { tool: 1, gate: 2, filament: 'Loaded', enabled: true },
+      },
+    });
+    server.help = { MMU_LOAD: 'Load', MMU_CHANGE_TOOL: 'Change', G28: 'Home', MMU_TEST_CONFIG: 'test' };
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    const objects = server.subscribeParams?.objects as Record<string, string[]>;
+    expect(objects.mmu).toContain('tool');
+    expect(objects.mmu).toContain('gate_status');
+    expect(objects.mmu).not.toContain('nfc');
+    expect(objects.mmu).not.toContain('sensors');
+    expect(server.calls).toContain('printer.gcode.help');
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toEqual(['MMU_LOAD', 'MMU_CHANGE_TOOL']);
+    client.stop();
+    resetIntegrationRuntime();
+  });
+
+  it('stays connected when Happy Hare command help fails', async () => {
+    setIntegrationRuntime({ spoolman: false, happyHare: true, afc: false });
+    const server = new FakeMoonraker({
+      objects: ['webhooks', 'extruder', 'mmu'],
+      status: { webhooks: { state: 'ready' }, extruder: { temperature: 30 }, mmu: { tool: 0 } },
+    });
+    server.help = 'error';
+    const { client, events, klippy } = setup(server);
+    client.start();
+    await flush();
+    const snapshot = events.find((e) => e.type === 'snapshot');
+    expect(snapshot && snapshot.type === 'snapshot' && snapshot.gcodeCommands).toBeNull();
+    expect(klippy()).toEqual(['ready']);
+    expect(server.calls).toContain('printer.gcode.help');
     client.stop();
     resetIntegrationRuntime();
   });
@@ -335,6 +396,7 @@ describe('MoonrakerClient', () => {
         'printer.print.start',
         'printer.restart',
         'server.files.delete_file',
+        'server.spoolman.post_spool_id',
       ].sort(),
     );
     client.stop();
@@ -365,6 +427,29 @@ describe('MoonrakerClient', () => {
       state: 'waiting',
       reason: 'Authentication failed (HTTP 401). Check the API key or trusted_clients',
     });
+    client.stop();
+  });
+
+  it('emits server info and spoolman notices, and refuses a proxy that is not a spool read', async () => {
+    const server = new FakeMoonraker();
+    const { client, events } = setup(server);
+    client.start();
+    await flush();
+    expect(events.some((event) => event.type === 'server')).toBe(true);
+    server.last.notify('notify_active_spool_set', [{ spool_id: 4 }]);
+    server.last.notify('notify_spoolman_status_changed', [{ spoolman_connected: false }]);
+    expect(events.filter((event) => event.type === 'spoolman')).toEqual([
+      { type: 'spoolman', notice: { kind: 'active', spoolId: 4, known: true } },
+      { type: 'spoolman', notice: { kind: 'link', connected: false } },
+    ]);
+    const before = server.calls.length;
+    await expect(
+      client.call('server.spoolman.proxy', { request_method: 'POST', path: '/v1/spool', use_v2_response: true }),
+    ).rejects.toBeInstanceOf(MethodNotAllowedError);
+    await expect(client.call('server.spoolman.post_spool_id', { spool_id: 1, extra: true })).rejects.toBeInstanceOf(MethodNotAllowedError);
+    expect(server.calls.length).toBe(before);
+    await expect(client.call('server.spoolman.proxy', listProxyParams(0))).rejects.toThrow(/not found/i);
+    expect(server.calls.at(-1)).toBe('server.spoolman.proxy');
     client.stop();
   });
 });

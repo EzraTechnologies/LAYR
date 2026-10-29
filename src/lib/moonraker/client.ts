@@ -1,7 +1,9 @@
 import type { KlippyState, TransportState } from '../printer/model';
+import { parseSpoolmanNotice, spoolmanParamsAllowed, type SpoolmanNotice } from '../spoolman/api';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
 import { AFC_OBJECT, afcCommandsFromHelp } from '../afc/objects';
+import { mmuCommandsFromHelp } from '../mmu/happyhare';
 import { integrationEnabled } from '../integrations/runtime';
 import { planSubscription } from './objects';
 import type {
@@ -39,6 +41,9 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.files.metadata',
   'server.files.thumbnails',
   'printer.gcode.help',
+  'server.spoolman.status',
+  'server.spoolman.get_spool_id',
+  'server.spoolman.proxy',
 ]);
 
 /**
@@ -57,6 +62,7 @@ export const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'printer.restart',
   'printer.firmware_restart',
   'server.files.delete_file',
+  'server.spoolman.post_spool_id',
 ]);
 
 export function isAllowedMethod(method: string): boolean {
@@ -103,11 +109,17 @@ export type ClientEvent =
       settings: ConfigSettings;
       /** Documented AFC commands present in `printer.gcode.help`. Empty when AFC is not installed. */
       afcCommands: string[];
+      /** Supported Happy Hare commands, or null when help was not queried or failed. */
+      gcodeCommands: string[] | null;
     }
   /** Incremental `notify_status_update` diff. */
   | { type: 'status'; diff: RawStatus }
   | { type: 'gcode_response'; message: string }
-  | { type: 'filelist_changed'; action: string; path: string | null; root: string | null };
+  | { type: 'filelist_changed'; action: string; path: string | null; root: string | null }
+  /** `server.info`, including the component list used to see whether Spoolman is loaded. */
+  | { type: 'server'; info: ServerInfo }
+  /** Spoolman push notifications. Ignored by the print path. */
+  | { type: 'spoolman'; notice: SpoolmanNotice };
 
 export interface MoonrakerClientOptions {
   /** Moonraker base URL, e.g. `http://printer.local:7125`. `ws(s)://` URLs are accepted too. */
@@ -345,6 +357,7 @@ export class MoonrakerClient {
   async #refreshKlippy(generation: number): Promise<void> {
     const info = await this.#call<ServerInfo>('server.info');
     if (generation !== this.#generation) return;
+    this.#emit({ type: 'server', info });
     const state = info.klippy_connected === false ? 'disconnected' : parseKlippyState(info.klippy_state);
 
     if (state === 'ready') {
@@ -386,13 +399,20 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
-      // One read, only when AFC is switched on and the object exists. Status after this comes from the subscription.
+      // One help read, and only for a changer that is switched on and listed.
+      // Happy Hare and AFC are exclusive, so this is a single query. Failure is not a disconnect.
       let afcCommands: string[] = [];
-      if (objects.includes(AFC_OBJECT) && integrationEnabled('afc')) {
+      let gcodeCommands: string[] | null = null;
+      const wantAfc = objects.includes(AFC_OBJECT) && integrationEnabled('afc');
+      const wantMmu = objects.includes('mmu') && integrationEnabled('happyHare');
+      if (wantAfc || wantMmu) {
         try {
-          afcCommands = afcCommandsFromHelp(await this.#call<unknown>('printer.gcode.help'));
+          const help = await this.#call<unknown>('printer.gcode.help', undefined, 2500);
+          if (wantAfc) afcCommands = afcCommandsFromHelp(help);
+          if (wantMmu) gcodeCommands = mmuCommandsFromHelp(help);
         } catch {
-          afcCommands = [];
+          if (wantAfc) afcCommands = [];
+          if (wantMmu) gcodeCommands = null;
         }
       }
       if (generation !== this.#generation) return;
@@ -404,6 +424,7 @@ export class MoonrakerClient {
         objects,
         settings,
         afcCommands,
+        gcodeCommands,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);
@@ -517,11 +538,19 @@ export class MoonrakerClient {
         this.#setKlippy('disconnected', null);
         this.#scheduleKlippyPoll(generation);
         return;
+      case 'notify_active_spool_set':
+      case 'notify_spoolman_status_changed': {
+        const notice = parseSpoolmanNotice(message.method, message.params);
+        if (notice) this.#emit({ type: 'spoolman', notice });
+        return;
+      }
     }
   }
 
   #call<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
-    if (!isAllowedMethod(method)) return Promise.reject(new MethodNotAllowedError(method));
+    if (!isAllowedMethod(method) || !spoolmanParamsAllowed(method, params)) {
+      return Promise.reject(new MethodNotAllowedError(method));
+    }
     const socket = this.#socket;
     if (!socket || socket.readyState !== WS_OPEN) {
       return Promise.reject(new Error('Not connected to Moonraker'));
