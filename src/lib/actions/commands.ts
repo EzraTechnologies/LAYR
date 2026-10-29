@@ -1,5 +1,7 @@
 import { prepareAfcCommand } from '../afc/plan';
 import type { AfcCommand } from '../afc/types';
+import { prepareMmuCommand } from '../mmu/plan';
+import type { MmuCommand } from '../mmu/types';
 import { objectSuffix } from '../moonraker/objects';
 import type { SpoolmanFacts } from '../spoolman/types';
 import { prepareSpoolmanCommand } from '../spoolman/plan';
@@ -59,7 +61,8 @@ export type PrinterCommand =
   | { kind: 'clear_active_spool'; authorized?: boolean }
   /** Runs a parameter-free unload macro. The spool is cleared only after Klipper accepts it. */
   | { kind: 'unload_for_spool_clear'; macro: string }
-  | AfcCommand;
+  | AfcCommand
+  | MmuCommand;
 
 export type CommandKind = PrinterCommand['kind'];
 
@@ -555,5 +558,17 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState, con
     case 'afc_unload':
     case 'afc_clear_message':
       return prepareAfcCommand(command, state, context.gcodeCommands);
+    case 'mmu_home':
+    case 'mmu_select':
+    case 'mmu_change_tool':
+    case 'mmu_load':
+    case 'mmu_unload':
+    case 'mmu_eject':
+    case 'mmu_preload':
+    case 'mmu_check_gate':
+    case 'mmu_recover':
+    case 'mmu_unlock':
+    case 'mmu_bypass':
+      return prepareMmuCommand(command, state, context.gcodeCommands);
   }
 }

@@ -42,6 +42,29 @@ Lane motion is refused while a job is printing or paused, while axes are not hom
 
 A dropped connection clears the snapshot, so the nav item and the buttons disappear together.
 
+## Happy Hare
+
+Happy Hare is detected from the Klipper objects `mmu` and, when present, `mmu_machine`. Stepper, encoder, and LED objects are not subscribed. Printers without `mmu` never get an MMU item. LAYR does not install Happy Hare and does not edit its config.
+
+The subscription asks for every field on those two objects. Missing values stay blank, including on older builds that omit a key. There is no extra poll.
+
+Buttons follow `printer.gcode.help`. Where Happy Hare renamed a command, the current name is used when both exist:
+
+| Action | Command |
+| --- | --- |
+| Home | `MMU_HOME` |
+| Select a gate | `MMU_SELECT GATE=` , or `MMU_SELECT_TOOL TOOL=` when `MMU_SELECT` is absent |
+| Change tool | `MMU_CHANGE_TOOL TOOL=` using the reported tool-to-gate map |
+| Load / unload / eject | `MMU_LOAD`, `MMU_UNLOAD`, `MMU_EJECT`, or the older `MMU_LOAD_TOOL`, `MMU_UNLOAD_TOOL`, `MMU_EJECT_TOOL` |
+| Preload / check | `MMU_PRELOAD`, `MMU_CHECK_GATE` |
+| Bypass | `MMU_SELECT BYPASS=1`, or `MMU_SELECT_BYPASS`, and only when a bypass is reported |
+| Recover | `MMU_RECOVER` with no extra arguments |
+| Unlock | `MMU_UNLOCK` while `print_state` is `pause_locked`, `paused`, or `error`. It does not resume the print |
+
+Filament moves are refused while a job is printing or paused, while Happy Hare reports `printing`, `started`, `pause_locked`, or `error`, and while `action` is anything other than idle. `pause_locked` and `error` still allow Recover and Unlock, after confirmation. An unhomed selector can be homed, and other moves wait until `is_homed` is true. Calibration, test, servo, LED, motor, and reset commands are not offered.
+
+A dropped connection clears the snapshot.
+
 ## Hardware check (not run here)
 
 On a machine that already has the tested Chromium build, after you choose to install a newer frontend yourself:
@@ -65,4 +88,13 @@ AFC, on a printer you already configured yourself:
 7. Disconnect Moonraker. The AFC item leaves the nav and the lane buttons go away.
 8. Check 1024×600 and 800×480: the nav can scroll, targets stay at least 44 px, and lane text that does not fit has a tooltip.
 
-Happy Hare checks are added with that panel.
+Happy Hare, on a printer you already configured yourself:
+
+1. No `mmu` object: there is no MMU item. Opening `#/mmu` says Happy Hare is not installed and shows no filament buttons.
+2. With Happy Hare idle, homed, and not printing: gates show the reported material, colour, and gate status. Missing fields stay blank. Tool `-1` reads Unknown and `-2` reads Bypass.
+3. Change tool. Go back must send nothing. Confirm sends `MMU_CHANGE_TOOL TOOL=<n>` and nothing else. On a printer that only has `MMU_SELECT_TOOL`, the button is Select and the script is `MMU_SELECT_TOOL TOOL=<n>`.
+4. Start a print. Change, load, unload, eject, and home stay disabled.
+5. Cause an MMU pause (`pause_locked` or `error`). Change stays disabled. Unlock asks first, says it does not resume, and sends `MMU_UNLOCK`. Recover sends `MMU_RECOVER` with no extra arguments.
+6. While `action` is Loading (or any other non-idle action), filament buttons stay disabled.
+7. Disconnect Moonraker. The MMU item leaves the nav and the buttons go away.
+8. Check 1024×600 and 800×480. The nav can scroll. Targets stay at least 44 px.

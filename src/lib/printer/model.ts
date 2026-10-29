@@ -1,4 +1,5 @@
 import type { AfcSnapshot } from '../afc/types';
+import type { MmuSnapshot } from '../mmu/types';
 
 /**
  * Printer view model. The live Moonraker source produces `PrinterState`; UI components only ever read this shape.
@@ -193,6 +194,8 @@ export interface PrinterState {
   missingObjects: string[];
   /** AFC snapshot while Klipper is ready and an AFC object exists. Null otherwise, including offline. */
   afc: AfcSnapshot | null;
+  /** Happy Hare snapshot while Klipper is ready and an `mmu` object exists. Null otherwise, including offline. */
+  mmu: MmuSnapshot | null;
   /** Epoch ms "now" used for clock/ETA rendering. */
   now: number;
 }
@@ -233,6 +236,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     idleState: null,
     missingObjects: [],
     afc: null,
+    mmu: null,
     now,
   };
 }

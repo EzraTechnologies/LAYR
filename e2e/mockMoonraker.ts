@@ -190,6 +190,40 @@ const CONTROL = new Set([
 export type SpoolmanMode = 'absent' | 'ready' | 'offline' | 'error';
 /** `off` printers have no AFC objects. `unsupported` has lanes but not the documented motion commands. */
 export type AfcMode = 'off' | 'ready' | 'error' | 'busy' | 'unsupported';
+/** `off` printers have no `mmu` object. `legacy` only registers the older `*_TOOL` command names. */
+export type MmuMode = 'off' | 'ready' | 'printing' | 'pause_locked' | 'error' | 'busy' | 'unsupported' | 'legacy';
+
+function mmuStatus(mode: Exclude<MmuMode, 'off'>): Status {
+  return {
+    mmu: {
+      enabled: true,
+      num_gates: 4,
+      is_homed: true,
+      print_state: mode === 'printing' ? 'printing' : mode === 'pause_locked' ? 'pause_locked' : mode === 'error' ? 'error' : 'idle',
+      tool: 1,
+      gate: 1,
+      filament: 'Loaded',
+      action: mode === 'busy' ? 'Loading' : 'Idle',
+      operation: '',
+      reason_for_pause: mode === 'pause_locked' ? 'Filament encoder not detected' : '',
+      gate_status: [-1, 1, 0, 2],
+      gate_filament_name: ['PolyTerra Black', 'Galaxy Orange', '', ''],
+      gate_material: ['PLA', 'ASA', 'PETG', ''],
+      gate_color: ['', '', 'blue', ''],
+      gate_color_rgb: [[0.11, 0.11, 0.11], [1, 0.416, 0], null, null],
+      gate_spool_id: [1, 2, -1, -1],
+      ttg_map: [0, 1, 2, 3],
+      has_bypass: true,
+      active_filament: { filament_name: 'Galaxy Orange', material: 'ASA', color: 'ff6a00' },
+    },
+    mmu_machine: {
+      happy_hare_version: '4.0.0',
+      num_units: 1,
+      num_gates: 4,
+      unit_0: { name: 'ERCF', display_name: 'ERCF', num_gates: 4, first_gate: 0, has_bypass: true },
+    },
+  };
+}
 
 function afcStatus(mode: Exclude<AfcMode, 'off'>): Status {
   const lanes = [
@@ -246,6 +280,8 @@ export interface MockOptions {
   failMacros?: string[];
   /** AFC Klipper objects. Off printers omit them, so the AFC screen stays out of the nav. */
   afc?: AfcMode;
+  /** Happy Hare `mmu` object. Off printers omit it. */
+  mmu?: MmuMode;
 }
 
 export class MockMoonraker {
@@ -259,6 +295,7 @@ export class MockMoonraker {
   online = true;
   spoolman: SpoolmanMode;
   afc: AfcMode;
+  mmu: MmuMode;
   activeSpoolId: number | null = 2;
   readonly failMacros: Set<string>;
   #ws: WebSocketRoute | null = null;
@@ -268,8 +305,10 @@ export class MockMoonraker {
   constructor(options: MockOptions = {}) {
     const scenario = options.scenario ?? 'ready';
     this.afc = options.afc ?? 'off';
+    this.mmu = options.mmu ?? 'off';
     this.status = baseStatus(scenario, options.homed ?? false);
     if (this.afc !== 'off') Object.assign(this.status, afcStatus(this.afc));
+    if (this.mmu !== 'off') Object.assign(this.status, mmuStatus(this.mmu));
     for (const [name, fields] of Object.entries(options.status ?? {})) this.status[name] = { ...this.status[name], ...fields };
     this.klippy = scenario === 'shutdown' ? 'shutdown' : scenario === 'startup' ? 'startup' : 'ready';
     this.files = options.files ?? defaultFiles();
@@ -480,6 +519,25 @@ export class MockMoonraker {
     } else if (this.afc === 'unsupported') {
       help.AFC_CLEAR_MESSAGE = 'Clear the AFC message';
     }
+    if (this.mmu === 'ready' || this.mmu === 'printing' || this.mmu === 'pause_locked' || this.mmu === 'error' || this.mmu === 'busy') {
+      help.MMU_HOME = 'Home the selector';
+      help.MMU_SELECT = 'Select a gate';
+      help.MMU_SELECT_BYPASS = 'Select the bypass';
+      help.MMU_CHANGE_TOOL = 'Change tool';
+      help.MMU_LOAD = 'Load filament';
+      help.MMU_UNLOAD = 'Unload filament';
+      help.MMU_EJECT = 'Eject filament';
+      help.MMU_PRELOAD = 'Preload the gate';
+      help.MMU_CHECK_GATE = 'Check the gate';
+      help.MMU_RECOVER = 'Recover MMU state';
+      help.MMU_UNLOCK = 'Unlock after a pause';
+    } else if (this.mmu === 'legacy') {
+      help.MMU_HOME = 'Home the selector';
+      help.MMU_SELECT_TOOL = 'Select a tool';
+      help.MMU_LOAD_TOOL = 'Load filament';
+      help.MMU_UNLOAD_TOOL = 'Unload filament';
+      help.MMU_EJECT_TOOL = 'Eject filament';
+    }
     return help;
   }
 
@@ -612,6 +670,35 @@ export class MockMoonraker {
           if (this.status.AFC) this.update({ AFC: { message: '', error_state: false } });
           this.#respond('// AFC message cleared');
           break;
+        case 'MMU_HOME':
+        case 'MMU_LOAD':
+        case 'MMU_LOAD_TOOL':
+        case 'MMU_UNLOAD':
+        case 'MMU_UNLOAD_TOOL':
+        case 'MMU_EJECT':
+        case 'MMU_EJECT_TOOL':
+        case 'MMU_PRELOAD':
+        case 'MMU_CHECK_GATE':
+        case 'MMU_RECOVER':
+        case 'MMU_UNLOCK':
+        case 'MMU_SELECT':
+        case 'MMU_SELECT_TOOL':
+        case 'MMU_SELECT_BYPASS':
+        case 'MMU_CHANGE_TOOL': {
+          if (this.status.mmu) {
+            const tool = arg('TOOL');
+            const gate = arg('GATE');
+            const bypass = word === 'MMU_SELECT_BYPASS' || arg('BYPASS') === '1';
+            const next: Record<string, unknown> = { action: 'Idle' };
+            if (bypass) next.tool = -2;
+            else if (tool !== null && Number.isInteger(Number(tool))) next.tool = Number(tool);
+            if (gate !== null && Number.isInteger(Number(gate))) next.gate = Number(gate);
+            else if (typeof next.tool === 'number' && next.tool >= 0) next.gate = next.tool;
+            this.update({ mmu: next });
+          }
+          this.#respond(`// ${word} done`);
+          break;
+        }
         default:
           if (word in MACROS) {
             if (this.failMacros.has(word)) this.#fail(`${word} failed`);

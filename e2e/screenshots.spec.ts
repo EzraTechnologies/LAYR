@@ -73,6 +73,14 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    name: 'mmu',
+    route: 'mmu',
+    options: { scenario: 'ready', homed: true, mmu: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('button', { name: 'Change' }).first()).toBeVisible();
+    },
+  },
+  {
     name: 'home-spool',
     route: 'home',
     options: { scenario: 'ready', homed: true, spoolman: 'ready' },

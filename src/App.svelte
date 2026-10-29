@@ -26,6 +26,7 @@
   import Macros from './views/Macros.svelte';
   import Move from './views/Move.svelte';
   import Afc from './views/Afc.svelte';
+  import Mmu from './views/Mmu.svelte';
   import Filament from './views/Filament.svelte';
   import Settings from './views/Settings.svelte';
 
@@ -56,6 +57,7 @@
     visibleRoutes({
       spoolman: spoolPhase === 'ready' || spoolPhase === 'offline' || spoolPhase === 'error',
       afc: store.state.afc !== null,
+      mmu: store.state.mmu !== null,
     }),
   );
 
@@ -125,6 +127,8 @@
       <Filament />
     {:else if route === 'afc'}
       <Afc />
+    {:else if route === 'mmu'}
+      <Mmu />
     {:else if route === 'fans'}
       <Fans />
     {:else if route === 'macros'}

@@ -12,9 +12,10 @@ deploy it over KlipperScreen until you have checked it in a browser. See
 
 Spoolman (browse spools, set the active spool, clear it only after a confirmed unload) is in the
 Chromium UI when Moonraker reports a `spoolman` component. AFC lanes appear only when Klipper
-reports AFC objects, and the lane buttons are the commands that printer registers. Printers
-without those features keep the previous navigation. The native Qt controller has its own Filament
-screen for Spoolman and does not show AFC. None of this has been re-tested on a Pi. See
+reports AFC objects. Happy Hare gates appear only when Klipper reports an `mmu` object. The
+buttons are the commands that printer registers. Printers without those features keep the previous
+navigation. The native Qt controller has its own Filament screen for Spoolman and does not show
+AFC or Happy Hare. None of this has been re-tested on a Pi. See
 [docs/chromium-integrations.md](docs/chromium-integrations.md).
 
 | 1024×600 | 800×480 |
@@ -172,7 +173,7 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Chromium Spools screen does too, and only when that Moonraker has Spoolman. An MMU stays unwired in both UIs until its own change.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Chromium Spools screen does too, and only when that Moonraker has Spoolman. The Chromium MMU screen talks to Happy Hare when Klipper reports an `mmu` object. The Qt UI does not.
 
 ## Architecture
 
@@ -180,7 +181,7 @@ that does not restart Klipper.
 src/
   App.svelte                    Hash routing, confirmation, toasts, dim overlay
   components/                   Nav rail, job, temperatures, jog helpers, keyboard, e-stop
-  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, optional Spools and AFC
+  views/                        Home, Files, Move, Heat, Extrude, Fans, Macros, Console, Settings, optional Spools, AFC, and MMU
   lib/
     config.ts                   URL resolution. No implicit endpoint.
     moonraker/                  WebSocket client, subscriptions, status and control mapping
@@ -190,6 +191,7 @@ src/
     console/                    G-code history
     spoolman/                   Moonraker Spoolman catalogue, confirmations, per-printer scope
     afc/                        AFC object mapping and guarded lane commands
+    mmu/                        Happy Hare status and guarded macros
 deploy/                         check, install, display switch, rollback, uninstall
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket

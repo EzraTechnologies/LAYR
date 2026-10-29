@@ -16,6 +16,7 @@ export const ROUTES = [
 export const INTEGRATION_ROUTES = [
   { id: 'filament', label: 'Spools', icon: 'spool', after: 'extrude' },
   { id: 'afc', label: 'AFC', icon: 'lanes', after: 'extrude' },
+  { id: 'mmu', label: 'MMU', icon: 'gates', after: 'extrude' },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; icon: IconName; after: string }>;
 
 export type RouteId = (typeof ROUTES)[number]['id'] | (typeof INTEGRATION_ROUTES)[number]['id'];
@@ -45,6 +46,7 @@ export function visibleRoutes(flags: IntegrationFlags): AppRoute[] {
   const extras: AppRoute[] = [];
   if (flags.spoolman) extras.push(INTEGRATION_ROUTES[0]);
   if (flags.afc) extras.push(INTEGRATION_ROUTES[1]);
+  if (flags.mmu) extras.push(INTEGRATION_ROUTES[2]);
   const routes: AppRoute[] = ROUTES.map((route) => ({ id: route.id, label: route.label, icon: route.icon }));
   const after = routes.findIndex((route) => route.id === 'extrude');
   routes.splice(after + 1, 0, ...extras);

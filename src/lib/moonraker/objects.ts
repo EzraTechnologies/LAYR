@@ -1,9 +1,10 @@
 import { afcSubscriptionObjects } from '../afc/map';
+import { mmuSubscriptionObjects } from '../mmu/map';
 
 /**
  * Klipper objects LAYR subscribes to, and the fields requested from each.
  * Requesting explicit fields (instead of `null` = everything) keeps WebSocket traffic and UI updates low.
- * AFC objects are the exception: versions disagree on field names, so a present object is subscribed in full.
+ * AFC and Happy Hare objects are the exception: versions disagree on field names, so a present object is subscribed in full.
  */
 
 export const CORE_OBJECTS: Record<string, string[]> = {
@@ -124,6 +125,7 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
     objects[name] = ['filament_detected', 'enabled'];
   }
   for (const name of afcSubscriptionObjects(available)) objects[name] = null;
+  for (const name of mmuSubscriptionObjects(available)) objects[name] = null;
 
   return { objects, missing };
 }
