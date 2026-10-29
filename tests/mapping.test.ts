@@ -189,6 +189,7 @@ describe('assembleState', () => {
     slicerEstimate: null,
     missingObjects: ['heater_bed'],
     objects: ['extruder', 'print_stats'],
+    afcCommands: [],
     settings: {},
     thumbnailPath: null,
     now: 0,

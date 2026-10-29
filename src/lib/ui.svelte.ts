@@ -1,4 +1,4 @@
-import type { Confirmation, PrinterCommand } from './actions/commands';
+import { afcScript, type Confirmation, type PrinterCommand } from './actions/commands';
 import type { CommandGateway, CommandOutcome } from './actions/gateway';
 import type { ConsoleLog } from './console/console.svelte';
 
@@ -71,8 +71,10 @@ export class Ui {
     let outcome = await this.#gateway.execute(command);
     if (outcome.status === 'needs_confirmation') {
       if (!(await this.confirm(outcome.confirm))) return outcome;
-      if (command.kind === 'gcode' || command.kind === 'macro') {
-        this.#console.recordCommand(command.kind === 'gcode' ? command.script.trim() : command.name);
+      if (command.kind === 'gcode' || command.kind === 'macro' || command.kind === 'afc') {
+        const text =
+          command.kind === 'gcode' ? command.script.trim() : command.kind === 'macro' ? command.name : afcScript(command.action, command.lane);
+        this.#console.recordCommand(text);
       }
       outcome = await this.#gateway.execute(command, { confirmed: true });
     }

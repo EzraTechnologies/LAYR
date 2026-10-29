@@ -32,6 +32,7 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 - [ ] Below `min_extrude_temp` both buttons are refused and no G-code is sent.
 - [ ] LOAD / UNLOAD appear only when those macros exist. The toast says the macro finished only after Klipper replies. A failed or cancelled run does not say the filament was unloaded.
 - [ ] Spoolman is not on this screen. Choosing or clearing a spool is a later milestone.
+- [ ] AFC, if this printer has the add-on: the rail shows AFC only when Klipper lists an `AFC` object. Units, lanes, the loaded lane, and any AFC error match Mainsail or Fluidd. Load, change, unload, hub load, and eject each ask first, and cancelling sends nothing. During a print those buttons stay off. A printer without AFC has no AFC item and `#/afc` says it is not installed. This build has not been checked on a machine with AFC. Do not use it to move filament until the states above match the printer.
 
 ## Files and a short print
 

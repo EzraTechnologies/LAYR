@@ -25,6 +25,16 @@ Filament screen for the same rules. That screen has not been tested on a Pi.
 Screenshots are captured from the production bundle talking to a mocked Moonraker
 (`npm run screenshots`). They are fixture data, not a recording of a printer.
 
+AFC screenshots use the same mock, with status shaped like the AFCProject `AFC` and `AFC_lane` objects.
+They are not a Box Turtle or any other physical unit.
+
+| 1024×600 | 800×480 |
+| --- | --- |
+| ![AFC lanes, 1024×600](docs/screenshots/1024x600-afc.png) | ![AFC lanes, 800×480](docs/screenshots/800x480-afc.png) |
+| ![AFC loading, 1024×600](docs/screenshots/1024x600-afc-loading.png) | ![AFC loading, 800×480](docs/screenshots/800x480-afc-loading.png) |
+| ![AFC error, 1024×600](docs/screenshots/1024x600-afc-error.png) | ![AFC error, 800×480](docs/screenshots/800x480-afc-error.png) |
+| ![AFC not installed, 1024×600](docs/screenshots/1024x600-afc-absent.png) | ![AFC not installed, 800×480](docs/screenshots/800x480-afc-absent.png) |
+
 ## What v0.2 does
 
 - **Home**: printer display name, connection and print state, progress, filename, the active
@@ -44,6 +54,10 @@ Screenshots are captured from the production bundle talking to a mocked Moonrake
   and changes during a print ask first.
 - **Extrude**: extrude and retract with a cold-extrusion lockout. Load and unload appear only when
   those macros exist, and success is reported only after Klipper accepts the macro.
+- **AFC** (only when Klipper lists an `AFC` object): units, lanes, what is loaded, loading state,
+  and errors from the AFC add-on. Load, tool change, unload, hub load, and eject are the documented
+  AFC commands, each confirmed first, and only if `printer.gcode.help` lists that command. Printers
+  without AFC keep the same navigation as before. LAYR does not install AFC.
 - **Fans**: part cooling and other controllable fans, plus lights when the config actually has them.
   Sliders send a command when released.
 - **Macros**: discovered from the printer. Names starting with `_` are hidden unless you ask for them.
@@ -117,7 +131,7 @@ Copy `.env.example` to `.env.local`. All variables are optional.
 | --- | --- | --- |
 | URL parameter | `?moonraker=http://voron.local:7125` | Highest precedence. |
 | Settings screen | Moonraker URL field, then **Save** | Stored in `localStorage` on that device. **Reset** clears it. The API key is never stored there. |
-| Page | `#/home`, `#/files`, `#/move`, `#/heat`, `#/extrude`, `#/fans`, `#/macros`, `#/console`, `#/settings` | Hash routes. |
+| Page | `#/home`, `#/files`, `#/move`, `#/heat`, `#/extrude`, `#/afc`, `#/fans`, `#/macros`, `#/console`, `#/settings` | Hash routes. `#/afc` explains that AFC is not installed when the printer has no `AFC` object. The AFC item is added to the rail only when that object is present. |
 
 URL precedence: query parameter, then saved setting, then the build variable. If none is set, LAYR does
 not connect.
@@ -174,7 +188,7 @@ that does not restart Klipper.
 
 ## Native Qt prototype
 
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not. An MMU stays unwired.
+`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Svelte UI does not implement Spoolman. The Svelte UI does show AFC when the printer reports it. The Qt build does not. An MMU stays unwired.
 
 ## Architecture
 
@@ -191,6 +205,7 @@ src/
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
     spoolman/types.ts           Svelte contract only. Qt implements the same rules.
+    afc/                        Optional AFC status mapping. Subscribed only when the `AFC` object exists.
 deploy/                         check, install, display switch, rollback, uninstall
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
@@ -220,6 +235,10 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
   differ slightly from Mainsail, which skips file headers. Layer numbers need `SET_PRINT_STATS_INFO`.
 - File upload is not implemented. Delete and print-start are.
 - The Svelte UI does not implement Spoolman. The native Qt Filament screen does, and it has not been tested on a Pi.
+- AFC on the Svelte screen was checked against the AFCProject `get_status` fields and a mocked Moonraker
+  (unit tests, Playwright, and the screenshots below). It has not been run on a printer with AFC
+  installed, and it has not been tried on a Raspberry Pi. Do not treat a fixture screenshot as a
+  hardware pass. LAYR will not install AFC or edit `printer.cfg` / `moonraker.conf`.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.

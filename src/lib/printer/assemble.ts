@@ -1,3 +1,4 @@
+import { mapAfc } from '../afc/map';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
 import type { ConfigSettings, RawStatus } from '../moonraker/types';
@@ -20,6 +21,8 @@ export interface AssembleInputs {
   missingObjects: string[];
   /** Object names from `printer.objects.list`. */
   objects: string[];
+  /** AFC commands listed by `printer.gcode.help`. Empty when AFC is absent or the query failed. */
+  afcCommands: readonly string[];
   /** `configfile.settings`, from the subscription snapshot (query is only a fallback). */
   settings: ConfigSettings;
   /** Thumbnail for the current job file, or null. Cleared when the filename changes. */
@@ -85,6 +88,7 @@ export function assembleState(input: AssembleInputs): PrinterState {
     lights: mapLights(raw, input.settings),
     macros: info.macros,
     filamentSensors: mapFilamentSensors(raw),
+    afc: connected ? mapAfc(raw, input.objects, input.afcCommands) : null,
     limits: structuredClone(info.limits),
     idleState: typeof raw.idle_timeout?.state === 'string' ? raw.idle_timeout.state : null,
     missingObjects: connected ? input.missingObjects : [],

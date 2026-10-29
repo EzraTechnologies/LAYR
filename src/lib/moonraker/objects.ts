@@ -3,6 +3,8 @@
  * Requesting explicit fields (instead of `null` = everything) keeps WebSocket traffic and UI updates low.
  */
 
+import { afcSubscription } from '../afc/objects';
+
 export const CORE_OBJECTS: Record<string, string[]> = {
   webhooks: ['state', 'state_message'],
   print_stats: ['filename', 'state', 'message', 'print_duration', 'total_duration', 'filament_used', 'info'],
@@ -119,6 +121,9 @@ export function planSubscription(available: readonly string[]): SubscriptionPlan
   for (const name of available.filter((n) => startsWithAny(n, FILAMENT_SENSOR_PREFIXES))) {
     objects[name] = ['filament_detected', 'enabled'];
   }
+
+  // AFC is optional. With no `AFC` object the plan is unchanged.
+  Object.assign(objects, afcSubscription(available).objects);
 
   return { objects, missing };
 }

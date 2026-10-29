@@ -12,9 +12,10 @@
   import { FileBrowser } from './lib/files/browser.svelte';
   import { createSource } from './lib/printer/createSource';
   import { PrinterStore } from './lib/printer/store.svelte';
-  import { parseRoute, type RouteId } from './lib/routes';
+  import { navItems, parseRoute, type RouteId } from './lib/routes';
   import { SettingsStore } from './lib/settings.svelte';
   import { Ui } from './lib/ui.svelte';
+  import Afc from './views/Afc.svelte';
   import Console from './views/Console.svelte';
   import Dashboard from './views/Dashboard.svelte';
   import Extrude from './views/Extrude.svelte';
@@ -85,7 +86,7 @@
 </script>
 
 <div class="app">
-  <NavRail current={route} />
+  <NavRail current={route} items={navItems(store.state.afc !== null)} />
   <TopBar />
 
   <main class="content" id="main">
@@ -99,6 +100,8 @@
       <Heat />
     {:else if route === 'extrude'}
       <Extrude />
+    {:else if route === 'afc'}
+      <Afc />
     {:else if route === 'fans'}
       <Fans />
     {:else if route === 'macros'}

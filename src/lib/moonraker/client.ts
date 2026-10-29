@@ -1,6 +1,7 @@
 import type { KlippyState, TransportState } from '../printer/model';
 import { Backoff } from './backoff';
 import { parseKlippyState } from './mapping';
+import { AFC_OBJECT, afcCommandsFromHelp } from '../afc/objects';
 import { planSubscription } from './objects';
 import type {
   ConfigSettings,
@@ -36,6 +37,7 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
   'server.files.get_directory',
   'server.files.metadata',
   'server.files.thumbnails',
+  'printer.gcode.help',
 ]);
 
 /**
@@ -98,6 +100,8 @@ export type ClientEvent =
       hostname: string | null;
       objects: string[];
       settings: ConfigSettings;
+      /** Documented AFC commands present in `printer.gcode.help`. Empty when AFC is not installed. */
+      afcCommands: string[];
     }
   /** Incremental `notify_status_update` diff. */
   | { type: 'status'; diff: RawStatus }
@@ -381,6 +385,16 @@ export class MoonrakerClient {
       const settings =
         configSettingsFrom(result.status) ?? (objects.includes('configfile') ? await this.#configSettings() : {});
       if (generation !== this.#generation) return;
+      // One read, only when the AFC object exists. Status after this comes from the subscription.
+      let afcCommands: string[] = [];
+      if (objects.includes(AFC_OBJECT)) {
+        try {
+          afcCommands = afcCommandsFromHelp(await this.#call<unknown>('printer.gcode.help'));
+        } catch {
+          afcCommands = [];
+        }
+      }
+      if (generation !== this.#generation) return;
       this.#emit({
         type: 'snapshot',
         status: result.status ?? {},
@@ -388,6 +402,7 @@ export class MoonrakerClient {
         hostname: printer.hostname?.trim() || null,
         objects,
         settings,
+        afcCommands,
       });
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);

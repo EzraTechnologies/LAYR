@@ -101,6 +101,39 @@ const SHOTS: Shot[] = [
   { name: 'move-printing', route: 'move', options: { scenario: 'printing' } },
   { name: 'heat', route: 'heat', options: { scenario: 'printing' } },
   { name: 'extrude', route: 'extrude', options: { scenario: 'paused' } },
+  {
+    name: 'afc',
+    route: 'afc',
+    options: { scenario: 'ready', homed: true, afc: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByText('Loaded lane2')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Change lane4' })).toBeVisible();
+    },
+  },
+  {
+    name: 'afc-loading',
+    route: 'afc',
+    options: { scenario: 'ready', homed: true, afc: 'loading' },
+    prepare: async (page) => {
+      await expect(page.getByRole('status').filter({ hasText: 'Loading · lane4' })).toBeVisible();
+    },
+  },
+  {
+    name: 'afc-error',
+    route: 'afc',
+    options: { scenario: 'ready', homed: true, afc: 'error' },
+    prepare: async (page) => {
+      await expect(page.getByText('Filament failed to load to the toolhead')).toBeVisible();
+    },
+  },
+  {
+    name: 'afc-absent',
+    route: 'afc',
+    options: { scenario: 'ready' },
+    prepare: async (page) => {
+      await expect(page.getByRole('heading', { name: 'AFC is not installed' })).toBeVisible();
+    },
+  },
   { name: 'fans', route: 'fans', options: { scenario: 'printing' } },
   { name: 'macros', route: 'macros', options: { scenario: 'ready' } },
   {
