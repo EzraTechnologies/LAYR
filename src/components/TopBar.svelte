@@ -1,11 +1,22 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
+  import { integrations } from '../lib/integrations/store.svelte';
   import EStopButton from './EStopButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
-  const { store, settings } = app();
+  const { store, settings, printer } = app();
   const printerState = store.state;
+  integrations.bind(printer.id, printer.moonrakerUrl);
+  const connection = store.source.connection;
+
+  // Reconnect outside the effect's tracking. The client reads printer state while
+  // connecting, and tracking that read would reconnect on every status update.
+  $effect(() => {
+    if (integrations.statusRevision === 0) return;
+    untrack(() => connection?.reconnect());
+  });
   const clock = $derived(formatClock(printerState.now));
   const name = $derived(settings.value.displayName.trim() || printerState.printerName);
 </script>
