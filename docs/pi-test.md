@@ -298,3 +298,10 @@ sudo systemctl restart layr-kiosk
 The HDMI pointing sticks are visible to libinput again. Touch and the mouse stay as they were.
 `./deploy/layr-hdmi-input.sh restore` puts back the last removed LAYR copy. It does not recreate
 a hand-written file. `./deploy/uninstall.sh` also leaves the rule file where it is.
+
+## 9. Raspberry Pi reboot and shutdown
+
+This section is a manual check for Settings → Reboot Raspberry Pi and Shut down Raspberry Pi.
+CI does not run it. The change that added the buttons was not executed on a Pi, and it does not
+reboot or power off any machine by itself. Do not start this section unless you mean to restart
+or shut down the Pi you are looking at. The full checklist is [pi-host-controls.md](pi-host-controls.md).

@@ -4,7 +4,7 @@ import { parseMmu } from '../mmu/happyhare';
 import { mapFans, mapFilamentSensors, mapLights, mapLimits, mapMacros, mapToolhead } from '../moonraker/controls';
 import { mapJob, mapTemperatures, parseJobState } from '../moonraker/mapping';
 import type { ConfigSettings, RawStatus } from '../moonraker/types';
-import { deriveStatus, FALLBACK_LIMITS, type KlippyState, type PrinterState, type TransportState } from './model';
+import { deriveStatus, FALLBACK_LIMITS, type HostMachine, type KlippyState, type PrinterState, type TransportState } from './model';
 import { mapMotion } from './telemetry';
 
 export interface AssembleInputs {
@@ -34,6 +34,8 @@ export interface AssembleInputs {
    * Null when the printer has no `mmu` object or the help query failed.
    */
   gcodeCommands?: string[] | null;
+  /** From `server.info`. Omitted until Moonraker sends a component list. */
+  hostMachine?: HostMachine;
   now: number;
 }
 
@@ -102,6 +104,8 @@ export function assembleState(input: AssembleInputs): PrinterState {
         : null,
     limits: structuredClone(info.limits),
     idleState: typeof raw.idle_timeout?.state === 'string' ? raw.idle_timeout.state : null,
+    hostMachine: input.hostMachine ?? 'unknown',
+    printState: jobState,
     missingObjects: connected ? input.missingObjects : [],
     now: input.now,
   };

@@ -1,4 +1,12 @@
 import { errorMessage, RpcError, RpcUnconfirmedError } from '../moonraker/client';
+import {
+  classifyHostRpcError,
+  HOST_UNAUTHORIZED_MESSAGE,
+  HOST_UNCONFIRMED_NOTE,
+  HOST_UNSUPPORTED_MESSAGE,
+  isHostMethod,
+  type HostRefusal,
+} from '../moonraker/host';
 import type { PrinterState } from '../printer/model';
 import type { PrinterConnection } from '../printer/source';
 import { ESTOP_GROUP, prepareCommand, type Confirmation, type PrinterCommand } from './commands';
@@ -11,8 +19,8 @@ export type CommandOutcome =
   | { status: 'blocked'; message: string }
   /** A command in the same group is still running; nothing was sent. */
   | { status: 'busy'; message: string }
-  /** Moonraker or Klipper rejected the command. */
-  | { status: 'failed'; summary: string; message: string }
+  /** Moonraker or Klipper rejected the command. `reason` is set for Raspberry Pi host power only. */
+  | { status: 'failed'; summary: string; message: string; reason?: HostRefusal }
   /** The request was sent but no reply arrived (timeout or disconnect). It may or may not have run. */
   | { status: 'unconfirmed'; summary: string; message: string };
 
@@ -88,7 +96,19 @@ export class CommandGateway {
       return { status: 'ok', summary: plan.summary, note: plan.note };
     } catch (error) {
       if (error instanceof RpcUnconfirmedError) {
-        return { status: 'unconfirmed', summary: plan.summary, message: `${error.message}. Check the printer before retrying` };
+        const message = isHostMethod(plan.method)
+          ? `${error.message}. ${HOST_UNCONFIRMED_NOTE}`
+          : `${error.message}. Check the printer before retrying`;
+        return { status: 'unconfirmed', summary: plan.summary, message };
+      }
+      if (isHostMethod(plan.method) && error instanceof RpcError) {
+        const kind = classifyHostRpcError(error.code, error.message);
+        if (kind === 'unauthorized') {
+          return { status: 'failed', summary: plan.summary, message: HOST_UNAUTHORIZED_MESSAGE, reason: 'unauthorized' };
+        }
+        if (kind === 'unsupported') {
+          return { status: 'failed', summary: plan.summary, message: HOST_UNSUPPORTED_MESSAGE, reason: 'unsupported' };
+        }
       }
       const message = error instanceof RpcError ? cleanKlipperMessage(error.message) : errorMessage(error);
       return { status: 'failed', summary: plan.summary, message };

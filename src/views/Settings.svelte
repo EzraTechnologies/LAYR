@@ -12,6 +12,7 @@
   } from '../lib/integrations/preferences';
   import { integrations } from '../lib/integrations/store.svelte';
   import { formatTemp } from '../lib/format';
+  import { HOST_UNAUTHORIZED_MESSAGE, HOST_UNSUPPORTED_MESSAGE, type HostRefusal } from '../lib/moonraker/host';
   import { DIM_OPTIONS, FILES_VIEW_OPTIONS } from '../lib/settings.svelte';
 
   interface Props {
@@ -117,6 +118,29 @@
   const klippyReachable = $derived(
     printerState.transport === 'connected' && printerState.klippy !== 'disconnected' && printerState.klippy !== 'unknown',
   );
+
+  const rebootCommand = { kind: 'host_reboot' } as const;
+  const shutdownCommand = { kind: 'host_shutdown' } as const;
+  const rebootCheck = $derived(ui.gateway.availability(rebootCommand));
+  const shutdownCheck = $derived(ui.gateway.availability(shutdownCommand));
+  let hostRefusal = $state<{ key: string; reason: HostRefusal } | null>(null);
+  const refusalKey = $derived(`${printerState.printerId}:${printerState.transport}`);
+  const activeRefusal = $derived(hostRefusal && hostRefusal.key === refusalKey ? hostRefusal.reason : null);
+  const hostBlock = $derived(
+    activeRefusal === 'unauthorized'
+      ? HOST_UNAUTHORIZED_MESSAGE
+      : activeRefusal === 'unsupported'
+        ? HOST_UNSUPPORTED_MESSAGE
+        : !rebootCheck.allowed
+          ? rebootCheck.message
+          : null,
+  );
+  const hostBusy = $derived(ui.isBusy(rebootCommand) || ui.isBusy(shutdownCommand));
+
+  async function runHost(command: typeof rebootCommand | typeof shutdownCommand) {
+    const outcome = await ui.run(command);
+    if (outcome.status === 'failed' && outcome.reason) hostRefusal = { key: refusalKey, reason: outcome.reason };
+  }
 </script>
 
 <div class="settings page scroll">
@@ -267,6 +291,7 @@
 
     <section class="card panel" aria-labelledby="set-printer">
       <h2 id="set-printer" class="eyebrow">Klipper</h2>
+      <p class="hint">Klipper only. This does not reboot the Raspberry Pi or cut printer power.</p>
       <div class="row">
         <button
           type="button"
@@ -275,7 +300,7 @@
           aria-busy={ui.isBusy({ kind: 'restart' })}
           onclick={() => ui.run({ kind: 'restart' })}
         >
-          <Icon name="power" size={18} />Restart
+          <Icon name="power" size={18} />Restart Klipper
         </button>
         <button
           type="button"
@@ -300,6 +325,42 @@
       <p class="about">LAYR v{__LAYR_VERSION__}</p>
     </section>
   </div>
+
+  <section class="card panel span" aria-labelledby="set-pi">
+    <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
+    <p class="hint">
+      Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
+      firmware restart and it does not switch off the printer power supply.
+    </p>
+    {#if hostBlock}
+      <p class="hint warn" id="pi-block" role="status">{hostBlock}</p>
+    {/if}
+    {#if hostBusy}
+      <p class="hint" role="status">Waiting for Moonraker. This is not yet a confirmed reboot or shutdown.</p>
+    {/if}
+    <div class="host-actions">
+      <button
+        type="button"
+        class="btn warn host-btn"
+        disabled={!rebootCheck.allowed || activeRefusal !== null}
+        aria-busy={ui.isBusy(rebootCommand)}
+        aria-describedby={hostBlock ? 'pi-block' : undefined}
+        onclick={() => runHost(rebootCommand)}
+      >
+        <Icon name="refresh" size={22} />Reboot Raspberry Pi
+      </button>
+      <button
+        type="button"
+        class="btn danger host-btn"
+        disabled={!shutdownCheck.allowed || activeRefusal !== null}
+        aria-busy={ui.isBusy(shutdownCommand)}
+        aria-describedby={hostBlock ? 'pi-block' : undefined}
+        onclick={() => runHost(shutdownCommand)}
+      >
+        <Icon name="power" size={22} />Shut down Raspberry Pi
+      </button>
+    </div>
+  </section>
 </div>
 
 <style>
@@ -308,6 +369,31 @@
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     gap: var(--gap);
     align-items: start;
+  }
+
+  .span {
+    grid-column: 1 / -1;
+  }
+
+  .host-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .host-btn {
+    width: 100%;
+    min-height: 64px;
+    white-space: normal;
+    line-height: 1.25;
+    padding: 8px 14px;
+    font-size: var(--fs-md);
+  }
+
+  @media (max-width: 900px), (max-height: 540px) {
+    .host-actions {
+      grid-template-columns: 1fr;
+    }
   }
 
   .col {

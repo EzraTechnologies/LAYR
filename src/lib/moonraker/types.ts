@@ -6,6 +6,8 @@ export interface ServerInfo {
   components?: string[];
   failed_components?: string[];
   moonraker_version?: string;
+  /** `[major, minor, patch]` when Moonraker sends `api_version`. */
+  api_version?: number[];
   api_version_string?: string;
 }
 

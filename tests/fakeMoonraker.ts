@@ -90,6 +90,11 @@ export class FakeMoonraker {
   gcodeHelp: Record<string, string> | null = null;
   /** `printer.gcode.help` result. `'error'` rejects the call. */
   help: Record<string, unknown> | 'error' = {};
+  /** When set, `server.info` includes this component list. Null omits it. */
+  components: string[] | null = null;
+  failedComponents: string[] = [];
+  /** When set, `server.info.api_version`. */
+  apiVersion: number[] | null = null;
 
   constructor(opts: FakeMoonrakerOptions = {}) {
     this.klippyState = opts.klippyState ?? 'ready';
@@ -127,8 +132,18 @@ export class FakeMoonraker {
     switch (msg.method) {
       case 'server.connection.identify':
         return reply({ connection_id: 42 });
-      case 'server.info':
-        return reply({ klippy_connected: this.klippyState !== 'disconnected', klippy_state: this.klippyState });
+      case 'server.info': {
+        const body: Record<string, unknown> = {
+          klippy_connected: this.klippyState !== 'disconnected',
+          klippy_state: this.klippyState,
+        };
+        if (this.components) {
+          body.components = this.components;
+          body.failed_components = this.failedComponents;
+        }
+        if (this.apiVersion) body.api_version = this.apiVersion;
+        return reply(body);
+      }
       case 'printer.info':
         return reply({
           state: this.klippyState,
@@ -180,6 +195,8 @@ export class FakeMoonraker {
       case 'printer.restart':
       case 'printer.firmware_restart':
       case 'server.files.delete_file':
+      case 'machine.reboot':
+      case 'machine.shutdown':
         return reply('ok');
       default:
         queueMicrotask(() =>

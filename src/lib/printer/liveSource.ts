@@ -1,6 +1,7 @@
 import type { PrinterProfile } from '../config';
 import { mapThumbnails, pickThumbnail } from '../files/files';
 import { MoonrakerClient, type CallOptions, type ClientEvent, type MoonrakerClientOptions } from '../moonraker/client';
+import { hostMachineFromInfo } from '../moonraker/host';
 import { mergeStatus, toNumber } from '../moonraker/mapping';
 import type { ConfigSettings, FileMetadata, ServerInfo } from '../moonraker/types';
 import type { SpoolmanNotice } from '../spoolman/api';
@@ -78,6 +79,7 @@ export class LiveSource implements PrinterSource, PrinterConnection {
       settings: {},
       thumbnailPath: null,
       gcodeCommands: null,
+      hostMachine: 'unknown',
       now: this.#now(),
     };
   }
@@ -173,7 +175,10 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         inputs.reconnectAttempt = event.attempt;
         inputs.nextRetryAt = event.nextRetryAt;
         inputs.transportReason = event.reason;
-        if (event.state !== 'connected') inputs.klippy = 'unknown';
+        if (event.state !== 'connected') {
+          inputs.klippy = 'unknown';
+          inputs.hostMachine = 'unknown';
+        }
         // Connection changes are shown immediately; they are rare.
         this.#emitNow();
         this.#transport.emit(event.state);
@@ -212,7 +217,9 @@ export class LiveSource implements PrinterSource, PrinterConnection {
         this.#files.emit({ action: event.action, path: event.path, root: event.root });
         return;
       case 'server':
+        inputs.hostMachine = hostMachineFromInfo(event.info);
         this.#serverInfo.emit(event.info);
+        this.#emitNow();
         return;
       case 'spoolman':
         this.#spoolman.emit(event.notice);

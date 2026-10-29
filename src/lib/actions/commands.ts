@@ -1,4 +1,10 @@
 import { integrationEnabled } from '../integrations/runtime';
+import {
+  HOST_UNKNOWN_MESSAGE,
+  HOST_UNSUPPORTED_MESSAGE,
+  MACHINE_REBOOT_METHOD,
+  MACHINE_SHUTDOWN_METHOD,
+} from '../moonraker/host';
 import { objectSuffix } from '../moonraker/objects';
 import { spoolIdValue } from '../spoolman/api';
 import {
@@ -36,6 +42,13 @@ export type PrinterCommand =
   | { kind: 'emergency_stop' }
   | { kind: 'firmware_restart' }
   | { kind: 'restart' }
+  /**
+   * Reboot the Raspberry Pi Moonraker is running on (`machine.reboot`).
+   * Not a Klipper firmware restart and not a printer power supply.
+   */
+  | { kind: 'host_reboot' }
+  /** Shut down that same Raspberry Pi (`machine.shutdown`). Does not take parameters. */
+  | { kind: 'host_shutdown' }
   /** Empty `axes` homes all axes. */
   | { kind: 'home'; axes: Axis[] }
   /** Relative move in mm at `speed` mm/s. */
@@ -344,6 +357,59 @@ function jobActive(state: PrinterState): boolean {
   return isPrinting(state) || isPaused(state);
 }
 
+/**
+ * Raspberry Pi reboot and shutdown. Refuses unless this screen's printer is connected, Klipper is
+ * ready, the print state is known and idle, and Moonraker reported the `machine` component.
+ * Re-checked by the gateway at the moment of the request.
+ */
+function prepareHost(state: PrinterState, action: 'host_reboot' | 'host_shutdown'): Prepared {
+  const blocked = hostPowerBlock(state);
+  if (blocked) return fail(blocked);
+  const reboot = action === 'host_reboot';
+  const host = state.hostname?.trim()
+    ? `Raspberry Pi host ${state.hostname.trim()}`
+    : 'the Raspberry Pi this screen is connected to';
+  const shared = `This acts only on ${host}, the Moonraker this screen is connected to. It is not a Klipper firmware restart and it does not shut down the printer power supply. LAYR will lose its connection and this screen will go offline.`;
+  return ok({
+    method: reboot ? MACHINE_REBOOT_METHOD : MACHINE_SHUTDOWN_METHOD,
+    summary: reboot ? 'Reboot Raspberry Pi' : 'Shut down Raspberry Pi',
+    group: 'pi-host',
+    timeoutMs: 15 * SECOND,
+    confirm: reboot
+      ? {
+          title: 'Reboot this Raspberry Pi?',
+          body: `${shared} The Pi restarts only if Moonraker accepts the request.`,
+          confirmLabel: 'Reboot Raspberry Pi',
+          cancelLabel: 'Go back',
+          tone: 'warn',
+        }
+      : {
+          title: 'Shut down this Raspberry Pi?',
+          body: `${shared} A software shutdown does not necessarily remove power. Starting the Pi again may need a physical power cycle or an external power controller.`,
+          confirmLabel: 'Shut down Raspberry Pi',
+          cancelLabel: 'Go back',
+          tone: 'danger',
+        },
+    note: reboot
+      ? 'Moonraker accepted the request. This does not mean the Raspberry Pi has finished restarting, and it does not cut printer power.'
+      : 'Moonraker accepted the request. This does not mean power was removed. A physical power cycle may be needed to start the Pi again.',
+  });
+}
+
+function hostPowerBlock(state: PrinterState): string | null {
+  if (state.status === 'unconfigured') return 'Set up the printer connection in Settings';
+  if (state.transport !== 'connected') return 'Printer is offline';
+  if (state.klippy === 'unknown') return 'Printer state is unknown';
+  if (state.klippy !== 'ready') return 'Klipper is not ready';
+  if (state.printState === null || state.printState === 'unknown') return 'Print state is unknown';
+  if (state.printState === 'printing') return 'Not available during a print';
+  if (state.printState === 'paused') return 'Not available while a print is paused';
+  if (state.idleState === 'Printing') return 'Klipper is busy';
+  if (state.hostMachine === 'unknown') return HOST_UNKNOWN_MESSAGE;
+  if (state.hostMachine === 'unavailable') return HOST_UNSUPPORTED_MESSAGE;
+  return null;
+}
+
 function axisLabel(axis: Axis): string {
   return axis.toUpperCase();
 }
@@ -594,6 +660,9 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
       // The deliberate press-and-hold in the UI is the confirmation; a dialog would only delay a real emergency.
       return ok({ method: 'printer.emergency_stop', summary: 'Emergency stop', group: ESTOP_GROUP, timeoutMs: 10 * SECOND });
     }
+    case 'host_reboot':
+    case 'host_shutdown':
+      return prepareHost(state, command.kind);
     case 'firmware_restart':
     case 'restart': {
       const gate = hostGate(state);
@@ -606,7 +675,7 @@ export function prepareCommand(command: PrinterCommand, state: PrinterState): Pr
         timeoutMs: 30 * SECOND,
         confirm: {
           title: firmware ? 'Restart firmware?' : 'Restart Klipper?',
-          body: `${firmware ? 'Resets every MCU and reloads the configuration.' : 'Reloads the Klipper configuration on the host.'} Heaters turn off, axes need homing and any print in progress is lost.`,
+          body: `${firmware ? 'Resets every MCU and reloads the configuration.' : 'Reloads the Klipper configuration on the host.'} Heaters turn off, axes need homing and any print in progress is lost. This does not reboot the Raspberry Pi or cut printer power.`,
           confirmLabel: firmware ? 'Firmware restart' : 'Restart',
           tone: jobActive(state) ? 'danger' : 'warn',
         },

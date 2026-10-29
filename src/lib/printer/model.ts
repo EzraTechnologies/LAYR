@@ -21,6 +21,12 @@ export type KlippyState = 'ready' | 'startup' | 'shutdown' | 'error' | 'disconne
 /** `print_stats.state` values reported by Klipper. */
 export type JobState = 'standby' | 'printing' | 'paused' | 'complete' | 'cancelled' | 'error' | 'unknown';
 
+/**
+ * Whether the connected Moonraker exposes `machine.reboot` and `machine.shutdown`.
+ * `unknown` until `server.info` includes a component list. Never guessed.
+ */
+export type HostMachine = 'unknown' | 'available' | 'unavailable';
+
 /** Top-level status shown to the user. `unconfigured` means no Moonraker endpoint has been set up yet. */
 export type PrinterStatus = 'unconfigured' | 'disconnected' | 'connecting' | 'ready' | 'printing' | 'paused' | 'error';
 
@@ -233,6 +239,11 @@ export interface PrinterState {
   /** Epoch ms of the next scheduled reconnect, when `transport === 'waiting'`. */
   nextRetryAt: number | null;
   job: JobInfo | null;
+  /**
+   * `print_stats.state`, including when no file is loaded (`standby` with a null job).
+   * Null when Klipper did not report `print_stats`. `unknown` when the value was not a known state.
+   */
+  printState: JobState | null;
   extruder: HeaterReading | null;
   bed: HeaterReading | null;
   chamber: HeaterReading | null;
@@ -257,6 +268,8 @@ export interface PrinterState {
   limits: PrinterLimits;
   /** `idle_timeout.state`: `Idle`, `Ready` or `Printing` (Klipper is busy executing G-code). */
   idleState: string | null;
+  /** Raspberry Pi host power via Moonraker `machine.reboot` / `machine.shutdown`. */
+  hostMachine: HostMachine;
   /** Requested Klipper objects that this printer does not provide. */
   missingObjects: string[];
   /** Epoch ms "now" used for clock/ETA rendering. */
@@ -284,6 +297,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     reconnectAttempt: 0,
     nextRetryAt: null,
     job: null,
+    printState: null,
     extruder: null,
     bed: null,
     chamber: null,
@@ -299,6 +313,7 @@ export function createInitialState(printerId: string, printerName: string, now: 
     mmu: null,
     limits: structuredClone(FALLBACK_LIMITS),
     idleState: null,
+    hostMachine: 'unknown',
     missingObjects: [],
     now,
   };

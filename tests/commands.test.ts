@@ -27,6 +27,8 @@ describe('connection gates', () => {
     { kind: 'start_print', filename: 'a.gcode' },
     { kind: 'pause' },
     { kind: 'emergency_stop' },
+    { kind: 'host_reboot' },
+    { kind: 'host_shutdown' },
     { kind: 'gcode', script: 'STATUS' },
     { kind: 'delete_file', path: 'a.gcode' },
     { kind: 'set_active_spool', spoolId: 4, name: 'Galaxy Black' },

@@ -161,7 +161,11 @@ const CONTROL = new Set([
   'printer.firmware_restart',
   'server.files.delete_file',
   'server.spoolman.post_spool_id',
+  'machine.reboot',
+  'machine.shutdown',
 ]);
+
+export type HostMode = 'ok' | 'absent' | 'failed' | 'denied' | 'missing' | 'drop';
 
 class RpcFailure extends Error {
   readonly code: number;
@@ -240,6 +244,14 @@ export interface MockOptions {
   failedComponents?: string[];
   /** Macro names that Klipper rejects. */
   failScripts?: string[];
+  /**
+   * Raspberry Pi host power. `ok` implements `machine.reboot` and `machine.shutdown`.
+   * `absent` / `failed` omit or fail the machine component. `denied` and `missing` answer the RPC.
+   * `drop` closes the socket without a reply.
+   */
+  host?: HostMode;
+  /** Holds the host RPC open so a second tap can be tested. */
+  hostDelayMs?: number;
 }
 
 export class MockMoonraker {
@@ -258,6 +270,8 @@ export class MockMoonraker {
   omitComponents: boolean;
   failedComponents: string[];
   failScripts: string[];
+  hostMode: HostMode;
+  hostDelayMs: number;
   #ws: WebSocketRoute | null = null;
   #relative = false;
   #saved: Record<string, boolean> = {};
@@ -298,6 +312,8 @@ export class MockMoonraker {
     this.omitComponents = options.omitComponents ?? false;
     this.failedComponents = options.failedComponents ?? [];
     this.failScripts = options.failScripts ?? [];
+    this.hostMode = options.host ?? 'ok';
+    this.hostDelayMs = options.hostDelayMs ?? 0;
   }
 
   /** Control (printer-changing) calls in order. */
@@ -413,12 +429,24 @@ export class MockMoonraker {
       case 'server.connection.identify':
         return { connection_id: 101 };
       case 'server.info': {
-        const body: Record<string, unknown> = { klippy_connected: true, klippy_state: this.klippy, moonraker_version: 'v0.9.3' };
+        const body: Record<string, unknown> = {
+          klippy_connected: true,
+          klippy_state: this.klippy,
+          moonraker_version: 'v0.9.3',
+          api_version: [1, 5, 0],
+          api_version_string: '1.5.0',
+        };
         if (!this.omitComponents) {
           const components = ['database', 'file_manager', 'klippy_apis', 'machine', 'data_store'];
+          if (this.hostMode === 'absent' || this.hostMode === 'failed') {
+            const index = components.indexOf('machine');
+            if (index >= 0) components.splice(index, 1);
+          }
           if (this.spoolmanMode !== 'absent' && !this.failedComponents.includes('spoolman')) components.push('spoolman');
           body.components = components;
-          body.failed_components = this.failedComponents;
+          const failed = [...this.failedComponents];
+          if (this.hostMode === 'failed' && !failed.includes('machine')) failed.push('machine');
+          body.failed_components = failed;
         }
         return body;
       }
@@ -513,6 +541,9 @@ export class MockMoonraker {
         return 'ok';
       case 'printer.gcode.script':
         return this.#script(String(params.script));
+      case 'machine.reboot':
+      case 'machine.shutdown':
+        return this.#host(params);
       default:
         throw new Error(`Method not found: ${method}`);
     }
@@ -562,6 +593,18 @@ export class MockMoonraker {
     const found = this.spools.find((spool) => spool.id === Number(detail[1]));
     if (!found) throw new RpcFailure('Not found', 404);
     return { response: toSpoolman(found), response_headers: {} };
+  }
+
+  async #host(params: Record<string, unknown>): Promise<string> {
+    if (Object.keys(params).length > 0) throw new RpcFailure('Invalid parameters', 400);
+    if (this.hostMode === 'denied') throw new RpcFailure('Unauthorized', 401);
+    if (this.hostMode === 'missing') throw new RpcFailure('Method not found', -32601);
+    if (this.hostMode === 'drop') {
+      void this.disconnect();
+      return new Promise(() => {});
+    }
+    if (this.hostDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.hostDelayMs));
+    return 'ok';
   }
 
   #fail(message: string): never {
