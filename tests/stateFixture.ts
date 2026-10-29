@@ -57,6 +57,7 @@ export function readyState(overrides: Overrides = {}): PrinterState {
 export function withJob(state: PrinterState, jobState: JobInfo['state'], filename = 'part.gcode'): PrinterState {
   return {
     ...state,
+    printState: jobState,
     status: jobState === 'printing' ? 'printing' : jobState === 'paused' ? 'paused' : 'ready',
     job: {
       filename,

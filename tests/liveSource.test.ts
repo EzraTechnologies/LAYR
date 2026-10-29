@@ -109,9 +109,29 @@ describe('LiveSource', () => {
     server.last.notify('notify_gcode_response', ['// hello']);
     expect(lines).toEqual(['// hello']);
     await expect(source.call('printer.gcode.script', { script: 'G28' })).resolves.toBe('ok');
-    await expect(source.call('machine.reboot')).rejects.toThrow(/not permitted/);
+    await expect(source.call('machine.services.restart', { service: 'klipper' })).rejects.toThrow(/not permitted/);
+    await expect(source.call('machine.reboot')).resolves.toBe('ok');
     source.stop();
     await expect(source.call('printer.gcode.script', { script: 'G28' })).rejects.toThrow('Not connected to Moonraker');
+  });
+
+  it('learns Raspberry Pi host controls from server.info and forgets them when the socket drops', async () => {
+    const server = new FakeMoonraker();
+    server.components = ['database', 'machine'];
+    server.apiVersion = [1, 5, 0];
+    const { source, states } = start(server);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toMatchObject({ hostMachine: 'available', printState: 'standby', hostname: 'fake-host' });
+
+    server.last.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toMatchObject({ hostMachine: 'unknown', transport: 'waiting', printState: null });
+
+    server.components = ['database'];
+    server.failedComponents = ['machine'];
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(states.at(-1)).toMatchObject({ hostMachine: 'unavailable', status: 'ready' });
+    source.stop();
   });
 
   it('shows Klipper live speed and volumetric flow, not the percentage overrides', async () => {

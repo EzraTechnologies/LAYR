@@ -18,6 +18,7 @@ import type {
   SubscribeResult,
   WebSocketLike,
 } from './types';
+import { HOST_METHOD_LIST, hostParamsAllowed } from './host';
 import { WS_OPEN } from './types';
 
 /** `configfile.settings` from a subscribe/query status payload, or null when it is absent or empty. */
@@ -49,8 +50,8 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
 /**
  * JSON-RPC methods that change the printer. They are only called by the command gateway
  * (`src/lib/actions/gateway.ts`), which validates and, where needed, confirms every command first.
- * Host-level methods (`machine.*`, `server.restart`, updates, config/file writes other than deleting a G-code
- * file) are deliberately absent.
+ * `server.restart`, updates, and config/file writes other than deleting a G-code file are deliberately absent.
+ * Raspberry Pi power is only `HOST_METHODS`, not this set.
  */
 export const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'printer.gcode.script',
@@ -65,8 +66,15 @@ export const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'server.spoolman.post_spool_id',
 ]);
 
+/**
+ * The only host methods LAYR can send. Exact names, not a `machine.*` wildcard.
+ * `machine.services.*`, `machine.system_info`, sudo, and shell endpoints stay rejected.
+ * Callers must omit `params` (`hostParamsAllowed`).
+ */
+export const HOST_METHODS: ReadonlySet<string> = new Set(HOST_METHOD_LIST);
+
 export function isAllowedMethod(method: string): boolean {
-  return READ_METHODS.has(method) || CONTROL_METHODS.has(method);
+  return READ_METHODS.has(method) || CONTROL_METHODS.has(method) || HOST_METHODS.has(method);
 }
 
 export class MethodNotAllowedError extends Error {
@@ -548,7 +556,7 @@ export class MoonrakerClient {
   }
 
   #call<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
-    if (!isAllowedMethod(method) || !spoolmanParamsAllowed(method, params)) {
+    if (!isAllowedMethod(method) || !spoolmanParamsAllowed(method, params) || !hostParamsAllowed(method, params)) {
       return Promise.reject(new MethodNotAllowedError(method));
     }
     const socket = this.#socket;

@@ -3,6 +3,7 @@ import { resetIntegrationRuntime, setIntegrationRuntime } from '../src/lib/integ
 import { Backoff } from '../src/lib/moonraker/backoff';
 import {
   CONTROL_METHODS,
+  HOST_METHODS,
   MethodNotAllowedError,
   MoonrakerClient,
   READ_METHODS,
@@ -374,8 +375,12 @@ describe('MoonrakerClient', () => {
     await flush();
     const before = server.calls.length;
     for (const method of [
-      'machine.reboot',
-      'machine.shutdown',
+      'machine.services.restart',
+      'machine.services.stop',
+      'machine.services.start',
+      'machine.system_info',
+      'machine.update.full',
+      'machine.*',
       'server.restart',
       'server.files.write',
       'server.files.upload',
@@ -383,8 +388,17 @@ describe('MoonrakerClient', () => {
     ]) {
       await expect(client.call(method, { script: 'G28' })).rejects.toBeInstanceOf(MethodNotAllowedError);
     }
+    await expect(client.call('machine.reboot', { service: 'klipper' })).rejects.toBeInstanceOf(MethodNotAllowedError);
+    await expect(client.call('machine.shutdown', {})).rejects.toBeInstanceOf(MethodNotAllowedError);
     expect(server.calls.length).toBe(before);
+    await expect(client.call('machine.reboot')).resolves.toBe('ok');
+    await expect(client.call('machine.shutdown')).resolves.toBe('ok');
+    const hostSent = server.last.sent.filter((message) => message.method === 'machine.reboot' || message.method === 'machine.shutdown');
+    expect(hostSent.map((message) => message.method)).toEqual(['machine.reboot', 'machine.shutdown']);
+    expect(hostSent.every((message) => message.params === undefined)).toBe(true);
     expect([...READ_METHODS].some((m) => /gcode\.script|print\.|emergency|machine\.|write|delete|upload/.test(m))).toBe(false);
+    expect([...HOST_METHODS].sort()).toEqual(['machine.reboot', 'machine.shutdown']);
+    expect([...READ_METHODS, ...CONTROL_METHODS].some((method) => method.startsWith('machine.'))).toBe(false);
     expect([...CONTROL_METHODS].sort()).toEqual(
       [
         'printer.emergency_stop',

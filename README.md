@@ -75,7 +75,8 @@ They are not a Box Turtle or any other physical unit.
   is independent. Happy Hare and AFC exclude each other, and both can stay off. Turning a switch does
   not move the printer.
   The display name, the List / Thumbnails choice, and those switches are stored on this screen and do not change the printer.
-  Restart and firmware restart are confirmed. Emergency stop is a press-and-hold in the top bar.
+  Restart Klipper and firmware restart are confirmed, and they do not reboot the Pi.
+  Settings also has Reboot Raspberry Pi and Shut down Raspberry Pi. Those ask first, name the connected Moonraker host, and stay off during a print, while paused, and while the printer is offline, not ready, or unknown. They do not restart Klipper and they do not switch off the printer power supply. A software shutdown does not necessarily remove power. Emergency stop is a press-and-hold in the top bar.
 
 There is no Demo mode. With no Moonraker URL, the UI stays on "not set up" and does not invent
 temperatures or positions. A dropped connection shows Offline and keeps retrying; it never substitutes
@@ -92,9 +93,12 @@ and recover run only when `printer.gcode.help` lists those commands, and only af
 - Every printer-changing action goes through `prepareCommand` (`src/lib/actions/commands.ts`) and then
   `CommandGateway`. The gateway re-checks the latest state, requires confirmation where the plan says
   so, and ignores a second tap while that command group is still running.
-- The Moonraker client only sends methods in `READ_METHODS` or `CONTROL_METHODS`
-  (`src/lib/moonraker/client.ts`). `machine.*`, `server.restart`, config writes and file uploads are
-  rejected in the client. Deleting a G-code file is allowed, and only after confirmation, and not while
+- The Moonraker client only sends methods in `READ_METHODS`, `CONTROL_METHODS`, or the two host
+  methods `machine.reboot` and `machine.shutdown` (`src/lib/moonraker/client.ts`). Every other
+  `machine.*` method, including service restarts, is rejected. The two host methods are sent only by
+  the command gateway after confirmation, with no parameters, and only to the Moonraker this screen is
+  connected to. `server.restart`, config writes and file uploads are rejected in the client. Deleting a
+  G-code file is allowed, and only after confirmation, and not while
   that file is the active print. Spoolman reads are `server.spoolman.status`, `get_spool_id`, and a
   GET proxy limited to `/v1/spool`. `server.spoolman.post_spool_id` is sent only after confirmation,
   or after an unload Klipper has accepted, and not during a print.

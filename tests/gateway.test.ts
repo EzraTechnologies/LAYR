@@ -108,6 +108,93 @@ describe('CommandGateway', () => {
     expect(calls.map((c) => c.timeoutMs)).toEqual([180_000, 15 * 60_000]);
   });
 
+  it('sends Raspberry Pi host power only after confirmation, and only on this connection', async () => {
+    const idle = readyState({ hostMachine: 'available', printState: 'standby', hostname: 'trident', idleState: 'Idle' });
+    const { connection, calls } = fakeConnection();
+    const other = fakeConnection();
+    const gateway = new CommandGateway(connection, () => idle);
+    const elsewhere = new CommandGateway(other.connection, () => idle);
+    const preview = await gateway.execute({ kind: 'host_reboot' });
+    expect(preview).toMatchObject({
+      status: 'needs_confirmation',
+      confirm: { title: 'Reboot this Raspberry Pi?', confirmLabel: 'Reboot Raspberry Pi' },
+    });
+    expect(calls).toEqual([]);
+    expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toMatchObject({
+      status: 'ok',
+      summary: 'Reboot Raspberry Pi',
+      note: expect.stringContaining('does not mean the Raspberry Pi has finished restarting'),
+    });
+    expect(calls).toEqual([{ method: 'machine.reboot', params: undefined, timeoutMs: 15_000 }]);
+    expect(other.calls).toEqual([]);
+    await elsewhere.execute({ kind: 'host_shutdown' }, { confirmed: true });
+    expect(calls).toHaveLength(1);
+    expect(other.calls.map((call) => call.method)).toEqual(['machine.shutdown']);
+    expect(other.calls[0]?.params).toBeUndefined();
+  });
+
+  it('re-checks print and connection state before a confirmed host action is sent', async () => {
+    const { connection, calls } = fakeConnection();
+    let state = readyState({ hostMachine: 'available', printState: 'standby', hostname: 'trident', idleState: 'Idle' });
+    const gateway = new CommandGateway(connection, () => state);
+    expect((await gateway.execute({ kind: 'host_shutdown' })).status).toBe('needs_confirmation');
+    state = withJob(state, 'printing');
+    expect(await gateway.execute({ kind: 'host_shutdown' }, { confirmed: true })).toMatchObject({
+      status: 'blocked',
+      message: 'Not available during a print',
+    });
+    state = readyState({
+      hostMachine: 'available',
+      printState: 'standby',
+      transport: 'waiting',
+      status: 'disconnected',
+    });
+    expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toEqual({
+      status: 'blocked',
+      message: 'Printer is offline',
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('treats a dropped host socket as unconfirmed and an auth error as a failure', async () => {
+    const idle = readyState({ hostMachine: 'available', printState: 'standby', hostname: 'trident', idleState: 'Idle' });
+    const { connection } = fakeConnection(async (method) => {
+      if (method === 'machine.reboot') throw new RpcUnconfirmedError('Connection closed before Moonraker replied');
+      if (method === 'machine.shutdown') throw new RpcError('Unauthorized', 401);
+      throw new RpcError('Cannot reboot from within a docker container', 400);
+    });
+    const gateway = new CommandGateway(connection, () => idle);
+    expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toEqual({
+      status: 'unconfirmed',
+      summary: 'Reboot Raspberry Pi',
+      message:
+        'Connection closed before Moonraker replied. The Raspberry Pi may still be running. This is not a confirmed reboot or shutdown',
+    });
+    expect(await gateway.execute({ kind: 'host_shutdown' }, { confirmed: true })).toEqual({
+      status: 'failed',
+      summary: 'Shut down Raspberry Pi',
+      message: 'Moonraker denied Raspberry Pi host control for this connection',
+      reason: 'unauthorized',
+    });
+  });
+
+  it('rejects a second host tap while the first request is still in flight', async () => {
+    let release: () => void = () => {};
+    const { connection, calls } = fakeConnection(
+      () => new Promise((resolve) => (release = () => resolve('ok'))),
+    );
+    const gateway = new CommandGateway(connection, () =>
+      readyState({ hostMachine: 'available', printState: 'standby', hostname: 'trident', idleState: 'Idle' }),
+    );
+    const first = gateway.execute({ kind: 'host_reboot' }, { confirmed: true });
+    expect(await gateway.execute({ kind: 'host_shutdown' }, { confirmed: true })).toMatchObject({ status: 'busy' });
+    expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toMatchObject({ status: 'busy' });
+    release();
+    expect(await first).toMatchObject({ status: 'ok' });
+    expect(calls.map((call) => call.method)).toEqual(['machine.reboot']);
+    expect(gateway.isBusy('pi-host')).toBe(false);
+  });
+
   it('keeps a jog busy until the new position is reported', async () => {
     vi.useFakeTimers();
     try {

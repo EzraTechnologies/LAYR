@@ -217,6 +217,44 @@ const SHOTS: Shot[] = [
   },
   { name: 'settings', route: 'settings', options: { scenario: 'ready' } },
   {
+    name: 'settings-pi-host',
+    route: 'settings',
+    options: { scenario: 'ready', homed: true },
+    prepare: async (page) => {
+      await page.getByRole('heading', { name: 'Raspberry Pi' }).scrollIntoViewIfNeeded();
+      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeEnabled();
+    },
+  },
+  {
+    name: 'settings-pi-reboot-confirm',
+    route: 'settings',
+    options: { scenario: 'ready', homed: true },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Reboot this Raspberry Pi?' })).toBeVisible();
+    },
+  },
+  {
+    name: 'settings-pi-shutdown-confirm',
+    route: 'settings',
+    options: { scenario: 'ready', homed: true },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Shut down this Raspberry Pi?' })).toBeVisible();
+    },
+  },
+  {
+    name: 'settings-pi-printing',
+    route: 'settings',
+    options: { scenario: 'printing', homed: true },
+    prepare: async (page) => {
+      await page.getByRole('heading', { name: 'Raspberry Pi' }).scrollIntoViewIfNeeded();
+      await expect(page.getByText('Not available during a print')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeDisabled();
+    },
+  },
+  {
     name: 'mmu',
     route: 'mmu',
     options: { scenario: 'ready', mmu: { status: readyMmu() }, seedSwitches: { happyHare: true } },
