@@ -70,8 +70,13 @@ function overlaps(a: CardBox, b: CardBox): boolean {
   return a.x < right(b) - 1 && right(a) > b.x + 1 && a.y < bottom(b) - 1 && bottom(a) > b.y + 1;
 }
 
-/** Two stacks, content-sized cards, and only the column gap between neighbours. */
-function expectBalancedColumns(layout: ColumnLayout) {
+/**
+ * Two stacks, content-sized cards, and only the column gap between neighbours.
+ * `minRatio` is the shorter stack divided by the taller one. Display includes the printer image
+ * chooser, so the right stack runs longer than the left. An empty Klipper card (no sensors, printer
+ * not set up) shortens the left stack further. Neighbour gaps are what reject a hole under Connection.
+ */
+function expectBalancedColumns(layout: ColumnLayout, minRatio = 0.72) {
   const { connection, pi, klipper, integrations, display } = layout;
   expect(Math.abs(connection.y - integrations.y)).toBeLessThan(2);
   expect(Math.abs(pi.x - connection.x)).toBeLessThan(2);
@@ -99,7 +104,7 @@ function expectBalancedColumns(layout: ColumnLayout) {
   const right = display.y + display.height - integrations.y;
   const shorter = Math.min(left, right);
   const taller = Math.max(left, right);
-  expect(shorter / taller).toBeGreaterThan(0.72);
+  expect(shorter / taller).toBeGreaterThan(minRatio);
 
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
   for (const card of cards) {
@@ -139,6 +144,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('heading', { name: 'Raspberry Pi' })).toContainText('Raspberry Pi');
       await expect(page.locator('[aria-labelledby="set-pi"]')).toContainText('not a Klipper firmware restart');
       await expect(page.locator('[aria-labelledby="set-printer"]')).toContainText('does not reboot the Raspberry Pi');
+      await expect(page.locator('[aria-labelledby="set-display"] #printer-image-label')).toHaveText('Printer image');
       await expectCleanLayout(page);
 
       await scrollSettings(page, 0.45);
@@ -171,7 +177,8 @@ for (const vp of VIEWPORTS) {
       const useHost = page.getByRole('button', { name: 'Use host name' });
       await useHost.scrollIntoViewIfNeeded();
       await expect(useHost).toBeVisible();
-      expectBalancedColumns(await measure(page));
+      await expect(page.locator('[aria-labelledby="set-display"] #printer-image-label')).toHaveText('Printer image');
+      expectBalancedColumns(await measure(page), 0.68);
       await expectCleanLayout(page);
       await scrollSettings(page, 1);
       await expectCleanLayout(page);
@@ -182,8 +189,9 @@ for (const vp of VIEWPORTS) {
       await page.goto('/#/settings');
       await expect(page.locator('[aria-labelledby="set-conn"]')).toContainText('Not set up');
       const layout = await measure(page);
-      expectBalancedColumns(layout);
+      expectBalancedColumns(layout, 0.58);
       expect(gap(layout.connection, layout.klipper)).toBeLessThan(20);
+      await expect(page.locator('[aria-labelledby="set-display"] #printer-image-label')).toHaveText('Printer image');
       expect(layout.pi.y).toBeGreaterThan(layout.klipper.y);
       const reboot = page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true });
       await reboot.scrollIntoViewIfNeeded();

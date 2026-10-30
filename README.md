@@ -47,6 +47,9 @@ They are not a Box Turtle or any other physical unit.
   volumetric flow (mm³/s), nozzle, bed and chamber (when that sensor exists), fans, and the
   latest console alert. Speed and flow are Klipper `motion_report` values, not the M220/M221
   percentages. Those percentages sit behind the speed and flow readouts.
+  While the printer is idle, finished, or standing by, the preview is a photo chosen in Settings,
+  or a generic printer mark when none is set. Printing and paused keep the G-code thumbnail, and use
+  that photo only when the file has none.
 - **Files**: G-code folders, sort, metadata, thumbnails (including nested paths), start and delete.
   Both ask before acting. Files without a thumbnail show a placeholder. The screen can stay on the
   compact list (the default, including on profiles saved before this choice existed) or switch to
@@ -74,7 +77,8 @@ They are not a Box Turtle or any other physical unit.
   and per-printer Spoolman, Happy Hare, and AFC switches. All three stay off until turned on. Spoolman
   is independent. Happy Hare and AFC exclude each other, and both can stay off. Turning a switch does
   not move the printer.
-  The display name, the List / Thumbnails choice, and those switches are stored on this screen and do not change the printer.
+  The display name, the List / Thumbnails choice, the printer photo, and those switches are stored on this screen and do not change the printer.
+  Printer image keeps a JPEG for this Moonraker address in the browser (at most 1024 px and 400 KB, up to 8 printers). It remains after a LAYR update and a Chromium restart, and it is not uploaded.
   Restart Klipper and firmware restart are confirmed, and they do not reboot the Pi.
   Settings also has Reboot Raspberry Pi and Shut down Raspberry Pi. Those ask first, name the connected Moonraker host, and stay off during a print, while paused, and while the printer is offline, not ready, or unknown. They do not restart Klipper and they do not switch off the printer power supply. A software shutdown does not necessarily remove power. Emergency stop is a press-and-hold in the top bar.
 

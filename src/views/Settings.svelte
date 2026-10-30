@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
+  import PrinterImageChooser from '../components/PrinterImageChooser.svelte';
   import { isValidMoonrakerUrl, type AppConfig } from '../lib/config';
   import { app } from '../lib/context';
   import { discoverIntegrations } from '../lib/integrations/discover';
@@ -329,6 +330,7 @@
         {/each}
       </div>
       <p class="hint">Saved on this device. Thumbnails shows the current directory as cards.</p>
+      <PrinterImageChooser />
       <span class="label" id="name-label">Printer Name</span>
       <button type="button" class="btn ghost url-field" aria-labelledby="name-label" onclick={editName}>
         <span class="url-text" class:placeholder={!settings.value.displayName} title={effectiveName}>
