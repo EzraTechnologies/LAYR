@@ -118,3 +118,47 @@ reload_active_kiosk() {
   info "Reloading layr-kiosk.service only. Klipper, Moonraker, and KlipperScreen are not restarted."
   run sudo systemctl restart "$KIOSK_UNIT"
 }
+
+# Refuse a truncated download. The marker is the last non-empty line of the file.
+# Call this before any install or display change.
+require_complete_script() {
+  local file="$1"
+  local marker="${2:-# LAYR_SCRIPT_END}"
+  local last=""
+  [ -f "$file" ] || die "Refusing to run $file: the file is missing. Nothing was changed."
+  last=$(awk 'NF { line = $0 } END { print line }' "$file")
+  if [ "$last" != "$marker" ]; then
+    die "Refusing to run an incomplete copy of $file. Download it again. Nothing was changed."
+  fi
+}
+
+layr_web_port() {
+  local line=""
+  if [ -f "$LAYR_ENV" ]; then
+    line=$(grep -E '^LAYR_PORT=[0-9]+$' "$LAYR_ENV" | tail -n 1 || true)
+  fi
+  if [ -n "$line" ]; then
+    printf '%s\n' "${line#LAYR_PORT=}"
+  else
+    printf '7180\n'
+  fi
+}
+
+# Printed before a display switch and again if that switch is undone.
+print_recovery_instructions() {
+  local deploy_dir="${1:-deploy}"
+  cat <<EOF
+
+If the panel is blank or on the wrong screen, the Pi was not rebooted.
+Run these as the printer user, not as root. KlipperScreen stays installed:
+
+  ${deploy_dir}/layr-display.sh to-klipperscreen --yes
+  ${deploy_dir}/rollback.sh --yes
+  ${deploy_dir}/uninstall.sh
+
+Those commands do not edit printer.cfg, moonraker.conf, mmu.cfg, or AFC / Box Turtle / Happy Hare files.
+A text console is Ctrl+Alt+F1, or: sudo chvt 1
+EOF
+}
+
+# LAYR_SCRIPT_END

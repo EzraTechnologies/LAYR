@@ -2,7 +2,7 @@
 
 Optional. The MMU item is added to the rail only while Settings → Happy Hare is on for this printer, Klipper is ready, and `printer.objects.list` contains an object named `mmu`. The switch defaults off and is stored per printer. Turning it on turns AFC off. Both can stay off. Turning the switch off leaves the MMU screen and drops the `mmu` subscription. Toggling does not send motion. Printers without that object keep the previous rail, and LAYR does not call `printer.gcode.help` for them. AFC objects are not read and are not controlled.
 
-LAYR does not install Happy Hare, does not edit `printer.cfg`, `mmu.cfg`, or `moonraker.conf`, and does not restart Klipper or Moonraker. The native Qt UI is unchanged.
+LAYR does not install Happy Hare, does not edit `printer.cfg`, `mmu.cfg`, or `moonraker.conf`, and does not restart Klipper or Moonraker. The native Qt UI is unchanged. Happy Hare and AFC are mutually exclusive in one printer profile: turning one on turns the other off. Test them one at a time, or on different printers. The Pi installer in [INSTALL-FOR-TESTERS.md](../INSTALL-FOR-TESTERS.md) does not install either controller.
 
 ## What the screen shows
 

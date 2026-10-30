@@ -11,6 +11,12 @@ and `layr-engine.sh --restart-kiosk` restart only the LAYR display process.
 `layr-display.sh to-klipperscreen` stops the LAYR kiosk and starts KlipperScreen.
 It does not restart Klipper.
 
+A friend with a 5-inch panel who already runs Klipper and Moonraker, and who may also
+already run AFC (including a Box Turtle) or Happy Hare, should start with
+[INSTALL-FOR-TESTERS.md](../INSTALL-FOR-TESTERS.md). That one-command installer does not
+install either filament controller and does not edit printer configuration. Test one
+controller at a time, or use a different printer. Do not enable both in one LAYR profile.
+
 ## 1. Get the reviewed build
 
 Wait until the pull request is approved. Then, on the Pi, as the printer user (not root):

@@ -1,0 +1,47 @@
+name: Release dist
+
+# Publishes the pre-built web assets the Pi bootstrap prefers.
+# It runs only when a v* tag is pushed. This pull request does not push a tag.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  dist:
+    name: Pack and attach layr-dist.tar.gz
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Pack dist and the deploy scripts
+        run: |
+          stage=$(mktemp -d)
+          cp -a dist/. "$stage/"
+          mkdir -p "$stage/deploy"
+          cp -a deploy/. "$stage/deploy/"
+          tar -C "$stage" -czf "$PWD/layr-dist.tar.gz" .
+          sha256sum layr-dist.tar.gz > layr-dist.tar.gz.sha256
+          tar -tzf layr-dist.tar.gz | grep -qx 'index.html'
+          tar -tzf layr-dist.tar.gz | grep -qx 'deploy/install.sh'
+          rm -rf "$stage"
+      - name: Attach the archive to the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Pre-built LAYR web assets for deploy/bootstrap.sh. This archive does not install AFC, Happy Hare, or Box Turtle, and it does not change printer configuration. AFC and Happy Hare stay mutually exclusive in one printer profile."
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" layr-dist.tar.gz layr-dist.tar.gz.sha256 --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" layr-dist.tar.gz layr-dist.tar.gz.sha256 --title "$GITHUB_REF_NAME" --notes "$notes"
+          fi

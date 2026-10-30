@@ -11,7 +11,8 @@
 #   - Refreshes ~/layr/bin. The kiosk URL includes layr_build set to that release directory name.
 #
 # What it never does:
-#   - Edit printer.cfg, moonraker.conf, or any Klipper/Moonraker file.
+#   - Edit printer.cfg, moonraker.conf, mmu.cfg, or any Klipper/Moonraker file.
+#   - Install or configure AFC, Happy Hare, Box Turtle, or any other filament controller.
 #   - Stop, disable, or replace KlipperScreen.
 #   - Restart Klipper or Moonraker.
 #   - Restart an already running kiosk unless --reload-kiosk is passed.
@@ -34,6 +35,8 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$SCRIPT_DIR" || exit 1
 # shellcheck source=deploy/lib.sh
 . ./lib.sh
+require_complete_script "$SCRIPT_DIR/install.sh"
+require_complete_script "$SCRIPT_DIR/lib.sh"
 
 # Empty means "the dist directory next to this script", resolved after the caller cwd is known.
 DIST_ARG=""
@@ -195,3 +198,5 @@ echo "The kiosk uses the same layr_build value, percent-encoded, and keeps the #
 echo "Open that address in Chromium on this Pi before using the kiosk."
 echo "KlipperScreen was not modified. To switch displays later: ./deploy/layr-display.sh to-layr"
 echo "To undo this install: ./deploy/uninstall.sh"
+print_recovery_instructions "$SCRIPT_DIR"
+# LAYR_SCRIPT_END

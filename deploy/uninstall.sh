@@ -9,6 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")" || exit 1
 # shellcheck source=deploy/lib.sh
 . ./lib.sh
+require_complete_script "$PWD/uninstall.sh"
+require_complete_script "$PWD/lib.sh"
 
 PURGE=0
 while [ $# -gt 0 ]; do
@@ -65,3 +67,5 @@ if [ "$PURGE" = 1 ]; then
 fi
 
 info "LAYR units removed. Printer configuration was not modified."
+print_recovery_instructions "$PWD"
+# LAYR_SCRIPT_END
