@@ -14,8 +14,10 @@ It does not restart Klipper.
 A friend with a 5-inch panel who already runs Klipper and Moonraker, and who may also
 already run AFC (including a Box Turtle) or Happy Hare, should start with
 [INSTALL-FOR-TESTERS.md](../INSTALL-FOR-TESTERS.md). That one-command installer does not
-install either filament controller and does not edit printer configuration. Test one
-controller at a time, or use a different printer. Do not enable both in one LAYR profile.
+install either filament controller and does not edit printer configuration. The first run
+is the long download. After that, `layr` opens the same menu and `layr to-klipperscreen`
+switches back with no network. Test one controller at a time, or use a different printer.
+Do not enable both in one LAYR profile.
 
 ## 1. Get the reviewed build
 

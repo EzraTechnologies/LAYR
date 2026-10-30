@@ -185,9 +185,10 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 A friend who already has Klipper, Moonraker, and a 5-inch touchscreen can use the one-command
 installer in [INSTALL-FOR-TESTERS.md](INSTALL-FOR-TESTERS.md). It installs LAYR only. It does not
 install AFC, Happy Hare, or a Box Turtle, and it does not edit `printer.cfg` or `moonraker.conf`.
-KlipperScreen stays up until a separate confirmation. The same command, run again after
-LAYR is installed, shows which display is active and a switch menu. That later run does not
-download or reinstall unless you choose Update or Repair. AFC and Happy Hare stay optional and are
+KlipperScreen stays up until a separate confirmation. The first run adds a `layr` command.
+After that, `layr` from any directory shows which display is active and the same switch menu,
+including Uninstall LAYR. That later run does not download or reinstall unless you choose Update
+or Repair. `layr to-klipperscreen` works offline. AFC and Happy Hare stay optional and are
 mutually exclusive in one printer profile.
 
 Test on a spare card first, and test in a browser before the kiosk. A Pi 4 with a BTT HDMI7 has
@@ -215,10 +216,15 @@ already shown the Chromium UI. The installer in this tree still needs the checks
 5. Only then, if you want LAYR on the panel: `./deploy/layr-display.sh to-layr`.
    That disables KlipperScreen (it stays installed) and starts cage + Chromium on tty7.
    `./deploy/layr-display.sh to-klipperscreen` switches back.
-6. `./deploy/rollback.sh` points `~/layr/current` at the previous release. The next kiosk start uses
-   that directory name as `layr_build`. Add `--reload-kiosk` to restart an already active kiosk.
-   `./deploy/uninstall.sh` removes the LAYR units and, if LAYR had disabled KlipperScreen, enables it
-   again. `--purge` also deletes `~/layr`. Uninstall does not delete a udev rule.
+6. `./deploy/rollback.sh` points `~/layr/current` at the previous release and leaves the `layr`
+   command in place. The next kiosk start uses that directory name as `layr_build`. Add
+   `--reload-kiosk` to restart an already active kiosk.
+   `layr uninstall` removes LAYR. It restores KlipperScreen first when that service is installed,
+   then removes LAYR units, `~/layr`, and the `layr` command. It asks separately before deleting
+   personal settings and printer photos. It does not remove apt packages or printer configuration.
+   `./deploy/uninstall.sh` without `--purge` removes the units and keeps `~/layr` and `layr`.
+   `--purge` also deletes `~/layr` and the command, and still keeps personal settings.
+   Uninstall does not delete a udev rule.
 
 The kiosk does not force a resolution. cage uses the connector's preferred mode. The Pi model and the
 panel's native mode are read by `check-device.sh` because they are not known in this repository.

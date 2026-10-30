@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# Persistent LAYR command. Installed for the printer user.
+# It runs the manager already stored under the LAYR home directory.
+# It does not download files, install packages, or read a script from /tmp.
+set -euo pipefail
+
+if [ "$(id -u)" = 0 ]; then
+  printf 'ERROR: Run layr as the printer user, not as root. Nothing was changed.\n' >&2
+  exit 1
+fi
+if [ -z "${HOME:-}" ]; then
+  printf 'ERROR: HOME is not set. Nothing was changed.\n' >&2
+  exit 1
+fi
+
+LAYR_HOME="${LAYR_HOME:-$HOME/layr}"
+MANAGER="${LAYR_BOOTSTRAP:-$LAYR_HOME/bin/bootstrap.sh}"
+
+complete_script() {
+  local file="$1" last
+  [ -f "$file" ] || return 1
+  [ -L "$file" ] && return 1
+  last=$(awk 'NF { line = $0 } END { print line }' "$file")
+  [ "$last" = "# LAYR_SCRIPT_END" ]
+}
+
+mode_safe() {
+  local file="$1" mode group other
+  mode=$(stat -c '%a' "$file" 2>/dev/null) || return 1
+  group=$(((10#$mode / 10) % 10))
+  other=$((10#$mode % 10))
+  [ $((group & 2)) -eq 0 ] && [ $((other & 2)) -eq 0 ]
+}
+
+local_manager() {
+  local parent
+  [ -n "$MANAGER" ] || return 1
+  case "$MANAGER" in
+    "$LAYR_HOME"/*) ;;
+    *) return 1 ;;
+  esac
+  parent=$(dirname "$MANAGER")
+  [ "$parent" != "/tmp" ] || return 1
+  [ -x "$MANAGER" ] || return 1
+  mode_safe "$MANAGER" || return 1
+  complete_script "$MANAGER"
+}
+
+display_script() {
+  local candidate
+  if [ -n "${LAYR_DISPLAY_SH:-}" ] && [ -f "$LAYR_DISPLAY_SH" ] && [ ! -L "$LAYR_DISPLAY_SH" ]; then
+    case "$(dirname "$LAYR_DISPLAY_SH")" in
+      /tmp) return 1 ;;
+    esac
+    printf '%s\n' "$LAYR_DISPLAY_SH"
+    return 0
+  fi
+  for candidate in "$LAYR_HOME/src/deploy/layr-display.sh" "$LAYR_HOME/bin/layr-display.sh"; do
+    if complete_script "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: layr [status | to-layr | to-klipperscreen | update | repair | diagnose | uninstall | help]
+
+  layr                    Open the LAYR manager menu.
+  layr status             Show which display is active. No network and no package install.
+  layr to-layr            Switch the panel to LAYR.
+  layr to-klipperscreen   Switch the panel to KlipperScreen. This works offline.
+  layr update             Update LAYR. This is the action that may download.
+  layr repair             Repair LAYR. This is the action that may download.
+  layr diagnose           Read-only report.
+  layr uninstall          Remove LAYR after confirmation.
+
+--yes skips the uninstall confirmation. Settings and printer photos are kept
+unless you also pass --delete-browser. Klipper, Moonraker, AFC, Happy Hare,
+and printer configuration are not removed.
+EOF
+}
+
+run_display() {
+  local script action="$1"
+  shift
+  if ! script=$(display_script); then
+    printf 'ERROR: layr-display.sh is not installed on this computer. Nothing was changed.\n' >&2
+    printf 'offline-fallback-needs-download: no\n'
+    exit 1
+  fi
+  exec bash "$script" "$action" "$@"
+}
+
+main() {
+  local cmd="${1:-}" script=""
+  if [ "$#" -gt 0 ]; then
+    shift
+  fi
+  case "$cmd" in
+    help | -h | --help)
+      usage
+      exit 0
+      ;;
+    "" | menu)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed in %s.\n' "$LAYR_HOME/bin" >&2
+        printf 'The first install uses the long command in INSTALL-FOR-TESTERS.md. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" "$@"
+      ;;
+    status | --status)
+      if local_manager; then
+        exec bash "$MANAGER" --status "$@"
+      fi
+      if script=$(display_script); then
+        exec bash "$script" status
+      fi
+      printf 'install-state: not-installed\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      printf 'offline-fallback-needs-download: no\n'
+      exit 0
+      ;;
+    to-klipperscreen | switch-klipperscreen | --switch-klipperscreen)
+      if local_manager; then
+        exec bash "$MANAGER" --switch-klipperscreen "$@"
+      fi
+      run_display to-klipperscreen "$@"
+      ;;
+    to-layr | switch-layr | --switch-display)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. The display was not changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --switch-display "$@"
+      ;;
+    update | --update)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was updated.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --update "$@"
+      ;;
+    repair | --repair)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was repaired.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --repair "$@"
+      ;;
+    diagnose | diagnostics)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" diagnose "$@"
+      ;;
+    uninstall | --uninstall)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was removed.\n' >&2
+        printf 'The layr command was left in place.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --uninstall "$@"
+      ;;
+    *)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" "$cmd" "$@"
+      ;;
+  esac
+}
+
+main "$@"
+# LAYR_SCRIPT_END

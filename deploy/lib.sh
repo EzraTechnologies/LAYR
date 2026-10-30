@@ -5,7 +5,7 @@
 LAYR_HOME="${LAYR_HOME:-$HOME/layr}"
 LAYR_STATE="$LAYR_HOME/state"
 LAYR_ENV="$LAYR_HOME/layr.env"
-UNIT_DIR="/etc/systemd/system"
+UNIT_DIR="${LAYR_UNIT_DIR:-/etc/systemd/system}"
 WEB_UNIT="layr-web.service"
 KIOSK_UNIT="layr-kiosk.service"
 KS_UNIT="KlipperScreen.service"
@@ -159,6 +159,71 @@ Run these as the printer user, not as root. KlipperScreen stays installed:
 Those commands do not edit printer.cfg, moonraker.conf, mmu.cfg, or AFC / Box Turtle / Happy Hare files.
 A text console is Ctrl+Alt+F1, or: sudo chvt 1
 EOF
+}
+
+# Keep this block identical to the copy in deploy/bootstrap.sh.
+LAYR_PATH_BEGIN="# BEGIN LAYR command path"
+LAYR_PATH_END="# END LAYR command path"
+
+layr_path_block() {
+  cat <<'EOF'
+
+# BEGIN LAYR command path
+if [ -d "$HOME/.local/bin" ]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+  esac
+fi
+# END LAYR command path
+EOF
+}
+
+ensure_layr_path_snippet() {
+  local file="$1" mode="${2:-always}"
+  [ -n "${HOME:-}" ] || return 0
+  [ -L "$file" ] && return 0
+  if [ -f "$file" ] && grep -q "$LAYR_PATH_BEGIN" "$file"; then
+    return 0
+  fi
+  if [ "$mode" = "if-missing" ] && [ -f "$file" ] && grep -q '\.local/bin' "$file"; then
+    return 0
+  fi
+  if [ ! -e "$file" ]; then
+    : >"$file"
+    chmod 644 "$file"
+  fi
+  layr_path_block >>"$file"
+}
+
+remove_layr_path_block() {
+  local file="$1" tmp
+  [ -f "$file" ] || return 0
+  [ -L "$file" ] && return 0
+  grep -q "$LAYR_PATH_BEGIN" "$file" || return 0
+  tmp="${file}.layr-tmp"
+  awk -v begin="$LAYR_PATH_BEGIN" -v end="$LAYR_PATH_END" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    skip != 1 { print }
+  ' "$file" >"$tmp"
+  mv -f "$tmp" "$file"
+}
+
+# Removes only the persistent layr command and the shell snippet that exposes it.
+remove_layr_command() {
+  local cmd="${HOME}/.local/bin/layr"
+  if [ "$DRY_RUN" = 1 ]; then
+    printf '   [dry-run] remove %s\n' "$cmd"
+    printf 'layr-command: would-remove\n'
+    return 0
+  fi
+  remove_layr_path_block "${HOME}/.bashrc"
+  remove_layr_path_block "${HOME}/.profile"
+  if [ -L "$cmd" ] || [ -e "$cmd" ]; then
+    rm -f "$cmd"
+  fi
+  printf 'layr-command: removed\n'
 }
 
 # LAYR_SCRIPT_END

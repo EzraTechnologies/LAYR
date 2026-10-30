@@ -827,8 +827,10 @@ describe('display switcher', () => {
       expect(result.status).toBe(0);
       expect(output).toContain('install-state: not-installed');
       expect(output).toContain('install-kind: first');
+      expect(output).toContain('layr-command: would-install');
       expect(output).toContain('Dry run only');
       expect(output).not.toContain('Same installer, already on this Pi');
+      expect(existsSync(path.join(box.home, '.local', 'bin', 'layr'))).toBe(false);
       expect(output).not.toContain('automatic-toggle: refused');
     } finally {
       cleanup(box);
@@ -851,6 +853,8 @@ describe('display switcher', () => {
       expect(ksOut).toContain('4) Repair');
       expect(ksOut).toContain('5) Diagnostics');
       expect(ksOut).toContain('6) Exit');
+      expect(ksOut).toContain('7) Uninstall LAYR');
+      expect(ksOut).toContain('layr-command: installed');
       expect(ksOut).toContain('menu: skipped');
       expect(ksOut).toContain('reinstall: no');
       expect(ksOut).toContain('changed=no');
@@ -866,6 +870,7 @@ describe('display switcher', () => {
       expect(layr.status).toBe(0);
       expect(textOf(layr)).toContain('active-display: layr');
       expect(textOf(layr)).toContain('menu: exit');
+      expect(textOf(layr)).toContain('layr-command: ready');
       expect(textOf(layr)).toContain('changed=no');
       expect(existsSync(box.aptLog)).toBe(false);
       expect(existsSync(box.httpLog)).toBe(false);
@@ -1062,6 +1067,9 @@ describe('display switcher', () => {
       expect(textOf(frontend)).toContain('offline-fallback-needs-download: no');
       expect(frontendLog).toContain('disable --now layr-kiosk.service');
       expect(frontendLog).toContain('enable --now KlipperScreen.service');
+      expect(frontendLog.indexOf('enable --now KlipperScreen.service')).toBeLessThan(
+        frontendLog.indexOf('disable --now layr-kiosk.service'),
+      );
       expect(existsSync(box.aptLog)).toBe(false);
       expect(existsSync(box.httpLog)).toBe(false);
       expect(statSync(conf).mtimeMs).toBe(before);
@@ -1296,7 +1304,7 @@ describe('bootstrap safety helpers', () => {
   });
 
   it('does not install controllers, force HDMI, reboot, or select the WebKit port', () => {
-    const files = ['bootstrap.sh', 'install.sh', 'layr-display.sh', 'rollback.sh', 'uninstall.sh', 'lib.sh'].map((name) =>
+    const files = ['bootstrap.sh', 'install.sh', 'layr-display.sh', 'rollback.sh', 'uninstall.sh', 'lib.sh', 'layr'].map((name) =>
       readFileSync(path.join(repo, 'deploy', name), 'utf8'),
     );
     const combined = files.join('\n');
@@ -1449,6 +1457,464 @@ exit 0
       expect(log).not.toContain('enable --now KlipperScreen.service');
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts KlipperScreen before it stops an active kiosk', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-display-ks-first-'));
+    const fx = displayEnv(root, {
+      units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
+      active: 'layr-web.service layr-kiosk.service',
+      enabled: 'layr-kiosk.service',
+    });
+    try {
+      const result = run('bash deploy/layr-display.sh to-klipperscreen --yes', fx.env);
+      const log = readFileSync(fx.log, 'utf8');
+      expect(result.status, textOf(result)).toBe(0);
+      expect(log.indexOf('enable --now KlipperScreen.service')).toBeGreaterThanOrEqual(0);
+      expect(log.indexOf('enable --now KlipperScreen.service')).toBeLessThan(log.indexOf('disable --now layr-kiosk.service'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not stop an active kiosk when KlipperScreen is absent', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-display-no-ks-'));
+    const fx = displayEnv(root, {
+      units: 'layr-kiosk.service layr-web.service',
+      active: 'layr-kiosk.service layr-web.service',
+      enabled: 'layr-kiosk.service',
+    });
+    try {
+      const result = run('bash deploy/layr-display.sh to-klipperscreen --yes', fx.env);
+      expect(result.status).not.toBe(0);
+      expect(textOf(result)).toContain('not left blank');
+      expect(readFileSync(fx.log, 'utf8')).not.toContain('disable');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('layr command', () => {
+  function commandPath(box: Sandbox): string {
+    return path.join(box.home, '.local', 'bin', 'layr');
+  }
+
+  function writeCanaries(box: Sandbox) {
+    const config = path.join(box.home, 'printer_data', 'config');
+    mkdirSync(path.join(config, 'AFC'), { recursive: true });
+    writeFileSync(path.join(config, 'printer.cfg'), '# printer\n');
+    writeFileSync(path.join(config, 'moonraker.conf'), '# moonraker\n');
+    writeFileSync(path.join(config, 'mmu.cfg'), '# mmu\n');
+    writeFileSync(path.join(config, 'KlipperScreen.conf'), '# ks\n');
+    writeFileSync(path.join(config, 'AFC', 'AFC.cfg'), '# afc\n');
+    mkdirSync(path.join(box.home, 'klipper'), { recursive: true });
+    writeFileSync(path.join(box.home, 'klipper', 'klippy.py'), '# klipper\n');
+    mkdirSync(path.join(box.home, 'moonraker'), { recursive: true });
+    writeFileSync(path.join(box.home, 'moonraker', 'moonraker.py'), '# moonraker\n');
+    mkdirSync(path.join(box.home, 'Happy-Hare'), { recursive: true });
+    writeFileSync(path.join(box.home, 'Happy-Hare', 'install.sh'), '# happy hare\n');
+    const profile = path.join(box.home, '.config', 'layr-chromium', 'Default');
+    mkdirSync(path.join(profile, 'IndexedDB'), { recursive: true });
+    writeFileSync(path.join(profile, 'Preferences'), '{"layr":true}\n');
+    writeFileSync(path.join(profile, 'IndexedDB', 'photo.bin'), 'printer-photo');
+    mkdirSync(path.join(box.home, '.cache', 'layr-wpe'), { recursive: true });
+    writeFileSync(path.join(box.home, '.cache', 'layr-wpe', 'cache'), 'wpe');
+  }
+
+  function expectCanaries(box: Sandbox) {
+    const config = path.join(box.home, 'printer_data', 'config');
+    expect(readFileSync(path.join(config, 'printer.cfg'), 'utf8')).toContain('# printer');
+    expect(readFileSync(path.join(config, 'moonraker.conf'), 'utf8')).toContain('# moonraker');
+    expect(readFileSync(path.join(config, 'mmu.cfg'), 'utf8')).toContain('# mmu');
+    expect(readFileSync(path.join(config, 'KlipperScreen.conf'), 'utf8')).toContain('# ks');
+    expect(readFileSync(path.join(config, 'AFC', 'AFC.cfg'), 'utf8')).toContain('# afc');
+    expect(readFileSync(path.join(box.home, 'klipper', 'klippy.py'), 'utf8')).toContain('# klipper');
+    expect(readFileSync(path.join(box.home, 'moonraker', 'moonraker.py'), 'utf8')).toContain('# moonraker');
+    expect(readFileSync(path.join(box.home, 'Happy-Hare', 'install.sh'), 'utf8')).toContain('# happy hare');
+  }
+
+  function unitDir(box: Sandbox): string {
+    const dir = path.join(box.home, 'systemd-units');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'layr-web.service'), 'web\n');
+    writeFileSync(path.join(dir, 'layr-kiosk.service'), 'kiosk\n');
+    writeFileSync(path.join(dir, 'KlipperScreen.service'), 'ks\n');
+    return dir;
+  }
+
+  it('embeds the same layr command it installs from one downloaded file', () => {
+    const boot = readFileSync(bootstrap, 'utf8');
+    const wrapper = readFileSync(path.join(repo, 'deploy/layr'), 'utf8');
+    const begin = "cat >\"$dest\" <<'LAYR_WRAPPER' || return 1\n";
+    const start = boot.indexOf(begin);
+    expect(start).toBeGreaterThan(-1);
+    const from = start + begin.length;
+    const end = boot.indexOf('\nLAYR_WRAPPER\n', from);
+    expect(boot.slice(from, end + 1)).toBe(wrapper);
+    expect(wrapper).not.toContain('apt-get');
+    expect(wrapper).not.toContain('curl');
+    expect(wrapper).not.toContain('mktemp');
+    expect(wrapper).not.toContain('/tmp/layr-bootstrap.sh');
+  });
+
+  it('adds the command on first install and leaves it unwritten in a dry run', () => {
+    const box = makeSandbox();
+    const installLog = path.join(box.root, 'install.log');
+    const stub = path.join(box.root, 'install-stub.sh');
+    writeExe(stub, `#!/bin/bash\nprintf '%s\\n' "$*" > ${JSON.stringify(installLog)}\nexit 0\n`);
+    try {
+      const dry = invoke(box, ['--dry-run', '--yes', '--dist', box.dist]);
+      expect(dry.status, textOf(dry)).toBe(0);
+      expect(textOf(dry)).toContain('layr-command: would-install');
+      expect(existsSync(commandPath(box))).toBe(false);
+
+      const result = invoke(box, ['--yes', '--dist', box.dist], { LAYR_INSTALL_SH: stub });
+      const output = textOf(result);
+      expect(result.status, output).toBe(0);
+      expect(output).toContain('layr-command: installed');
+      expect(output).toContain('Next time, from any directory: layr');
+      expect(output).toContain('Offline recovery: layr to-klipperscreen --yes');
+      const command = commandPath(box);
+      const info = statSync(command);
+      expect(info.mode & 0o777).toBe(0o755);
+      expect(info.uid).toBe(process.getuid?.());
+      expect(readFileSync(installLog, 'utf8')).toContain('--dist');
+      expect(existsSync(box.aptLog)).toBe(false);
+      const http = existsSync(box.httpLog) ? readFileSync(box.httpLog, 'utf8') : '';
+      expect(http).not.toContain('github.com');
+      expect(http).not.toContain('nodejs.org');
+      expect(readFileSync(path.join(box.home, '.bashrc'), 'utf8')).toContain('# BEGIN LAYR command path');
+      expect(readFileSync(path.join(box.home, '.profile'), 'utf8')).toContain('# BEGIN LAYR command path');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('upgrades an old install and opens the menu again without a network', () => {
+    const box = makeSandbox();
+    const release = writeRelease(box);
+    const before = readFileSync(path.join(release, 'index.html'), 'utf8');
+    const units = unitEnv({ active: 'layr-web.service KlipperScreen.service' });
+    try {
+      const upgraded = invoke(box, [], { ...units, LAYR_MENU_CHOICE: 'exit', LAYR_HTTP_MODE: 'fail' });
+      expect(upgraded.status, textOf(upgraded)).toBe(0);
+      expect(textOf(upgraded)).toContain('layr-command: installed');
+      expect(textOf(upgraded)).toContain('changed=no');
+      expect(readFileSync(path.join(release, 'index.html'), 'utf8')).toBe(before);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      const command = commandPath(box);
+      expect(statSync(command).mode & 0o777).toBe(0o755);
+      expect(statSync(command).uid).toBe(process.getuid?.());
+
+      const again = run(`bash ${JSON.stringify(command)}`, { ...box.env, ...units, LAYR_MENU_CHOICE: 'exit', LAYR_HTTP_MODE: 'fail' }, '/');
+      expect(again.status, textOf(again)).toBe(0);
+      expect(textOf(again)).toContain('menu: exit');
+      expect(textOf(again)).toContain('layr-command: ready');
+      expect(textOf(again)).toContain('7) Uninstall LAYR');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      const status = run(`bash ${JSON.stringify(command)} status`, { ...box.env, ...units, LAYR_HTTP_MODE: 'fail' }, '/');
+      expect(status.status, textOf(status)).toBe(0);
+      expect(textOf(status)).toContain('install-state: installed');
+      expect(textOf(status)).toContain('active-display: klipperscreen');
+      expect(textOf(status)).toContain('changed=no');
+      expect(textOf(status)).toContain('reinstall: no');
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('still runs after the downloaded installer is deleted and after a new login', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const downloaded = path.join(box.root, 'layr-bootstrap.sh');
+    writeFileSync(downloaded, readFileSync(bootstrap, 'utf8'));
+    chmodSync(downloaded, 0o755);
+    const units = unitEnv({ active: 'layr-web.service KlipperScreen.service' });
+    try {
+      const installed = run(`bash ${JSON.stringify(downloaded)}`, {
+        ...box.env,
+        ...units,
+        LAYR_MENU_CHOICE: 'exit',
+        LAYR_HTTP_MODE: 'fail',
+      });
+      expect(installed.status, textOf(installed)).toBe(0);
+      rmSync(downloaded);
+      const command = commandPath(box);
+      const manager = path.join(box.home, 'layr', 'bin', 'bootstrap.sh');
+      expect(existsSync(manager)).toBe(true);
+      expect(path.dirname(manager)).not.toBe('/tmp');
+      const found = run('export PATH=/usr/bin:/bin; . "$HOME/.profile"; . "$HOME/.bashrc"; command -v layr', box.env);
+      expect(found.status, textOf(found)).toBe(0);
+      expect(textOf(found).trim()).toBe(command);
+      const status = run(`bash ${JSON.stringify(command)} status`, { ...box.env, ...units, LAYR_HTTP_MODE: 'fail' }, '/');
+      expect(status.status, textOf(status)).toBe(0);
+      expect(textOf(status)).toContain('install-state: installed');
+      expect(textOf(status)).toContain('offline-fallback-needs-download: no');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('switches a broken frontend offline without apt or a download', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    const units = path.join(box.root, 'systemd');
+    mkdirSync(units);
+    try {
+      expect(invoke(box, ['--install-command']).status, 'install command').toBe(0);
+      const switched = run(`bash ${JSON.stringify(commandPath(box))} to-klipperscreen --yes`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-kiosk.service', enabled: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_CURL_FAIL: '1',
+        LAYR_DISK_FREE_MB: '10',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      const output = textOf(switched);
+      expect(switched.status, output).toBe(0);
+      expect(output).toContain('install-state: broken');
+      expect(output).toContain('display-changed=yes');
+      expect(output).toContain('offline-fallback-needs-download: no');
+      const log = readFileSync(box.systemctlLog, 'utf8');
+      expect(log.indexOf('enable --now KlipperScreen.service')).toBeLessThan(log.indexOf('disable --now layr-kiosk.service'));
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(existsSync(commandPath(box))).toBe(true);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses a symlink for the command directory', () => {
+    const box = makeSandbox();
+    const outside = path.join(box.root, 'outside');
+    mkdirSync(outside);
+    mkdirSync(path.join(box.home, '.local'), { recursive: true });
+    symlinkSync(outside, path.join(box.home, '.local', 'bin'));
+    try {
+      const result = invoke(box, ['--install-command']);
+      expect(result.status, textOf(result)).not.toBe(0);
+      expect(textOf(result)).toContain('symlink');
+      expect(existsSync(path.join(outside, 'layr'))).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('uninstalls from layr, restores KlipperScreen, and keeps printer files and photos', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    writeCanaries(box);
+    const units = unitDir(box);
+    try {
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const removed = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service layr-kiosk.service', enabled: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_CURL_FAIL: '1',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      const output = textOf(removed);
+      expect(removed.status, output).toBe(0);
+      expect(output).toContain('action: uninstall');
+      expect(output).toContain('Uninstall LAYR?');
+      expect(output).toContain('uninstall: complete');
+      expect(output).toContain('browser-data: kept');
+      expect(output).toContain('apt-removed: no');
+      expect(output).toContain('printer-config: kept');
+      expect(output).toContain('layr-command: removed');
+      expect(output).toContain('layr-home: removed');
+      expect(existsSync(commandPath(box))).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
+      expect(existsSync(path.join(units, 'layr-web.service'))).toBe(false);
+      expect(existsSync(path.join(units, 'layr-kiosk.service'))).toBe(false);
+      expect(readFileSync(path.join(units, 'KlipperScreen.service'), 'utf8')).toBe('ks\n');
+      expect(readFileSync(path.join(box.home, '.config', 'layr-chromium', 'Default', 'IndexedDB', 'photo.bin'), 'utf8')).toBe('printer-photo');
+      expect(readFileSync(path.join(box.home, '.bashrc'), 'utf8')).not.toContain('# BEGIN LAYR command path');
+      expectCanaries(box);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      const log = readFileSync(box.systemctlLog, 'utf8');
+      expect(log.indexOf('enable --now KlipperScreen.service')).toBeGreaterThanOrEqual(0);
+      expect(log.indexOf('enable --now KlipperScreen.service')).toBeLessThan(log.indexOf('disable --now layr-web.service'));
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('asks before deleting personal settings and can delete them separately', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    writeCanaries(box);
+    const units = unitDir(box);
+    try {
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const removed = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes --delete-browser`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      const output = textOf(removed);
+      expect(removed.status, output).toBe(0);
+      expect(output).toContain('browser-data: removed');
+      expect(output).toContain('uninstall: complete');
+      expect(existsSync(path.join(box.home, '.config', 'layr-chromium'))).toBe(false);
+      expect(existsSync(path.join(box.home, '.cache', 'layr-wpe'))).toBe(false);
+      expect(existsSync(commandPath(box))).toBe(false);
+      expectCanaries(box);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('uninstalls a partial install and a broken install', () => {
+    const box = makeSandbox();
+    armRealDisplay(box);
+    writeCanaries(box);
+    mkdirSync(path.join(box.home, 'layr', 'current'), { recursive: true });
+    const units = unitDir(box);
+    try {
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const partial = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({ units: 'KlipperScreen.service', active: 'KlipperScreen.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      expect(partial.status, textOf(partial)).toBe(0);
+      expect(textOf(partial)).toContain('install-state: partial');
+      expect(textOf(partial)).toContain('uninstall: complete');
+      expect(textOf(partial)).toContain('units: absent');
+      expect(existsSync(commandPath(box))).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
+      expect(readFileSync(path.join(units, 'KlipperScreen.service'), 'utf8')).toBe('ks\n');
+      expectCanaries(box);
+      const partialLog = existsSync(box.systemctlLog) ? readFileSync(box.systemctlLog, 'utf8') : '';
+      expect(partialLog).not.toContain('disable --now KlipperScreen.service');
+      expect(existsSync(box.aptLog)).toBe(false);
+
+      writeRelease(box);
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const broken = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({ active: 'KlipperScreen.service', failed: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_CURL_FAIL: '1',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      expect(broken.status, textOf(broken)).toBe(0);
+      expect(textOf(broken)).toContain('install-state: broken');
+      expect(textOf(broken)).toContain('uninstall: complete');
+      expect(existsSync(commandPath(box))).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
+      expectCanaries(box);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses to uninstall when that would leave the panel blank', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    writeCanaries(box);
+    const units = unitDir(box);
+    try {
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const refused = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({
+          units: 'layr-web.service layr-kiosk.service',
+          active: 'layr-web.service layr-kiosk.service',
+        }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      const output = textOf(refused);
+      expect(refused.status, output).not.toBe(0);
+      expect(output).toContain('uninstall-refused: no-alternative-display');
+      expect(output).toContain('changed=no');
+      expect(output).toContain('The layr command was left in place.');
+      expect(existsSync(commandPath(box))).toBe(true);
+      expect(existsSync(path.join(box.home, 'layr', 'current'))).toBe(true);
+      expect(readFileSync(units + '/layr-kiosk.service', 'utf8')).toBe('kiosk\n');
+      expectCanaries(box);
+      const refusedLog = existsSync(box.systemctlLog) ? readFileSync(box.systemctlLog, 'utf8') : '';
+      expect(refusedLog).not.toContain('disable');
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('leaves the command in place when uninstall is not confirmed or cleanup fails', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    writeCanaries(box);
+    const units = unitDir(box);
+    const stub = path.join(box.root, 'uninstall-stub.sh');
+    writeExe(stub, '#!/bin/bash\nprintf \'stub-uninstall\\n\'\nexit 1\n');
+    const rm = path.join(box.root, 'bin', 'layr-rm');
+    writeExe(rm, '#!/bin/bash\nexit 1\n');
+    try {
+      expect(invoke(box, ['--install-command']).status).toBe(0);
+      const cancelled = run(`bash ${JSON.stringify(commandPath(box))} uninstall`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+      }, '/');
+      expect(cancelled.status, textOf(cancelled)).not.toBe(0);
+      expect(textOf(cancelled)).toContain('Nothing was removed.');
+      expect(existsSync(commandPath(box))).toBe(true);
+      expect(existsSync(path.join(box.home, 'layr', 'current'))).toBe(true);
+
+      const failedUnits = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+        LAYR_UNINSTALL_SH: stub,
+      }, '/');
+      expect(failedUnits.status, textOf(failedUnits)).not.toBe(0);
+      expect(textOf(failedUnits)).toContain('uninstall-aborted: units');
+      expect(textOf(failedUnits)).toContain('The layr command was left in place.');
+      expect(existsSync(commandPath(box))).toBe(true);
+      expect(existsSync(path.join(box.home, 'layr', 'releases'))).toBe(true);
+
+      const failedFiles = run(`bash ${JSON.stringify(commandPath(box))} uninstall --yes`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_UNIT_DIR: units,
+        LAYR_RM: rm,
+      }, '/');
+      expect(failedFiles.status, textOf(failedFiles)).not.toBe(0);
+      expect(textOf(failedFiles)).toContain('uninstall-aborted: files');
+      expect(existsSync(commandPath(box))).toBe(true);
+      expect(existsSync(path.join(box.home, 'layr', 'current'))).toBe(true);
+      expectCanaries(box);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
     }
   });
 });

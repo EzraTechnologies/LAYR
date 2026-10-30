@@ -193,6 +193,14 @@ else
   echo "Reload only the kiosk with --reload-kiosk, or: sudo systemctl restart layr-kiosk"
 fi
 
+if [ "$DRY_RUN" = 1 ]; then
+  echo "The layr command is not written during a dry run."
+elif [ -f "$SCRIPT_DIR/bootstrap.sh" ]; then
+  if ! bash "$SCRIPT_DIR/bootstrap.sh" --install-command; then
+    warn "LAYR is installed, but the layr command was not added. The display was not changed."
+  fi
+fi
+
 info "Web UI is (or would be) at http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}&layr_build=${STAMP}#/home"
 echo "The kiosk uses the same layr_build value, percent-encoded, and keeps the #/home route."
 echo "Open that address in Chromium on this Pi before using the kiosk."

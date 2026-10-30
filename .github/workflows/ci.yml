@@ -31,6 +31,8 @@ jobs:
       - run: npm ci
       - name: Repeat-run LAYR and KlipperScreen switcher
         run: npx vitest run tests/bootstrap.test.ts -t "display switcher"
+      - name: Persistent layr command
+        run: npx vitest run tests/bootstrap.test.ts tests/deploy.test.ts -t "layr command"
       - run: npm run check
       - run: npm test
       - run: npm run build
