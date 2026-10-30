@@ -3,12 +3,14 @@
   import { app } from '../lib/context';
   import { formatClock } from '../lib/format';
   import { integrations } from '../lib/integrations/store.svelte';
+  import { printerImages } from '../lib/printerImage/store.svelte';
   import EStopButton from './EStopButton.svelte';
   import StatusPill from './StatusPill.svelte';
 
   const { store, settings, printer } = app();
   const printerState = store.state;
   integrations.bind(printer.id, printer.moonrakerUrl);
+  printerImages.bind(printer.id, printer.moonrakerUrl);
   const connection = store.source.connection;
 
   // Reconnect outside the effect's tracking. The client reads printer state while

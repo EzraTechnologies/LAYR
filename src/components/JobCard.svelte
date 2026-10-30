@@ -3,8 +3,11 @@
   import { displayFilename, formatClock, formatDuration, formatFilament, formatFlow, formatSpeed } from '../lib/format';
   import { navigate } from '../lib/routes';
   import { jobSpoolSuffix } from '../lib/spoolman/present';
+  import { printerImages } from '../lib/printerImage/store.svelte';
+  import { isJobActive } from '../lib/printer/model';
   import { headline } from '../lib/statusMeta';
   import Icon from './Icon.svelte';
+  import PrinterPhoto from './PrinterPhoto.svelte';
   import ProgressRing from './ProgressRing.svelte';
   import Thumb from './Thumb.svelte';
 
@@ -14,7 +17,8 @@
 
   const job = $derived(printerState.job);
   const title = $derived(headline(printerState));
-  const active = $derived(printerState.status === 'printing' || printerState.status === 'paused');
+  const active = $derived(isJobActive(printerState.status));
+  const printerPhoto = $derived(printerImages.url);
   const ringTone = $derived(
     printerState.status === 'paused' ? 'warn' : job?.state === 'complete' ? 'ok' : active ? 'cyan' : 'dim',
   );
@@ -78,7 +82,18 @@
 <section class="card job" aria-labelledby="job-title">
   {#if job}
     <header class="head">
-      <Thumb path={job.thumbnailPath} cacheKey={null} size={56} alt={displayFilename(job.filename)} />
+      {#if active}
+        <Thumb
+          path={job.thumbnailPath}
+          cacheKey={null}
+          size={56}
+          alt={displayFilename(job.filename)}
+          fallbackSrc={printerPhoto}
+          fallbackAlt="Printer photo"
+        />
+      {:else}
+        <PrinterPhoto src={printerPhoto} size={72} />
+      {/if}
       <div class="title-block">
         <span class="eyebrow">Current job</span>
         <h2 id="job-title" class="filename" title={job.filename}>{displayFilename(job.filename)}</h2>
@@ -180,12 +195,19 @@
     {/if}
   {:else}
     <div class="idle">
-      <div class="idle-icon" aria-hidden="true"><Icon name="check" size={34} strokeWidth={2} /></div>
-      <h2 id="job-title">Ready to print</h2>
-      <p>No job is loaded. Choose a file to start a print.</p>
-      <button type="button" class="btn primary" onclick={() => navigate('files')}>
-        <Icon name="files" size={20} />Browse files
-      </button>
+      <div class="hero">
+        <PrinterPhoto src={printerPhoto} />
+      </div>
+      <div class="idle-copy">
+        <div class="idle-icon" aria-hidden="true"><Icon name="check" size={22} strokeWidth={2} /></div>
+        <div class="idle-text">
+          <h2 id="job-title" title="Ready to print">Ready to print</h2>
+          <p title="No job is loaded. Choose a file to start a print.">No job is loaded. Choose a file to start a print.</p>
+        </div>
+        <button type="button" class="btn primary" onclick={() => navigate('files')}>
+          <Icon name="files" size={20} />Browse files
+        </button>
+      </div>
     </div>
   {/if}
 </section>
@@ -449,34 +471,58 @@
 
   .idle {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
     gap: 8px;
+  }
+
+  .hero {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+  }
+
+  .idle-copy {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .idle-copy .btn {
+    flex: none;
   }
 
   .idle-icon {
     display: grid;
     place-items: center;
-    width: 72px;
-    height: 72px;
+    flex: none;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     color: var(--ok);
     background: var(--ok-soft);
   }
 
+  .idle-text {
+    flex: 1;
+    min-width: 0;
+  }
+
   .idle h2 {
-    margin: 4px 0 0;
-    font-size: var(--fs-xl);
+    margin: 0;
+    font-size: var(--fs-lg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .idle p {
     margin: 0;
-    max-width: 34ch;
     color: var(--text-dim);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
   }
 
   @media (max-width: 900px), (max-height: 540px) {

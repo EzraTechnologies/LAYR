@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { seedIntegrations } from './integrationSeed';
 import { openWithMock, VIEWPORTS } from './helpers';
 import { defaultFiles, MOONRAKER, type MockFile, type MockOptions } from './mockMoonraker';
+import { choosePrinterPhoto } from './printerImage';
 
 /**
  * Regenerates docs/screenshots from the real production bundle connected to the mock Moonraker in
@@ -43,6 +44,66 @@ import { errorMmu, printingMmu, readyMmu } from './mmuFixture';
 
 const SHOTS: Shot[] = [
   { name: 'home-printing', route: 'home', options: { scenario: 'printing' } },
+  {
+    name: 'home-idle-photo',
+    route: 'home',
+    options: { scenario: 'ready', homed: true },
+    prepare: async (page) => {
+      await page.getByRole('link', { name: 'Settings', exact: true }).click();
+      await choosePrinterPhoto(page);
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Ready to print' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Browse files' })).toBeVisible();
+      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+    },
+  },
+  {
+    name: 'home-complete-photo',
+    route: 'settings',
+    options: { scenario: 'complete' },
+    prepare: async (page) => {
+      await choosePrinterPhoto(page);
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expect(page.getByText('Print complete')).toBeVisible();
+      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+      await expect(page.getByRole('img', { name: 'SB_main_body_ASA_0.2mm_3h41m' })).toHaveCount(0);
+    },
+  },
+  {
+    name: 'home-print-fallback',
+    route: 'settings',
+    options: {
+      scenario: 'printing',
+      status: {
+        print_stats: {
+          filename: 'no_preview_bracket.gcode',
+          state: 'printing',
+          message: '',
+          print_duration: 10,
+          total_duration: 12,
+          filament_used: 10,
+          info: { current_layer: 1, total_layer: 4 },
+        },
+      },
+    },
+    prepare: async (page) => {
+      await choosePrinterPhoto(page);
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+      await expect(page.getByRole('img', { name: 'no_preview_bracket (no preview)' })).toHaveCount(0);
+    },
+  },
+  {
+    name: 'settings-printer-image',
+    route: 'settings',
+    options: { scenario: 'ready', homed: true },
+    prepare: async (page) => {
+      await choosePrinterPhoto(page);
+      await page.getByRole('button', { name: 'Choose photo' }).scrollIntoViewIfNeeded();
+      await expect(page.getByText(/Chromium restart/)).toBeVisible();
+    },
+  },
   { name: 'home-paused', route: 'home', options: { scenario: 'paused' } },
   { name: 'home-ready', route: 'home', options: { scenario: 'ready', homed: true } },
   {
