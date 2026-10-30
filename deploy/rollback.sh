@@ -11,6 +11,8 @@ set -euo pipefail
 cd "$(dirname "$0")" || exit 1
 # shellcheck source=deploy/lib.sh
 . ./lib.sh
+require_complete_script "$PWD/rollback.sh"
+require_complete_script "$PWD/lib.sh"
 
 RELOAD_KIOSK=0
 
@@ -67,3 +69,5 @@ else
   echo "Reload only the kiosk with: sudo systemctl restart layr-kiosk"
   echo "Or: ./deploy/rollback.sh --reload-kiosk --yes"
 fi
+print_recovery_instructions "$PWD"
+# LAYR_SCRIPT_END

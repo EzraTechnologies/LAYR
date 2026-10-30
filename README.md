@@ -182,6 +182,14 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 
 ## Raspberry Pi install
 
+A friend who already has Klipper, Moonraker, and a 5-inch touchscreen can use the one-command
+installer in [INSTALL-FOR-TESTERS.md](INSTALL-FOR-TESTERS.md). It installs LAYR only. It does not
+install AFC, Happy Hare, or a Box Turtle, and it does not edit `printer.cfg` or `moonraker.conf`.
+KlipperScreen stays up until a separate confirmation. The same command, run again after
+LAYR is installed, shows which display is active and a switch menu. That later run does not
+download or reinstall unless you choose Update or Repair. AFC and Happy Hare stay optional and are
+mutually exclusive in one printer profile.
+
 Test on a spare card first, and test in a browser before the kiosk. A Pi 4 with a BTT HDMI7 has
 already shown the Chromium UI. The installer in this tree still needs the checks in
 [docs/pi-test.md](docs/pi-test.md). `deploy/check-device.sh` only reads the system.
@@ -253,7 +261,7 @@ src/
     files/                      Directory listing, metadata, thumbnail URLs
     console/                    G-code history
     spoolman/                   Optional Chromium Spoolman client, scoped to the active printer.
-deploy/                         check, install, display switch, rollback, uninstall, HDMI pointer preflight
+deploy/                         bootstrap, check, install, display switch, rollback, uninstall, HDMI pointer preflight
 tests/                          Vitest, with a fake Moonraker
 e2e/                            Playwright against the production bundle and a mock socket
 ```

@@ -19,11 +19,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Shellcheck deploy scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck -x -S warning deploy/*.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Repeat-run LAYR and KlipperScreen switcher
+        run: npx vitest run tests/bootstrap.test.ts -t "display switcher"
       - run: npm run check
       - run: npm test
       - run: npm run build

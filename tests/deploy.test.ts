@@ -908,6 +908,8 @@ describe('deploy script syntax', () => {
       'deploy/uninstall.sh',
       'deploy/lib.sh',
       'deploy/check-device.sh',
+      'deploy/bootstrap.sh',
+      'deploy/layr-display.sh',
     ]) {
       run(`bash -n ${script}`);
     }
