@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,8 @@ function run(command: string, options: { cwd?: string; env?: NodeJS.ProcessEnv }
     cwd: options.cwd ?? repo,
     env: { ...process.env, ...options.env },
     encoding: 'utf8',
+    // Keep child stderr on the error object instead of echoing expected fallback text.
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
 
@@ -97,62 +99,298 @@ describe('layr.env upgrades', () => {
   });
 });
 
+// wpe_report follows PATH for cog, cage, and dpkg, and LAYR_COG_MODULE_DIRS for the
+// Wayland plugin. A Pi with those packages installed is a valid host, so the engine
+// tests replace discovery with fixtures instead of reading the machine.
+type CogPlatform = 'wl' | 'fdo' | 'drm' | 'none';
+
+type KioskEngineFixture = {
+  root: string;
+  bin: string;
+  modules: string;
+  env: NodeJS.ProcessEnv;
+};
+
+type EngineConfig = {
+  HOME: string;
+  LAYR_HOME: string;
+  LAYR_ENV: string;
+  LAYR_STATE: string;
+};
+
+// dirname is how layr-engine.sh finds kiosk-lib.sh. The other names are the external
+// commands that script and wpe_report call. cog, cage, and dpkg stay under test control.
+const kioskHostTools = ['bash', 'cat', 'chmod', 'dirname', 'grep', 'head', 'mkdir', 'mktemp', 'mv', 'tail', 'tr'] as const;
+const hostToolCache = new Map<string, string>();
+
+function hostTool(name: string): string {
+  const cached = hostToolCache.get(name);
+  if (cached) return cached;
+  const found = execFileSync('bash', ['-c', 'command -v "$1"', 'bash', name], { encoding: 'utf8' }).trim();
+  if (!found) throw new Error(`required host tool is missing: ${name}`);
+  hostToolCache.set(name, found);
+  return found;
+}
+
+function writeExecutable(file: string, body: string) {
+  writeFileSync(file, body.endsWith('\n') ? body : `${body}\n`);
+  chmodSync(file, 0o755);
+}
+
+function dpkgQueryStub(webkit: boolean): string {
+  const found = webkit
+    ? `
+if [ "$pkg" = "libwpewebkit-1.1-0" ]; then
+  printf '%s\\n' 'libwpewebkit-1.1-0 0.0.0-layr-fixture'
+  exit 0
+fi`
+    : '';
+  return `#!/bin/sh
+prev=""
+pkg=""
+for arg in "$@"; do
+  if [ "$prev" = "-f" ]; then
+    prev=""
+    continue
+  fi
+  case "$arg" in
+    -f) prev="-f" ;;
+    -*) ;;
+    *) pkg=$arg ;;
+  esac
+done
+${found}
+exit 1
+`;
+}
+
+function kioskEngineFixture(
+  options: { cog?: boolean; cage?: boolean; webkit?: boolean; platform?: CogPlatform } = {},
+): KioskEngineFixture {
+  const cog = options.cog === true;
+  const cage = options.cage === true;
+  const webkit = options.webkit === true;
+  const platform = options.platform ?? 'none';
+  const root = mkdtempSync(path.join(tmpdir(), 'layr-wpe-'));
+  const bin = path.join(root, 'bin');
+  const modules = path.join(root, 'modules');
+  mkdirSync(bin);
+  mkdirSync(modules);
+  for (const name of kioskHostTools) symlinkSync(hostTool(name), path.join(bin, name));
+  if (cog) {
+    writeExecutable(
+      path.join(bin, 'cog'),
+      `#!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+  printf '%s\\n' 'cog 0.16.1-layr-fixture'
+fi
+exit 0
+`,
+    );
+  }
+  if (cage) writeExecutable(path.join(bin, 'cage'), '#!/bin/sh\nexit 0\n');
+  writeExecutable(path.join(bin, 'dpkg'), '#!/bin/sh\nexit 0\n');
+  writeExecutable(path.join(bin, 'dpkg-query'), dpkgQueryStub(webkit));
+  if (platform !== 'none') writeFileSync(path.join(modules, `libcogplatform-${platform}.so`), '');
+  return {
+    root,
+    bin,
+    modules,
+    env: {
+      PATH: bin,
+      LAYR_COG_MODULE_DIRS: modules,
+    },
+  };
+}
+
+function engineConfig(root: string): EngineConfig {
+  const home = path.join(root, 'home');
+  const layr = path.join(home, 'layr');
+  mkdirSync(layr, { recursive: true });
+  const layrEnv = path.join(layr, 'layr.env');
+  writeFileSync(layrEnv, 'LAYR_PORT=7180\nLAYR_MOONRAKER_URL=http://localhost:7125\nLAYR_HIDE_CURSOR=1\n');
+  return {
+    HOME: home,
+    LAYR_HOME: layr,
+    LAYR_ENV: layrEnv,
+    LAYR_STATE: path.join(layr, 'state'),
+  };
+}
+
+function launchEngine(fx: KioskEngineFixture, requested?: string): { engine: string; stderr: string } {
+  const errFile = path.join(fx.root, 'launch.err');
+  const assignment = requested === undefined ? 'unset LAYR_KIOSK_ENGINE' : `export LAYR_KIOSK_ENGINE=${JSON.stringify(requested)}`;
+  const engine = run(
+    `
+      set -euo pipefail
+      . deploy/kiosk-lib.sh
+      ${assignment}
+      resolve_launch_engine 2>${JSON.stringify(errFile)}
+    `,
+    { env: fx.env },
+  ).trim();
+  return { engine, stderr: existsSync(errFile) ? readFileSync(errFile, 'utf8') : '' };
+}
+
 describe('kiosk engine selection', () => {
-  it('selects chromium by default, finds a Wayland Cog plugin, and falls back when WPE is missing', () => {
-    const modules = mkdtempSync(path.join(tmpdir(), 'layr-cog-'));
-    writeFileSync(path.join(modules, 'libcogplatform-drm.so'), '');
+  it('selects chromium by default, finds a Wayland Cog plugin, and falls back when mocked WPE is missing', () => {
+    const fx = kioskEngineFixture({ platform: 'drm' });
     const script = `
       set -euo pipefail
       . deploy/kiosk-lib.sh
       normalize_engine ''
       normalize_engine WPE
       if normalize_engine nope >/dev/null; then echo 'accepted-bad'; exit 1; fi
-      export LAYR_COG_MODULE_DIRS=${JSON.stringify(modules)}
       if find_cog_wayland_platform >/dev/null; then echo 'drm-was-accepted'; exit 1; fi
-      touch ${JSON.stringify(path.join(modules, 'libcogplatform-wl.so'))}
+      printf '' > ${JSON.stringify(path.join(fx.modules, 'libcogplatform-wl.so'))}
       find_cog_wayland_platform
       export LAYR_KIOSK_ENGINE=wpe
       resolve_launch_engine
       export LAYR_KIOSK_ENGINE=chromium
       resolve_launch_engine
     `;
-    const output = run(script).trim().split('\n');
-    expect(output).toEqual(['chromium', 'wpe', 'wl', 'chromium', 'chromium']);
-    rmSync(modules, { recursive: true, force: true });
+    try {
+      const output = run(script, { env: fx.env }).trim().split('\n');
+      expect(output).toEqual(['chromium', 'wpe', 'wl', 'chromium', 'chromium']);
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
   });
 
-  it('saves a Chromium rollback and refuses to save WPE when Cog is not usable', () => {
-    const home = mkdtempSync(path.join(tmpdir(), 'layr-engine-'));
-    const layr = path.join(home, 'layr');
-    mkdirSync(layr);
-    const env = {
-      HOME: home,
-      LAYR_HOME: layr,
-      LAYR_ENV: path.join(layr, 'layr.env'),
-      LAYR_STATE: path.join(layr, 'state'),
-    };
-    writeFileSync(env.LAYR_ENV, 'LAYR_PORT=7180\nLAYR_MOONRAKER_URL=http://localhost:7125\nLAYR_HIDE_CURSOR=1\n');
+  it('saves a Chromium rollback and refuses to save WPE when mocked Cog is not usable', () => {
+    const fx = kioskEngineFixture();
+    const cfg = engineConfig(fx.root);
+    const env = { ...fx.env, ...cfg };
     try {
       const refused = runAllowFail('bash deploy/layr-engine.sh use wpe --yes', { env });
       expect(refused.status).not.toBe(0);
-      expect(refused.stdout + refused.stderr).toMatch(/not usable|not installed|missing/i);
-      expect(readFileSync(env.LAYR_ENV, 'utf8')).not.toContain('LAYR_KIOSK_ENGINE=wpe');
+      expect(refused.stderr).toContain('WPE is not usable');
+      expect(refused.stdout).toContain('cog: not installed');
+      expect(refused.stdout).toContain('wayland-platform: missing');
+      expect(refused.stdout).toContain('libwpewebkit: libwpewebkit-1.1-0 is not installed');
+      expect(readFileSync(cfg.LAYR_ENV, 'utf8')).not.toContain('LAYR_KIOSK_ENGINE=wpe');
 
       const saved = run('bash deploy/layr-engine.sh use chromium --yes', { env });
       expect(saved).toContain('LAYR_KIOSK_ENGINE=chromium');
-      const file = readFileSync(env.LAYR_ENV, 'utf8');
+      const file = readFileSync(cfg.LAYR_ENV, 'utf8');
       expect(file).toContain('LAYR_KIOSK_ENGINE=chromium');
       expect(file).toContain('LAYR_PORT=7180');
       expect(file).toContain('LAYR_HIDE_CURSOR=1');
 
-      writeFileSync(env.LAYR_ENV, file.replace('LAYR_KIOSK_ENGINE=chromium', 'LAYR_KIOSK_ENGINE=wpe'));
+      writeFileSync(cfg.LAYR_ENV, file.replace('LAYR_KIOSK_ENGINE=chromium', 'LAYR_KIOSK_ENGINE=wpe'));
       run('bash deploy/layr-engine.sh rollback --yes', { env });
-      expect(readFileSync(env.LAYR_ENV, 'utf8')).toContain('LAYR_KIOSK_ENGINE=chromium');
+      expect(readFileSync(cfg.LAYR_ENV, 'utf8')).toContain('LAYR_KIOSK_ENGINE=chromium');
       const status = run('bash deploy/layr-engine.sh status', { env });
       expect(status).toContain('saved-engine: chromium');
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmSync(fx.root, { recursive: true, force: true });
     }
+  });
+
+  it('saves mocked WPE when Cog, Cage, WPE WebKit, and a Wayland plugin are present, then rolls back to Chromium', () => {
+    const fx = kioskEngineFixture({ cog: true, cage: true, webkit: true, platform: 'wl' });
+    writeFileSync(path.join(fx.modules, 'libcogplatform-fdo.so'), '');
+    const cfg = engineConfig(fx.root);
+    const env = { ...fx.env, ...cfg };
+    try {
+      expect(launchEngine(fx)).toEqual({ engine: 'chromium', stderr: '' });
+      expect(launchEngine(fx, 'chromium')).toEqual({ engine: 'chromium', stderr: '' });
+      expect(launchEngine(fx, 'wpe')).toEqual({ engine: 'wpe', stderr: '' });
+      const rejected = launchEngine(fx, 'nope');
+      expect(rejected.engine).toBe('chromium');
+      expect(rejected.stderr).toContain('not chromium or wpe');
+      expect(run('. deploy/kiosk-lib.sh && find_cog_wayland_platform', { env: fx.env }).trim()).toBe('wl');
+
+      const check = run('bash deploy/layr-engine.sh check', { env });
+      expect(check).toContain(`cog: ${path.join(fx.bin, 'cog')}`);
+      expect(check).toContain('cog-version: cog 0.16.1-layr-fixture');
+      expect(check).toContain(`cage: ${path.join(fx.bin, 'cage')}`);
+      expect(check).toContain('wayland-platform: wl');
+      expect(check).toContain('libwpewebkit: libwpewebkit-1.1-0 0.0.0-layr-fixture');
+      expect(check).not.toContain('not installed');
+
+      const saved = run('bash deploy/layr-engine.sh use wpe --yes', { env });
+      expect(saved).toContain('LAYR_KIOSK_ENGINE=wpe');
+      const file = readFileSync(cfg.LAYR_ENV, 'utf8');
+      expect(file).toContain('LAYR_KIOSK_ENGINE=wpe');
+      expect(file).toContain('LAYR_PORT=7180');
+      expect(file).toContain('LAYR_MOONRAKER_URL=http://localhost:7125');
+      expect(file).toContain('LAYR_HIDE_CURSOR=1');
+      expect(run('bash deploy/layr-engine.sh status', { env })).toContain('saved-engine: wpe');
+
+      run('bash deploy/layr-engine.sh rollback --yes', { env });
+      const rolled = readFileSync(cfg.LAYR_ENV, 'utf8');
+      expect(rolled).toContain('LAYR_KIOSK_ENGINE=chromium');
+      expect(rolled).not.toContain('LAYR_KIOSK_ENGINE=wpe');
+      expect(rolled).toContain('LAYR_PORT=7180');
+      expect(rolled).toContain('LAYR_HIDE_CURSOR=1');
+      expect(run('bash deploy/layr-engine.sh status', { env })).toContain('saved-engine: chromium');
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a mocked fdo plugin when the wl plugin is absent', () => {
+    const fx = kioskEngineFixture({ cog: true, cage: true, webkit: true, platform: 'fdo' });
+    try {
+      expect(launchEngine(fx, 'wpe')).toEqual({ engine: 'wpe', stderr: '' });
+      const check = run('bash deploy/layr-engine.sh check', { env: fx.env });
+      expect(check).toContain('wayland-platform: fdo');
+      expect(check).toContain('cog-version: cog 0.16.1-layr-fixture');
+      expect(check).toContain('libwpewebkit: libwpewebkit-1.1-0 0.0.0-layr-fixture');
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to Chromium and refuses to save WPE for each missing mocked dependency', () => {
+    const cases: Array<{ name: string; cog?: boolean; cage?: boolean; webkit?: boolean; platform?: CogPlatform; report: string }> = [
+      { name: 'cog missing', cage: true, webkit: true, platform: 'wl', report: 'cog: not installed' },
+      { name: 'cage missing', cog: true, webkit: true, platform: 'wl', report: 'cage: not installed' },
+      {
+        name: 'WPE WebKit package missing',
+        cog: true,
+        cage: true,
+        webkit: false,
+        platform: 'wl',
+        report: 'libwpewebkit: libwpewebkit-1.1-0 is not installed',
+      },
+      { name: 'Wayland plugin missing', cog: true, cage: true, webkit: true, platform: 'none', report: 'wayland-platform: missing' },
+      { name: 'DRM plugin ignored', cog: true, cage: true, webkit: true, platform: 'drm', report: 'wayland-platform: missing' },
+    ];
+    for (const item of cases) {
+      const fx = kioskEngineFixture(item);
+      const cfg = engineConfig(fx.root);
+      const env = { ...fx.env, ...cfg };
+      try {
+        const launched = launchEngine(fx, 'wpe');
+        expect(launched.engine, item.name).toBe('chromium');
+        expect(launched.stderr, item.name).toContain('not usable');
+        const checked = runAllowFail('bash deploy/layr-engine.sh check', { env });
+        expect(checked.status, item.name).not.toBe(0);
+        expect(checked.stdout, item.name).toContain(item.report);
+        const refused = runAllowFail('bash deploy/layr-engine.sh use wpe --yes', { env });
+        expect(refused.status, item.name).not.toBe(0);
+        expect(refused.stderr, item.name).toContain('The saved engine was not changed');
+        expect(readFileSync(cfg.LAYR_ENV, 'utf8'), item.name).not.toContain('LAYR_KIOSK_ENGINE=');
+      } finally {
+        rmSync(fx.root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('reports the real host WPE probe for diagnostics', () => {
+    const output = run(`
+      set +e
+      . deploy/kiosk-lib.sh
+      wpe_report
+      printf '\\n__probe_exit:%s\\n' "$?"
+      exit 0
+    `);
+    const matched = output.match(/__probe_exit:(\d+)\s*$/);
+    const report = output.replace(/\n?__probe_exit:\d+\s*$/, '').trim();
+    process.stderr.write(`Host WPE probe (diagnostic only, not asserted), exit ${matched?.[1] ?? 'unknown'}\n${report}\n`);
+    expect(matched).not.toBeNull();
   });
 });
 
