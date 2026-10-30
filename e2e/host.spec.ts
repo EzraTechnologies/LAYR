@@ -14,7 +14,7 @@ function hostCalls(mock: MockMoonraker) {
   return mock.calls.filter((call) => call.method.startsWith('machine.'));
 }
 
-/** The host card sits at the bottom of the settings scroller so the rest of Settings stays in view. */
+/** The host card is the last card in the left column, under Klipper. */
 async function revealHost(page: Page) {
   await page.getByRole('heading', { name: 'Raspberry Pi' }).scrollIntoViewIfNeeded();
 }

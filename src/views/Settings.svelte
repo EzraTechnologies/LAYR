@@ -144,45 +144,119 @@
 </script>
 
 <div class="settings page scroll">
-  <section class="card panel" aria-labelledby="set-conn">
-    <h2 id="set-conn" class="eyebrow">Connection</h2>
-    <dl>
-      <div><dt>Moonraker</dt><dd title={printer.moonrakerUrl ?? ''}>{printer.moonrakerUrl ?? 'Not set up'}</dd></div>
-      <div><dt>Source</dt><dd>{SOURCE_LABEL[config.urlSource]}</dd></div>
-      <div><dt>Transport</dt><dd>{printerState.transport}</dd></div>
-      <div><dt>Klipper</dt><dd>{printerState.klippy}</dd></div>
-      <div><dt>Host</dt><dd>{printerState.hostname ?? '—'}</dd></div>
-      <div><dt>Auth</dt><dd>{printer.apiKey ? 'API key (build setting)' : 'Trusted client'}</dd></div>
-      {#if printerState.missingObjects.length > 0}
-        <div><dt>Missing</dt><dd title={printerState.missingObjects.join(', ')}>{printerState.missingObjects.join(', ')}</dd></div>
-      {/if}
-    </dl>
+  <div class="col">
+    <section class="card panel" aria-labelledby="set-conn">
+      <h2 id="set-conn" class="eyebrow">Connection</h2>
+      <dl>
+        <div><dt>Moonraker</dt><dd title={printer.moonrakerUrl ?? ''}>{printer.moonrakerUrl ?? 'Not set up'}</dd></div>
+        <div><dt>Source</dt><dd>{SOURCE_LABEL[config.urlSource]}</dd></div>
+        <div><dt>Transport</dt><dd>{printerState.transport}</dd></div>
+        <div><dt>Klipper</dt><dd>{printerState.klippy}</dd></div>
+        <div><dt>Host</dt><dd>{printerState.hostname ?? '—'}</dd></div>
+        <div><dt>Auth</dt><dd>{printer.apiKey ? 'API key (build setting)' : 'Trusted client'}</dd></div>
+        {#if printerState.missingObjects.length > 0}
+          <div><dt>Missing</dt><dd title={printerState.missingObjects.join(', ')}>{printerState.missingObjects.join(', ')}</dd></div>
+        {/if}
+      </dl>
 
-    <div class="url">
-      <span class="label" id="url-label">Moonraker URL</span>
-      <button type="button" class="btn ghost url-field" aria-labelledby="url-label" onclick={editUrl}>
-        <span class="url-text" class:placeholder={!urlDraft} title={urlDraft}>{urlDraft || 'Tap to enter an address'}</span>
-      </button>
-      <div class="row">
-        <button type="button" class="btn primary" disabled={!urlValid || !changed} onclick={() => onSaveUrl(urlDraft.trim())}>
-          Save &amp; connect
+      <div class="url">
+        <span class="label" id="url-label">Moonraker URL</span>
+        <button type="button" class="btn ghost url-field" aria-labelledby="url-label" onclick={editUrl}>
+          <span class="url-text" class:placeholder={!urlDraft} title={urlDraft}>{urlDraft || 'Tap to enter an address'}</span>
         </button>
-        {#if urlDraft !== config.suggestedUrl}
-          <button type="button" class="btn" onclick={() => (urlDraft = config.suggestedUrl)} title={config.suggestedUrl}>
-            Use this device
+        <div class="row">
+          <button type="button" class="btn primary" disabled={!urlValid || !changed} onclick={() => onSaveUrl(urlDraft.trim())}>
+            Save &amp; connect
+          </button>
+          {#if urlDraft !== config.suggestedUrl}
+            <button type="button" class="btn" onclick={() => (urlDraft = config.suggestedUrl)} title={config.suggestedUrl}>
+              Use this device
+            </button>
+          {/if}
+          {#if config.urlSource === 'storage'}
+            <button type="button" class="btn ghost" onclick={() => onSaveUrl(null)}>Forget</button>
+          {/if}
+        </div>
+        {#if store.configured}
+          <button type="button" class="btn ghost" onclick={() => store.source.connection?.reconnect()}>
+            <Icon name="refresh" size={18} />Reconnect now
           </button>
         {/if}
-        {#if config.urlSource === 'storage'}
-          <button type="button" class="btn ghost" onclick={() => onSaveUrl(null)}>Forget</button>
-        {/if}
       </div>
-      {#if store.configured}
-        <button type="button" class="btn ghost" onclick={() => store.source.connection?.reconnect()}>
-          <Icon name="refresh" size={18} />Reconnect now
+    </section>
+
+    <section class="card panel" aria-labelledby="set-printer">
+      <h2 id="set-printer" class="eyebrow">Klipper</h2>
+      <p class="hint">Klipper only. This does not reboot the Raspberry Pi or cut printer power.</p>
+      <div class="row">
+        <button
+          type="button"
+          class="btn warn"
+          disabled={!klippyReachable}
+          aria-busy={ui.isBusy({ kind: 'restart' })}
+          onclick={() => ui.run({ kind: 'restart' })}
+        >
+          <Icon name="power" size={18} />Restart Klipper
         </button>
+        <button
+          type="button"
+          class="btn warn"
+          disabled={!klippyReachable}
+          aria-busy={ui.isBusy({ kind: 'firmware_restart' })}
+          onclick={() => ui.run({ kind: 'firmware_restart' })}
+        >
+          <Icon name="refresh" size={18} />Firmware restart
+        </button>
+      </div>
+      {#if allSensors.length > 0}
+        <ul class="sensors">
+          {#each allSensors as sensor (sensor.object)}
+            <li>
+              <span title={sensor.object}>{sensor.label}</span>
+              <span class="num">{formatTemp(sensor.temperature)}°C</span>
+            </li>
+          {/each}
+        </ul>
       {/if}
-    </div>
-  </section>
+      <p class="about">LAYR v{__LAYR_VERSION__}</p>
+    </section>
+
+    <section class="card panel" aria-labelledby="set-pi">
+      <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
+      <p class="hint">
+        Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
+        firmware restart and it does not switch off the printer power supply.
+      </p>
+      {#if hostBlock}
+        <p class="hint warn" id="pi-block" role="status">{hostBlock}</p>
+      {/if}
+      {#if hostBusy}
+        <p class="hint" role="status">Waiting for Moonraker. This is not yet a confirmed reboot or shutdown.</p>
+      {/if}
+      <div class="host-actions">
+        <button
+          type="button"
+          class="btn warn host-btn"
+          disabled={!rebootCheck.allowed || activeRefusal !== null}
+          aria-busy={ui.isBusy(rebootCommand)}
+          aria-describedby={hostBlock ? 'pi-block' : undefined}
+          onclick={() => runHost(rebootCommand)}
+        >
+          <Icon name="refresh" size={22} />Reboot Raspberry Pi
+        </button>
+        <button
+          type="button"
+          class="btn danger host-btn"
+          disabled={!shutdownCheck.allowed || activeRefusal !== null}
+          aria-busy={ui.isBusy(shutdownCommand)}
+          aria-describedby={hostBlock ? 'pi-block' : undefined}
+          onclick={() => runHost(shutdownCommand)}
+        >
+          <Icon name="power" size={22} />Shut down Raspberry Pi
+        </button>
+      </div>
+    </section>
+  </div>
 
   <div class="col">
     <section class="card panel" aria-labelledby="set-integrations">
@@ -288,96 +362,34 @@
       <p class="hint">Dimming darkens the screen; it does not switch the backlight off. The first tap only wakes it.</p>
       <p class="hint">Hide pointer clears the arrow in this browser immediately. On the Cage kiosk it also applies the next time the display starts, without restarting Klipper. A mouse still clicks.</p>
     </section>
-
-    <section class="card panel" aria-labelledby="set-printer">
-      <h2 id="set-printer" class="eyebrow">Klipper</h2>
-      <p class="hint">Klipper only. This does not reboot the Raspberry Pi or cut printer power.</p>
-      <div class="row">
-        <button
-          type="button"
-          class="btn warn"
-          disabled={!klippyReachable}
-          aria-busy={ui.isBusy({ kind: 'restart' })}
-          onclick={() => ui.run({ kind: 'restart' })}
-        >
-          <Icon name="power" size={18} />Restart Klipper
-        </button>
-        <button
-          type="button"
-          class="btn warn"
-          disabled={!klippyReachable}
-          aria-busy={ui.isBusy({ kind: 'firmware_restart' })}
-          onclick={() => ui.run({ kind: 'firmware_restart' })}
-        >
-          <Icon name="refresh" size={18} />Firmware restart
-        </button>
-      </div>
-      {#if allSensors.length > 0}
-        <ul class="sensors">
-          {#each allSensors as sensor (sensor.object)}
-            <li>
-              <span title={sensor.object}>{sensor.label}</span>
-              <span class="num">{formatTemp(sensor.temperature)}°C</span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      <p class="about">LAYR v{__LAYR_VERSION__}</p>
-    </section>
   </div>
-
-  <section class="card panel span" aria-labelledby="set-pi">
-    <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
-    <p class="hint">
-      Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
-      firmware restart and it does not switch off the printer power supply.
-    </p>
-    {#if hostBlock}
-      <p class="hint warn" id="pi-block" role="status">{hostBlock}</p>
-    {/if}
-    {#if hostBusy}
-      <p class="hint" role="status">Waiting for Moonraker. This is not yet a confirmed reboot or shutdown.</p>
-    {/if}
-    <div class="host-actions">
-      <button
-        type="button"
-        class="btn warn host-btn"
-        disabled={!rebootCheck.allowed || activeRefusal !== null}
-        aria-busy={ui.isBusy(rebootCommand)}
-        aria-describedby={hostBlock ? 'pi-block' : undefined}
-        onclick={() => runHost(rebootCommand)}
-      >
-        <Icon name="refresh" size={22} />Reboot Raspberry Pi
-      </button>
-      <button
-        type="button"
-        class="btn danger host-btn"
-        disabled={!shutdownCheck.allowed || activeRefusal !== null}
-        aria-busy={ui.isBusy(shutdownCommand)}
-        aria-describedby={hostBlock ? 'pi-block' : undefined}
-        onclick={() => runHost(shutdownCommand)}
-      >
-        <Icon name="power" size={22} />Shut down Raspberry Pi
-      </button>
-    </div>
-  </section>
 </div>
 
 <style>
+  /* Independent stacks. One shared grid row would grow to the taller side and leave a hole under Connection. */
   .settings {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--gap);
     align-items: start;
+    align-content: start;
   }
 
-  .span {
-    grid-column: 1 / -1;
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+    min-width: 0;
   }
 
+  .col > .panel {
+    flex: none;
+  }
+
+  /* Full-width in the column so reboot and shutdown stay easy to hit and distinct from the Klipper pair. */
   .host-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 10px;
   }
 
@@ -390,16 +402,10 @@
     font-size: var(--fs-md);
   }
 
-  @media (max-width: 900px), (max-height: 540px) {
-    .host-actions {
-      grid-template-columns: 1fr;
+  @media (max-width: 640px) {
+    .settings {
+      grid-template-columns: minmax(0, 1fr);
     }
-  }
-
-  .col {
-    display: grid;
-    gap: var(--gap);
-    min-width: 0;
   }
 
   h2 {
