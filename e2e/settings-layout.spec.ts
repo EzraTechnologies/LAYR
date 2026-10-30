@@ -27,7 +27,7 @@ interface ColumnLayout {
   clientHeight: number;
 }
 
-const NAMES = ['Connection', 'Raspberry Pi', 'Klipper', 'Integrations', 'Display'] as const;
+const NAMES = ['Connection', 'Klipper', 'Raspberry Pi', 'Integrations', 'Display'] as const;
 
 async function measure(page: Page): Promise<ColumnLayout> {
   return page.evaluate((names) => {
@@ -48,8 +48,8 @@ async function measure(page: Page): Promise<ColumnLayout> {
     };
     return {
       connection: cardOf(names[0]!),
-      pi: cardOf(names[1]!),
-      klipper: cardOf(names[2]!),
+      klipper: cardOf(names[1]!),
+      pi: cardOf(names[2]!),
       integrations: cardOf(names[3]!),
       display: cardOf(names[4]!),
       scrollWidth: scroller.scrollWidth,
@@ -85,7 +85,7 @@ function expectBalancedColumns(layout: ColumnLayout) {
   expect(columnGap).toBeGreaterThan(4);
   expect(columnGap).toBeLessThan(20);
 
-  for (const space of [gap(connection, pi), gap(pi, klipper), gap(integrations, display)]) {
+  for (const space of [gap(connection, klipper), gap(klipper, pi), gap(integrations, display)]) {
     expect(space).toBeGreaterThan(4);
     expect(space).toBeLessThan(20);
   }
@@ -95,7 +95,7 @@ function expectBalancedColumns(layout: ColumnLayout) {
     for (let j = i + 1; j < cards.length; j++) expect(overlaps(cards[i]!, cards[j]!)).toBe(false);
   }
 
-  const left = klipper.y + klipper.height - connection.y;
+  const left = pi.y + pi.height - connection.y;
   const right = display.y + display.height - integrations.y;
   const shorter = Math.min(left, right);
   const taller = Math.max(left, right);
@@ -146,8 +146,8 @@ for (const vp of VIEWPORTS) {
       expectBalancedColumns(await measure(page));
 
       await scrollSettings(page, 1);
-      await expect(page.getByRole('button', { name: 'Firmware restart' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeVisible();
       await expectCleanLayout(page);
       const scrolled = await page.locator('.settings').evaluate((el) => ({
         top: el.scrollTop,
@@ -183,7 +183,8 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('[aria-labelledby="set-conn"]')).toContainText('Not set up');
       const layout = await measure(page);
       expectBalancedColumns(layout);
-      expect(gap(layout.connection, layout.pi)).toBeLessThan(20);
+      expect(gap(layout.connection, layout.klipper)).toBeLessThan(20);
+      expect(layout.pi.y).toBeGreaterThan(layout.klipper.y);
       const reboot = page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true });
       await reboot.scrollIntoViewIfNeeded();
       await expect(reboot).toBeDisabled();

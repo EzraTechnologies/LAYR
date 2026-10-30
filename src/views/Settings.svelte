@@ -185,42 +185,6 @@
       </div>
     </section>
 
-    <section class="card panel" aria-labelledby="set-pi">
-      <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
-      <p class="hint">
-        Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
-        firmware restart and it does not switch off the printer power supply.
-      </p>
-      {#if hostBlock}
-        <p class="hint warn" id="pi-block" role="status">{hostBlock}</p>
-      {/if}
-      {#if hostBusy}
-        <p class="hint" role="status">Waiting for Moonraker. This is not yet a confirmed reboot or shutdown.</p>
-      {/if}
-      <div class="host-actions">
-        <button
-          type="button"
-          class="btn warn host-btn"
-          disabled={!rebootCheck.allowed || activeRefusal !== null}
-          aria-busy={ui.isBusy(rebootCommand)}
-          aria-describedby={hostBlock ? 'pi-block' : undefined}
-          onclick={() => runHost(rebootCommand)}
-        >
-          <Icon name="refresh" size={22} />Reboot Raspberry Pi
-        </button>
-        <button
-          type="button"
-          class="btn danger host-btn"
-          disabled={!shutdownCheck.allowed || activeRefusal !== null}
-          aria-busy={ui.isBusy(shutdownCommand)}
-          aria-describedby={hostBlock ? 'pi-block' : undefined}
-          onclick={() => runHost(shutdownCommand)}
-        >
-          <Icon name="power" size={22} />Shut down Raspberry Pi
-        </button>
-      </div>
-    </section>
-
     <section class="card panel" aria-labelledby="set-printer">
       <h2 id="set-printer" class="eyebrow">Klipper</h2>
       <p class="hint">Klipper only. This does not reboot the Raspberry Pi or cut printer power.</p>
@@ -255,6 +219,42 @@
         </ul>
       {/if}
       <p class="about">LAYR v{__LAYR_VERSION__}</p>
+    </section>
+
+    <section class="card panel" aria-labelledby="set-pi">
+      <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
+      <p class="hint">
+        Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
+        firmware restart and it does not switch off the printer power supply.
+      </p>
+      {#if hostBlock}
+        <p class="hint warn" id="pi-block" role="status">{hostBlock}</p>
+      {/if}
+      {#if hostBusy}
+        <p class="hint" role="status">Waiting for Moonraker. This is not yet a confirmed reboot or shutdown.</p>
+      {/if}
+      <div class="host-actions">
+        <button
+          type="button"
+          class="btn warn host-btn"
+          disabled={!rebootCheck.allowed || activeRefusal !== null}
+          aria-busy={ui.isBusy(rebootCommand)}
+          aria-describedby={hostBlock ? 'pi-block' : undefined}
+          onclick={() => runHost(rebootCommand)}
+        >
+          <Icon name="refresh" size={22} />Reboot Raspberry Pi
+        </button>
+        <button
+          type="button"
+          class="btn danger host-btn"
+          disabled={!shutdownCheck.allowed || activeRefusal !== null}
+          aria-busy={ui.isBusy(shutdownCommand)}
+          aria-describedby={hostBlock ? 'pi-block' : undefined}
+          onclick={() => runHost(shutdownCommand)}
+        >
+          <Icon name="power" size={22} />Shut down Raspberry Pi
+        </button>
+      </div>
     </section>
   </div>
 

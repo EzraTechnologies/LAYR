@@ -224,7 +224,8 @@ const SHOTS: Shot[] = [
       await page.locator('.settings').evaluate((el) => {
         el.scrollTop = el.scrollHeight;
       });
-      await expect(page.getByRole('button', { name: 'Firmware restart' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Klipper' })).toBeAttached();
     },
   },
   {
