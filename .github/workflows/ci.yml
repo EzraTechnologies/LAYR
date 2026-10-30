@@ -29,7 +29,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Repeat-run LAYR and KlipperScreen switcher
+      - name: Repeat-run layr command and KlipperScreen switcher
         run: npx vitest run tests/bootstrap.test.ts -t "display switcher"
       - run: npm run check
       - run: npm test

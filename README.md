@@ -185,10 +185,11 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 A friend who already has Klipper, Moonraker, and a 5-inch touchscreen can use the one-command
 installer in [INSTALL-FOR-TESTERS.md](INSTALL-FOR-TESTERS.md). It installs LAYR only. It does not
 install AFC, Happy Hare, or a Box Turtle, and it does not edit `printer.cfg` or `moonraker.conf`.
-KlipperScreen stays up until a separate confirmation. The same command, run again after
-LAYR is installed, shows which display is active and a switch menu. That later run does not
-download or reinstall unless you choose Update or Repair. AFC and Happy Hare stay optional and are
-mutually exclusive in one printer profile.
+KlipperScreen stays up until a separate confirmation. The long download is only the first run.
+After that, type `layr` from any directory, including after you log in again. `layr` opens the same
+menu and does not download, install packages, or rebuild unless you choose Update or Repair.
+`layr status` and `layr to-klipperscreen` work from SSH when the LAYR page is down. AFC and Happy
+Hare stay optional and are mutually exclusive in one printer profile.
 
 Test on a spare card first, and test in a browser before the kiosk. A Pi 4 with a BTT HDMI7 has
 already shown the Chromium UI. The installer in this tree still needs the checks in
@@ -218,7 +219,9 @@ already shown the Chromium UI. The installer in this tree still needs the checks
 6. `./deploy/rollback.sh` points `~/layr/current` at the previous release. The next kiosk start uses
    that directory name as `layr_build`. Add `--reload-kiosk` to restart an already active kiosk.
    `./deploy/uninstall.sh` removes the LAYR units and, if LAYR had disabled KlipperScreen, enables it
-   again. `--purge` also deletes `~/layr`. Uninstall does not delete a udev rule.
+   again. It also removes the `layr` command this installer added. `--purge` also deletes `~/layr`.
+   Uninstall does not delete a udev rule, and it does not remove Klipper, Moonraker, AFC, Happy Hare,
+   or printer configuration.
 
 The kiosk does not force a resolution. cage uses the connector's preferred mode. The Pi model and the
 panel's native mode are read by `check-device.sh` because they are not known in this repository.

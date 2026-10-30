@@ -193,10 +193,19 @@ else
   echo "Reload only the kiosk with --reload-kiosk, or: sudo systemctl restart layr-kiosk"
 fi
 
+if [ "$DRY_RUN" = 1 ]; then
+  echo "Would add the layr command on PATH for this user. That step does not use apt or the network."
+else
+  if ! bash "$SCRIPT_DIR/bootstrap.sh" --install-command; then
+    warn "LAYR files are installed, but the layr command was not added. Run: bash ${SCRIPT_DIR}/bootstrap.sh --install-command"
+  fi
+fi
+
 info "Web UI is (or would be) at http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}&layr_build=${STAMP}#/home"
 echo "The kiosk uses the same layr_build value, percent-encoded, and keeps the #/home route."
 echo "Open that address in Chromium on this Pi before using the kiosk."
-echo "KlipperScreen was not modified. To switch displays later: ./deploy/layr-display.sh to-layr"
+echo "KlipperScreen was not modified. To switch displays later: layr"
+echo "If layr is not found yet: ${LAYR_HOME}/bin/layr"
 echo "To undo this install: ./deploy/uninstall.sh"
 print_recovery_instructions "$SCRIPT_DIR"
 # LAYR_SCRIPT_END

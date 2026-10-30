@@ -36,6 +36,8 @@ if [ "$PURGE" = 1 ]; then
 else
   echo "Keeps $LAYR_HOME (pass --purge to delete it)."
 fi
+echo "Removes only the layr command this installer added, when that file is present."
+echo "Does not remove Klipper, Moonraker, AFC, Happy Hare, or printer configuration."
 if [ -f "$HDMI_POINTER_RULE_PATH" ]; then
   echo "Leaves the udev rule at $HDMI_POINTER_RULE_PATH in place."
   echo "Uninstall does not delete that file. A rule already on this Pi stays until you remove it yourself."
@@ -60,6 +62,12 @@ if [ -f "$KS_MARKER" ]; then
     warn "Marker says LAYR disabled KlipperScreen, but $KS_UNIT is not installed. Nothing was started."
   fi
   run rm -f "$KS_MARKER"
+fi
+
+if [ "$DRY_RUN" = 1 ]; then
+  echo "Would remove the layr command from PATH. The command file is left in place for this dry run."
+elif [ -f "$PWD/bootstrap.sh" ]; then
+  bash "$PWD/bootstrap.sh" --remove-command || warn "Could not remove the layr command."
 fi
 
 if [ "$PURGE" = 1 ]; then

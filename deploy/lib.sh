@@ -152,11 +152,14 @@ print_recovery_instructions() {
 If the panel is blank or on the wrong screen, the Pi was not rebooted.
 Run these as the printer user, not as root. KlipperScreen stays installed:
 
+  ${HOME}/layr/bin/layr status
+  ${HOME}/layr/bin/layr to-klipperscreen
   ${deploy_dir}/layr-display.sh to-klipperscreen --yes
   ${deploy_dir}/rollback.sh --yes
   ${deploy_dir}/uninstall.sh
 
 Those commands do not edit printer.cfg, moonraker.conf, mmu.cfg, or AFC / Box Turtle / Happy Hare files.
+layr does not download the installer. It runs the copy already stored on this Pi.
 A text console is Ctrl+Alt+F1, or: sudo chvt 1
 EOF
 }

@@ -1211,6 +1211,364 @@ describe('display switcher', () => {
   });
 });
 
+describe('display switcher layr command', () => {
+  function commandPaths(box: Sandbox) {
+    const root = path.join(box.home, 'layr');
+    return {
+      root,
+      bin: path.join(root, 'bin', 'layr'),
+      link: path.join(box.home, '.local', 'bin', 'layr'),
+      manager: path.join(root, 'src', 'deploy', 'bootstrap.sh'),
+      display: path.join(root, 'src', 'deploy', 'layr-display.sh'),
+      profile: path.join(box.home, '.profile'),
+      bashrc: path.join(box.home, '.bashrc'),
+    };
+  }
+
+  function modeBits(file: string): number {
+    return statSync(file).mode & 0o777;
+  }
+
+  function assertPrivate(file: string) {
+    expect(modeBits(file) & 0o022).toBe(0);
+    expect(statSync(file).uid).toBe(process.getuid());
+  }
+
+  function installedUnits() {
+    return unitEnv({ active: 'layr-web.service KlipperScreen.service', enabled: 'KlipperScreen.service' });
+  }
+
+  function runLayr(box: Sandbox, args: string[], extra: NodeJS.ProcessEnv = {}, cwd = '/'): RunResult {
+    const link = commandPaths(box).link;
+    const command = `${JSON.stringify(link)} ${args.map((arg) => JSON.stringify(arg)).join(' ')}`;
+    return run(command, { ...box.env, ...extra }, cwd);
+  }
+
+  it('installs the command on the first run and opens the menu on the next', () => {
+    const box = makeSandbox();
+    const installLog = path.join(box.root, 'install.log');
+    const paths = commandPaths(box);
+    writeExe(
+      path.join(box.root, 'install.sh'),
+      `#!/bin/bash
+printf '%s\\n' "$*" > ${JSON.stringify(installLog)}
+mkdir -p "$LAYR_HOME/releases/first"
+printf '%s\\n' '<!doctype html><title>LAYR</title>' > "$LAYR_HOME/releases/first/index.html"
+ln -sfn "$LAYR_HOME/releases/first" "$LAYR_HOME/current"
+`,
+    );
+    try {
+      const first = invoke(box, ['--yes', '--dist', box.dist], { LAYR_INSTALL_SH: path.join(box.root, 'install.sh') });
+      const output = textOf(first);
+      expect(first.status, output).toBe(0);
+      expect(output).toContain('install-kind: first');
+      expect(output).toContain('layr-command: installed');
+      expect(output).toContain('layr-command-needs-network: no');
+      expect(output).not.toContain('Same installer, already on this Pi');
+      expect(output).not.toContain('/tmp/layr-bootstrap.sh');
+      expect(existsSync(box.aptLog)).toBe(false);
+      const firstHttp = existsSync(box.httpLog) ? readFileSync(box.httpLog, 'utf8') : '';
+      expect(firstHttp).not.toContain('github.com');
+      expect(firstHttp).not.toContain('nodejs.org');
+      expect(firstHttp).not.toContain('raw.githubusercontent.com');
+      rmSync(box.httpLog, { force: true });
+      expect(existsSync(paths.bin)).toBe(true);
+      expect(existsSync(paths.link)).toBe(true);
+      expect(readFileSync(paths.profile, 'utf8')).toContain('# BEGIN LAYR COMMAND');
+      expect(readFileSync(paths.bashrc, 'utf8')).toContain('# BEGIN LAYR COMMAND');
+      expect(readFileSync(paths.link, 'utf8')).toContain('LAYR_COMMAND_WRAPPER');
+      assertPrivate(paths.bin);
+      assertPrivate(path.dirname(paths.link));
+      expect(modeBits(paths.bin)).toBe(0o755);
+      const stamp = statSync(paths.bin).mtimeMs;
+
+      const again = runLayr(box, [], { ...installedUnits(), LAYR_HTTP_MODE: 'fail' });
+      const againText = textOf(again);
+      expect(again.status, againText).toBe(0);
+      expect(againText).toContain('layr-command: present');
+      expect(againText).toContain('active-display: klipperscreen');
+      expect(againText).toContain('1) Switch to LAYR');
+      expect(againText).toContain('6) Exit');
+      expect(againText).toContain('menu: skipped');
+      expect(againText).toContain('reinstall: no');
+      expect(againText).toContain('changed=no');
+      expect(againText).toContain(`layr-manager: ${paths.manager}`);
+      expect(againText).not.toContain(bootstrap);
+      expect(statSync(paths.bin).mtimeMs).toBe(stamp);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      const repeated = runLayr(box, [], { ...installedUnits(), LAYR_MENU_CHOICE: 'exit', LAYR_HTTP_MODE: 'fail' });
+      expect(repeated.status, textOf(repeated)).toBe(0);
+      expect(textOf(repeated)).toContain('menu: exit');
+      expect(statSync(paths.bin).mtimeMs).toBe(stamp);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('stays on PATH after a new login and still switches offline when the page is down', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    const paths = commandPaths(box);
+    try {
+      const added = invoke(box, [], { ...installedUnits(), LAYR_HTTP_MODE: 'fail' });
+      expect(added.status, textOf(added)).toBe(0);
+      expect(existsSync(paths.link)).toBe(true);
+      writeExe(path.join(box.home, '.local', 'bin', 'systemctl'), readFileSync(path.join(box.root, 'bin', 'systemctl'), 'utf8'));
+
+      const login = run(
+        `bash -lc 'cd / && command -v layr && layr status'`,
+        {
+          ...box.env,
+          ...installedUnits(),
+          PATH: '/usr/bin:/bin',
+          LAYR_HOME: '',
+          LAYR_HTTP_MODE: 'fail',
+          LAYR_HTTP_GET: '',
+        },
+        '/',
+      );
+      const loginText = textOf(login);
+      expect(login.status, loginText).toBe(0);
+      expect(loginText).toContain(paths.link);
+      expect(loginText).toContain('action: status');
+      expect(loginText).toContain('network: no');
+      expect(loginText).toContain('apt: no');
+      expect(loginText).toContain('changed=no');
+      expect(loginText).toContain(`layr-manager: ${paths.manager}`);
+      expect(loginText).not.toContain('/tmp/layr-bootstrap.sh');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+
+      rmSync(box.systemctlLog, { force: true });
+      const back = runLayr(box, ['to-klipperscreen'], {
+        ...unitEnv({ active: 'layr-kiosk.service', enabled: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_HTTP_GET: '',
+        LAYR_CURL_FAIL: '1',
+      });
+      const backText = textOf(back);
+      expect(back.status, backText).toBe(0);
+      expect(backText).toContain('install-state: broken');
+      expect(backText).toContain('display-changed=yes');
+      expect(backText).toContain('offline-fallback-needs-download: no');
+      expect(readFileSync(box.systemctlLog, 'utf8')).toContain('disable --now layr-kiosk.service');
+      expect(readFileSync(box.systemctlLog, 'utf8')).toContain('enable --now KlipperScreen.service');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      rmSync(box.systemctlLog, { force: true });
+      const refused = runLayr(box, ['to-layr'], {
+        ...installedUnits(),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_HTTP_GET: '',
+        LAYR_CURL_FAIL: '1',
+      });
+      expect(refused.status, textOf(refused)).not.toBe(0);
+      expect(textOf(refused)).toContain('KlipperScreen was not stopped');
+      expect(textOf(refused)).toContain('display-changed=no');
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+
+      rmSync(box.systemctlLog, { force: true });
+      const restored = runLayr(box, ['to-layr'], {
+        ...installedUnits(),
+        LAYR_HTTP_GET: '',
+        LAYR_KIOSK_WAIT_SECS: '1',
+        LAYR_KIOSK_WAIT_INTERVAL: '0',
+      });
+      const restoredLog = readFileSync(box.systemctlLog, 'utf8');
+      expect(restored.status, textOf(restored)).not.toBe(0);
+      expect(restoredLog).toContain('disable --now KlipperScreen.service');
+      expect(restoredLog).toContain('enable --now layr-kiosk.service');
+      expect(restoredLog).toContain('disable --now layr-kiosk.service');
+      expect(restoredLog).toContain('enable --now KlipperScreen.service');
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('upgrades an older install locally and leaves its display script in place', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const paths = commandPaths(box);
+    mkdirSync(path.dirname(paths.manager), { recursive: true });
+    writeFileSync(paths.manager, '#!/bin/bash\nprintf "old-manager\\n"\nexit 0\n# LAYR_SCRIPT_END\n');
+    writeFileSync(paths.display, readFileSync(path.join(repo, 'deploy/layr-display.sh'), 'utf8'));
+    writeFileSync(path.join(path.dirname(paths.manager), 'lib.sh'), readFileSync(path.join(repo, 'deploy/lib.sh'), 'utf8'));
+    const displayBefore = readFileSync(paths.display);
+    try {
+      const upgraded = invoke(box, [], { ...installedUnits(), LAYR_HTTP_MODE: 'fail' });
+      const output = textOf(upgraded);
+      expect(upgraded.status, output).toBe(0);
+      expect(output).toContain('layr-command-manager: updated');
+      expect(output).toContain('layr-command: installed');
+      expect(output).toContain('reinstall: no');
+      expect(output).not.toContain('old-manager');
+      expect(readFileSync(paths.manager, 'utf8')).toContain('ensure_layr_command');
+      expect(readFileSync(paths.display)).toEqual(displayBefore);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      const status = runLayr(box, ['status'], { ...installedUnits(), LAYR_HTTP_MODE: 'fail', LAYR_HTTP_GET: '' });
+      expect(status.status, textOf(status)).toBe(0);
+      expect(textOf(status)).toContain('action: status');
+      expect(textOf(status)).toContain('install-state: installed');
+      expect(textOf(status)).toContain('network: no');
+      expect(textOf(status)).toContain(`layr-manager: ${paths.manager}`);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('keeps a foreign layr command and refuses a writable manager', () => {
+    const box = makeSandbox();
+    const paths = commandPaths(box);
+    mkdirSync(path.dirname(paths.link), { recursive: true });
+    writeFileSync(paths.link, '#!/bin/sh\nprintf "foreign-layr\\n"\n');
+    chmodSync(paths.link, 0o755);
+    try {
+      const result = invoke(box, ['--install-command']);
+      const output = textOf(result);
+      expect(result.status, output).toBe(0);
+      expect(output).toContain(`layr-command: left-foreign ${paths.link}`);
+      expect(readFileSync(paths.link, 'utf8')).toContain('foreign-layr');
+      expect(readFileSync(paths.bin, 'utf8')).toContain('LAYR_COMMAND_WRAPPER');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      chmodSync(paths.manager, 0o777);
+      const refused = run(`${JSON.stringify(paths.bin)} status`, { ...box.env, ...installedUnits() }, '/');
+      expect(refused.status, textOf(refused)).not.toBe(0);
+      expect(textOf(refused)).toContain('not writable by group or others');
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('removes only the layr command on uninstall and keeps it across rollback', () => {
+    const box = makeSandbox();
+    const paths = commandPaths(box);
+    const printer = path.join(box.home, 'printer_data', 'config', 'printer.cfg');
+    const moonraker = path.join(box.home, 'printer_data', 'config', 'moonraker.conf');
+    const mmu = path.join(box.home, 'mmu.cfg');
+    const other = path.join(box.home, '.local', 'bin', 'other-tool');
+    const sudoLog = path.join(box.root, 'sudo.log');
+    mkdirSync(path.dirname(printer), { recursive: true });
+    writeFileSync(printer, '# printer stays\n');
+    writeFileSync(moonraker, '# moonraker stays\n');
+    writeFileSync(mmu, '# mmu stays\n');
+    try {
+      const added = invoke(box, ['--install-command']);
+      expect(added.status, textOf(added)).toBe(0);
+      writeFileSync(paths.bashrc, `# user-keeps-this\n${readFileSync(paths.bashrc, 'utf8')}`);
+      writeExe(other, '#!/bin/sh\nprintf "other\\n"\n');
+      const older = path.join(paths.root, 'releases', 'older');
+      const newer = path.join(paths.root, 'releases', 'newer');
+      mkdirSync(older, { recursive: true });
+      mkdirSync(newer, { recursive: true });
+      writeFileSync(path.join(older, 'index.html'), '<!doctype html>');
+      writeFileSync(path.join(newer, 'index.html'), '<!doctype html>');
+      rmSync(path.join(paths.root, 'current'), { force: true });
+      symlinkSync(newer, path.join(paths.root, 'current'));
+      mkdirSync(path.join(paths.root, 'state'), { recursive: true });
+      writeFileSync(path.join(paths.root, 'state', 'previous'), `${older}\n`);
+
+      const rolled = run(`bash ${JSON.stringify(path.join(repo, 'deploy/rollback.sh'))} --yes`, {
+        ...box.env,
+        PATH: `${path.join(box.root, 'bin')}:/usr/bin:/bin`,
+      });
+      expect(rolled.status, textOf(rolled)).toBe(0);
+      expect(existsSync(paths.bin)).toBe(true);
+      expect(existsSync(paths.link)).toBe(true);
+      expect(readFileSync(paths.profile, 'utf8')).toContain('# BEGIN LAYR COMMAND');
+
+      writeExe(
+        path.join(box.root, 'bin', 'sudo'),
+        `#!/bin/bash
+printf '%s\\n' "$*" >> ${JSON.stringify(sudoLog)}
+exit 0
+`,
+      );
+      const dry = run(`bash ${JSON.stringify(path.join(repo, 'deploy/uninstall.sh'))} --dry-run --yes`, {
+        ...box.env,
+        PATH: `${path.join(box.root, 'bin')}:/usr/bin:/bin`,
+        LAYR_UDEV_RULES_PATH: path.join(box.root, 'missing.rules'),
+      });
+      expect(dry.status, textOf(dry)).toBe(0);
+      expect(textOf(dry)).toContain('left in place for this dry run');
+      expect(existsSync(paths.bin)).toBe(true);
+
+      const removed = run(`bash ${JSON.stringify(path.join(repo, 'deploy/uninstall.sh'))} --yes`, {
+        ...box.env,
+        PATH: `${path.join(box.root, 'bin')}:/usr/bin:/bin`,
+        LAYR_UDEV_RULES_PATH: path.join(box.root, 'missing.rules'),
+      });
+      const removedText = textOf(removed);
+      expect(removed.status, removedText).toBe(0);
+      expect(removedText).toContain('layr-command: removed');
+      expect(removedText).toContain('layr-command: removed-path');
+      expect(existsSync(paths.bin)).toBe(false);
+      expect(existsSync(paths.link)).toBe(false);
+      expect(existsSync(paths.root)).toBe(true);
+      expect(readFileSync(paths.bashrc, 'utf8')).toContain('# user-keeps-this');
+      expect(readFileSync(paths.bashrc, 'utf8')).not.toContain('# BEGIN LAYR COMMAND');
+      expect(readFileSync(paths.profile, 'utf8')).not.toContain('# BEGIN LAYR COMMAND');
+      expect(readFileSync(printer, 'utf8')).toBe('# printer stays\n');
+      expect(readFileSync(moonraker, 'utf8')).toBe('# moonraker stays\n');
+      expect(readFileSync(mmu, 'utf8')).toBe('# mmu stays\n');
+      expect(readFileSync(other, 'utf8')).toContain('other');
+      const sudoText = readFileSync(sudoLog, 'utf8');
+      expect(sudoText).not.toContain('printer.cfg');
+      expect(sudoText).not.toContain('moonraker.conf');
+      expect(sudoText).not.toContain('mmu.cfg');
+      expect(sudoText).not.toContain('KlipperScreen');
+      expect(sudoText).not.toMatch(/klipper\.service|moonraker\.service/i);
+
+      const readded = invoke(box, ['--install-command']);
+      expect(readded.status, textOf(readded)).toBe(0);
+      const purged = run(`bash ${JSON.stringify(path.join(repo, 'deploy/uninstall.sh'))} --purge --yes`, {
+        ...box.env,
+        PATH: `${path.join(box.root, 'bin')}:/usr/bin:/bin`,
+        LAYR_UDEV_RULES_PATH: path.join(box.root, 'missing.rules'),
+      });
+      expect(purged.status, textOf(purged)).toBe(0);
+      expect(existsSync(paths.root)).toBe(false);
+      expect(existsSync(paths.link)).toBe(false);
+      expect(readFileSync(printer, 'utf8')).toBe('# printer stays\n');
+      expect(readFileSync(other, 'utf8')).toContain('other');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('tells a dry-run install about the command without creating it', () => {
+    const box = makeSandbox();
+    const paths = commandPaths(box);
+    try {
+      const result = run(
+        `bash ${JSON.stringify(path.join(repo, 'deploy/install.sh'))} --dist ${JSON.stringify(box.dist)} --dry-run --yes`,
+        { ...box.env, PATH: `${path.join(box.root, 'bin')}:${process.env.PATH ?? ''}` },
+        box.root,
+      );
+      expect(result.status, textOf(result)).toBe(0);
+      expect(textOf(result)).toContain('Would add the layr command on PATH');
+      expect(existsSync(paths.bin)).toBe(false);
+      expect(existsSync(paths.link)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+});
+
 describe('bootstrap safety helpers', () => {
   it('refuses a truncated script before creating a home directory', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'layr-truncated-'));
