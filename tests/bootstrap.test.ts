@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,17 +150,43 @@ exit "\${LAYR_APT_RC:-0}"
     path.join(bin, 'systemctl'),
     `#!/bin/bash
 printf '%s\\n' "$*" >> "$LAYR_SYSTEMCTL_LOG"
-if [ "$1" = "is-active" ]; then
-  unit=$1
-  shift
-  [ "$1" = "--quiet" ] && shift
-  unit=$1
-  case " \${LAYR_ACTIVE_UNITS:-} " in
-    *" $unit "*) exit 0 ;;
+verb=$1
+shift
+unit=
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;;
+    *) unit=$arg ;;
   esac
-  printf 'inactive\\n'
-  exit 3
-fi
+done
+case "$verb" in
+  is-active)
+    case " \${LAYR_FAILED_UNITS:-} " in
+      *" $unit "*) printf 'failed\\n'; exit 3 ;;
+    esac
+    case " \${LAYR_ACTIVE_UNITS:-} " in
+      *" $unit "*) printf 'active\\n'; exit 0 ;;
+    esac
+    printf 'inactive\\n'
+    exit 3
+    ;;
+  is-enabled)
+    case " \${LAYR_ENABLED_UNITS:-} " in
+      *" $unit "*) printf 'enabled\\n'; exit 0 ;;
+    esac
+    case " \${LAYR_UNITS:-} " in
+      *" $unit "*) printf 'disabled\\n'; exit 1 ;;
+    esac
+    printf 'not-found\\n'
+    exit 1
+    ;;
+  list-unit-files)
+    case " \${LAYR_UNITS:-} " in
+      *" $unit "*) printf '%s enabled enabled\\n' "$unit"; exit 0 ;;
+    esac
+    exit 1
+    ;;
+esac
 exit 0
 `,
   );
@@ -203,6 +229,10 @@ exit 0
     LAYR_GROUPS: 'video render input',
     LAYR_KIOSK_ACTIVE: '0',
     LAYR_REF: '',
+    LAYR_UNITS: '',
+    LAYR_ACTIVE_UNITS: '',
+    LAYR_FAILED_UNITS: '',
+    LAYR_ENABLED_UNITS: '',
   };
   return { root, home, dist, env, aptLog, httpLog, systemctlLog, objects, query };
 }
@@ -250,6 +280,7 @@ describe('bootstrap platform preflight', () => {
       expect(output).toContain('touch: Goodix Capacitive TouchScreen');
       expect(output).not.toContain('touch: Logitech');
       expect(output).toContain('udev: not modified');
+      expect(output).toContain('install-state: not-installed');
       expect(output).toContain('display-switch: no');
       expect(output).toContain('klipperscreen: left as it is until you confirm a switch');
       expect(output).toContain('to-klipperscreen');
@@ -633,12 +664,23 @@ describe('bootstrap source selection and install handoff', () => {
     }
   });
 
-  it('names an update when a current install already exists', () => {
+  it('names an update when repair is asked and a current install already exists', () => {
     const box = makeSandbox();
     mkdirSync(path.join(box.home, 'layr', 'current'), { recursive: true });
     try {
-      const result = invoke(box, ['--dry-run', '--yes', '--dist', box.dist]);
+      const skipped = invoke(box, ['--dry-run', '--yes', '--dist', box.dist]);
+      expect(skipped.status).toBe(0);
+      expect(textOf(skipped)).toContain('install-state: partial');
+      expect(textOf(skipped)).toContain('reinstall: no');
+      expect(textOf(skipped)).toContain('changed=no');
+      expect(textOf(skipped)).not.toContain('install-kind: update');
+      expect(existsSync(box.aptLog)).toBe(false);
+
+      const result = invoke(box, ['--repair', '--dry-run', '--yes', '--dist', box.dist]);
+      expect(result.status).toBe(0);
+      expect(textOf(result)).toContain('action: repair');
       expect(textOf(result)).toContain('install-kind: update');
+      expect(textOf(result)).toContain('display-changed=no');
     } finally {
       cleanup(box);
     }
@@ -737,6 +779,435 @@ describe('bootstrap source selection and install handoff', () => {
     } finally {
       cleanup(box);
     }
+  });
+});
+
+const SERVICE_UNITS = 'layr-web.service layr-kiosk.service KlipperScreen.service';
+
+function writeRelease(box: Sandbox, name = '20260101T000000Z') {
+  const release = path.join(box.home, 'layr', 'releases', name);
+  mkdirSync(release, { recursive: true });
+  writeFileSync(path.join(release, 'index.html'), '<!doctype html><title>LAYR</title>\n');
+  const current = path.join(box.home, 'layr', 'current');
+  rmSync(current, { recursive: true, force: true });
+  symlinkSync(release, current);
+  return release;
+}
+
+function unitEnv(options: { units?: string; active?: string; failed?: string; enabled?: string } = {}) {
+  return {
+    LAYR_UNITS: options.units ?? SERVICE_UNITS,
+    LAYR_ACTIVE_UNITS: options.active ?? 'layr-web.service',
+    LAYR_FAILED_UNITS: options.failed ?? '',
+    LAYR_ENABLED_UNITS: options.enabled ?? 'KlipperScreen.service',
+  };
+}
+
+function displayStub(box: Sandbox) {
+  const log = path.join(box.root, 'display-switch.log');
+  const file = path.join(box.root, 'layr-display-stub.sh');
+  writeExe(file, `#!/bin/bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit "\${LAYR_DISPLAY_RC:-0}"\n`);
+  return { file, log };
+}
+
+function armRealDisplay(box: Sandbox) {
+  const bin = path.join(box.root, 'bin');
+  writeExe(path.join(bin, 'sudo'), '#!/bin/bash\nexec "$@"\n');
+  writeExe(path.join(bin, 'curl'), '#!/bin/bash\nif [ "${LAYR_CURL_FAIL:-0}" = 1 ]; then exit 1; fi\nexit 0\n');
+  writeExe(path.join(bin, 'cage'), '#!/bin/bash\nexit 0\n');
+  writeExe(path.join(bin, 'chromium'), '#!/bin/bash\nexit 0\n');
+}
+
+describe('display switcher', () => {
+  it('installs on the first run and does not open the switch menu', () => {
+    const box = makeSandbox();
+    try {
+      const result = invoke(box, ['--dry-run', '--yes', '--dist', box.dist]);
+      const output = textOf(result);
+      expect(result.status).toBe(0);
+      expect(output).toContain('install-state: not-installed');
+      expect(output).toContain('install-kind: first');
+      expect(output).toContain('Dry run only');
+      expect(output).not.toContain('Same installer, already on this Pi');
+      expect(output).not.toContain('automatic-toggle: refused');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('re-runs as a menu on KlipperScreen and on LAYR without downloading', () => {
+    const box = makeSandbox();
+    const release = writeRelease(box);
+    const before = readFileSync(path.join(release, 'index.html'), 'utf8');
+    try {
+      const ks = invoke(box, [], unitEnv({ active: 'layr-web.service KlipperScreen.service' }));
+      const ksOut = textOf(ks);
+      expect(ks.status).toBe(0);
+      expect(ksOut).toContain('install-state: installed');
+      expect(ksOut).toContain('active-display: klipperscreen');
+      expect(ksOut).toContain('1) Switch to LAYR');
+      expect(ksOut).toContain('2) Switch to KlipperScreen');
+      expect(ksOut).toContain('3) Update');
+      expect(ksOut).toContain('4) Repair');
+      expect(ksOut).toContain('5) Diagnostics');
+      expect(ksOut).toContain('6) Exit');
+      expect(ksOut).toContain('menu: skipped');
+      expect(ksOut).toContain('reinstall: no');
+      expect(ksOut).toContain('changed=no');
+      expect(ksOut).toContain('offline-fallback-needs-download: no');
+      expect(ksOut).not.toContain('raw.githubusercontent.com');
+      expect(ksOut).not.toContain('Dry run only');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+      expect(readFileSync(path.join(release, 'index.html'), 'utf8')).toBe(before);
+
+      const layr = invoke(box, [], { ...unitEnv({ active: 'layr-web.service layr-kiosk.service' }), LAYR_MENU_CHOICE: 'exit' });
+      expect(layr.status).toBe(0);
+      expect(textOf(layr)).toContain('active-display: layr');
+      expect(textOf(layr)).toContain('menu: exit');
+      expect(textOf(layr)).toContain('changed=no');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('switches through layr-display.sh and leaves an already active display alone', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const stub = displayStub(box);
+    try {
+      const toLayr = invoke(box, ['--switch-display'], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(toLayr.status).toBe(0);
+      expect(readFileSync(stub.log, 'utf8')).toContain('to-layr --yes');
+      expect(textOf(toLayr)).toContain('reinstall: no');
+      expect(textOf(toLayr)).toContain('display-changed=yes');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      rmSync(stub.log);
+      const already = invoke(box, ['--switch-display'], {
+        ...unitEnv({ active: 'layr-web.service layr-kiosk.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(already.status).toBe(0);
+      expect(textOf(already)).toContain('already-active: layr');
+      expect(textOf(already)).toContain('display-changed=no');
+      expect(existsSync(stub.log)).toBe(false);
+
+      const back = invoke(box, ['--switch-klipperscreen'], {
+        ...unitEnv({ active: 'layr-web.service layr-kiosk.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(back.status).toBe(0);
+      expect(readFileSync(stub.log, 'utf8')).toContain('to-klipperscreen --yes');
+      expect(textOf(back)).toContain('display-switch: klipperscreen');
+      expect(existsSync(box.httpLog)).toBe(false);
+
+      rmSync(stub.log);
+      const stayed = invoke(box, [], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+        LAYR_MENU_CHOICE: 'switch-klipperscreen',
+      });
+      expect(stayed.status).toBe(0);
+      expect(textOf(stayed)).toContain('already-active: klipperscreen');
+      expect(existsSync(stub.log)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses an automatic toggle when both, neither, or systemd is unreadable', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const stub = displayStub(box);
+    try {
+      const both = invoke(box, [], {
+        ...unitEnv({ active: SERVICE_UNITS }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(both.status).toBe(0);
+      expect(textOf(both)).toContain('active-display: both');
+      expect(textOf(both)).toContain('automatic-toggle: refused');
+      expect(textOf(both)).toContain('changed=no');
+      expect(existsSync(stub.log)).toBe(false);
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+
+      const picked = invoke(box, [], {
+        ...unitEnv({ active: SERVICE_UNITS }),
+        LAYR_DISPLAY_SH: stub.file,
+        LAYR_MENU_CHOICE: 'switch-klipperscreen',
+      });
+      expect(picked.status).toBe(0);
+      expect(textOf(picked)).toContain('display-conflict: both');
+      expect(textOf(picked)).toContain('explicit-switch: klipperscreen');
+      expect(readFileSync(stub.log, 'utf8')).toContain('to-klipperscreen --yes');
+
+      rmSync(stub.log);
+      const neither = invoke(box, [], {
+        ...unitEnv({ active: 'layr-web.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(neither.status).toBe(0);
+      expect(textOf(neither)).toContain('active-display: neither');
+      expect(textOf(neither)).toContain('automatic-toggle: refused');
+      expect(existsSync(stub.log)).toBe(false);
+
+      const uncertain = invoke(box, [], {
+        ...unitEnv(),
+        LAYR_DISPLAY_SH: stub.file,
+        LAYR_SYSTEMCTL_BIN: 'missing',
+        LAYR_MENU_CHOICE: 'switch-layr',
+      });
+      expect(uncertain.status).not.toBe(0);
+      expect(textOf(uncertain)).toContain('install-state: uncertain');
+      expect(textOf(uncertain)).toContain('active-display: uncertain');
+      expect(textOf(uncertain)).toContain('switch-refused: uncertain');
+      expect(textOf(uncertain)).toContain('changed=no');
+      expect(existsSync(stub.log)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('reports a partial install and does not finish it unless repair is chosen', () => {
+    const box = makeSandbox();
+    const stub = displayStub(box);
+    try {
+      mkdirSync(path.join(box.home, 'layr', 'current'), { recursive: true });
+      const empty = invoke(box, [], { LAYR_DISPLAY_SH: stub.file });
+      expect(empty.status).toBe(0);
+      expect(textOf(empty)).toContain('install-state: partial');
+      expect(textOf(empty)).toContain('release: broken');
+      expect(textOf(empty)).toContain('changed=no');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(stub.log)).toBe(false);
+
+      rmSync(path.join(box.home, 'layr', 'current'), { recursive: true, force: true });
+      const unitsOnly = invoke(box, [], {
+        ...unitEnv({ units: 'layr-web.service layr-kiosk.service', active: '' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(unitsOnly.status).toBe(0);
+      expect(textOf(unitsOnly)).toContain('install-state: partial');
+      expect(textOf(unitsOnly)).toContain('release: absent');
+      expect(existsSync(box.aptLog)).toBe(false);
+
+      writeRelease(box);
+      const webOnly = invoke(box, [], {
+        ...unitEnv({ units: 'layr-web.service', active: 'layr-web.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(textOf(webOnly)).toContain('install-state: partial');
+      expect(textOf(webOnly)).toContain('layr-kiosk: missing');
+      expect(existsSync(stub.log)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses to switch to KlipperScreen when that unit is absent', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const stub = displayStub(box);
+    try {
+      const result = invoke(box, ['--switch-klipperscreen'], {
+        ...unitEnv({
+          units: 'layr-web.service layr-kiosk.service',
+          active: 'layr-web.service layr-kiosk.service',
+        }),
+        LAYR_DISPLAY_SH: stub.file,
+        LAYR_HTTP_MODE: 'fail',
+      });
+      const output = textOf(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('klipperscreen: absent');
+      expect(output).toContain('switch-refused: klipperscreen-absent');
+      expect(output).toContain('was not installed or removed');
+      expect(output).toContain('display-changed=no');
+      expect(existsSync(stub.log)).toBe(false);
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('switches back to KlipperScreen when LAYR is broken or the page is down, without a network', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    const conf = box.env.LAYR_MOONRAKER_CONF as string;
+    const before = statSync(conf).mtimeMs;
+    try {
+      const frontend = invoke(box, ['--switch-klipperscreen'], {
+        ...unitEnv({ active: 'layr-kiosk.service', enabled: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_CURL_FAIL: '1',
+        LAYR_DISK_FREE_MB: '10',
+      });
+      const frontendLog = readFileSync(box.systemctlLog, 'utf8');
+      expect(frontend.status, textOf(frontend)).toBe(0);
+      expect(textOf(frontend)).toContain('install-state: broken');
+      expect(textOf(frontend)).toContain('active-display: layr');
+      expect(textOf(frontend)).toContain('display-changed=yes');
+      expect(textOf(frontend)).toContain('offline-fallback-needs-download: no');
+      expect(frontendLog).toContain('disable --now layr-kiosk.service');
+      expect(frontendLog).toContain('enable --now KlipperScreen.service');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+      expect(statSync(conf).mtimeMs).toBe(before);
+
+      rmSync(box.systemctlLog, { force: true });
+      const failed = invoke(box, [], {
+        ...unitEnv({ active: 'layr-web.service', failed: 'layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+        LAYR_MENU_CHOICE: 'switch-klipperscreen',
+      });
+      expect(failed.status, textOf(failed)).toBe(0);
+      expect(textOf(failed)).toContain('install-state: broken');
+      expect(textOf(failed)).toContain('layr-kiosk: failed');
+      expect(textOf(failed)).toContain('active-display: neither');
+      expect(textOf(failed)).toContain('explicit-switch: klipperscreen');
+      expect(readFileSync(box.systemctlLog, 'utf8')).toContain('enable --now KlipperScreen.service');
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('does not stop KlipperScreen when the kiosk cannot start, and restores it when the kiosk dies', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    armRealDisplay(box);
+    try {
+      const refused = invoke(box, ['--switch-display'], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service', enabled: 'KlipperScreen.service' }),
+        LAYR_CURL_FAIL: '1',
+      });
+      expect(refused.status).not.toBe(0);
+      expect(textOf(refused)).toContain('display-changed=no');
+      expect(textOf(refused)).toContain('KlipperScreen was not stopped');
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+      expect(existsSync(box.aptLog)).toBe(false);
+
+      rmSync(box.systemctlLog, { force: true });
+      const restored = invoke(box, ['--switch-display'], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service', enabled: 'KlipperScreen.service' }),
+        LAYR_KIOSK_WAIT_SECS: '1',
+        LAYR_KIOSK_WAIT_INTERVAL: '0',
+      });
+      const log = readFileSync(box.systemctlLog, 'utf8');
+      expect(restored.status).not.toBe(0);
+      expect(textOf(restored)).toContain('display-changed=no');
+      expect(log).toContain('disable --now KlipperScreen.service');
+      expect(log).toContain('enable --now layr-kiosk.service');
+      expect(log).toContain('disable --now layr-kiosk.service');
+      expect(log).toContain('enable --now KlipperScreen.service');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('updates or repairs only when asked, and leaves the display alone', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const stub = displayStub(box);
+    try {
+      const updated = invoke(box, ['--update', '--dry-run', '--yes', '--dist', box.dist], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_DISPLAY_SH: stub.file,
+      });
+      expect(updated.status, textOf(updated)).toBe(0);
+      expect(textOf(updated)).toContain('action: update');
+      expect(textOf(updated)).toContain('Dry run only');
+      expect(textOf(updated)).toContain('display-changed=no');
+      expect(textOf(updated)).toContain('The current display was left as it is.');
+      expect(existsSync(stub.log)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(readFileSync(box.httpLog, 'utf8')).not.toContain('releases/latest');
+      expect(readFileSync(box.httpLog, 'utf8')).not.toContain('nodejs.org');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('runs diagnostics and an offline status report without installing', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const conf = box.env.LAYR_MOONRAKER_CONF as string;
+    const before = statSync(conf).mtimeMs;
+    try {
+      const diagnostics = invoke(box, [], {
+        ...unitEnv({ active: 'layr-web.service KlipperScreen.service' }),
+        LAYR_MENU_CHOICE: 'diagnostics',
+        LAYR_HTTP_MODE: 'fail',
+      });
+      const output = textOf(diagnostics);
+      expect(diagnostics.status).toBe(0);
+      expect(output).toContain('action: diagnostics');
+      expect(output).toContain('changed=no');
+      expect(output).toContain('reinstall: no');
+      expect(output).toContain('moonraker: reachable: no');
+      expect(output).toContain('offline-fallback-needs-download: no');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(readFileSync(box.httpLog, 'utf8')).not.toContain('github.com');
+      expect(statSync(conf).mtimeMs).toBe(before);
+
+      const offline = invoke(box, ['diagnose'], {
+        ...unitEnv({ active: 'layr-web.service layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+      });
+      expect(offline.status).toBe(0);
+      expect(textOf(offline)).toContain('install-state: installed');
+      expect(textOf(offline)).toContain('source: unavailable');
+      expect(textOf(offline)).toContain('changed=no');
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses a switch when layr-display.sh is not on disk', () => {
+    const box = makeSandbox();
+    writeRelease(box);
+    const copy = path.join(box.root, 'layr-bootstrap.sh');
+    writeFileSync(copy, readFileSync(bootstrap, 'utf8'));
+    chmodSync(copy, 0o755);
+    try {
+      const result = run(`bash ${JSON.stringify(copy)} --switch-klipperscreen`, {
+        ...box.env,
+        ...unitEnv({ active: 'layr-web.service layr-kiosk.service' }),
+        LAYR_HTTP_MODE: 'fail',
+      });
+      const output = textOf(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('switch-refused: layr-display.sh missing');
+      expect(output).toContain('changed=no');
+      expect(output).toContain('offline-fallback-needs-download: no');
+      expect(readFileSync(box.systemctlLog, 'utf8')).not.toContain('disable');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(box.httpLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('does not start or stop units from the bootstrap script itself', () => {
+    const source = readFileSync(bootstrap, 'utf8');
+    expect(source).not.toMatch(/systemctl\s+(disable|enable|restart|stop|start)\b/);
+    expect(source).toContain('layr-display.sh');
+    expect(source).toContain('offline-fallback-needs-download: no');
   });
 });
 

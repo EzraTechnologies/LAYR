@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # One-command LAYR install for a Raspberry Pi that already runs Klipper and Moonraker.
+# The same command is the LAYR / KlipperScreen switcher on later runs.
 # The printer may also already run AFC (including a Box Turtle) or Happy Hare, not both
 # at once. Download this file, then run it. Do not pipe it into a shell.
 #
@@ -15,11 +16,27 @@
 # time, or use a different printer. This script never starts both controllers.
 # The Pi is not rebooted. HDMI modes are not written.
 #
+# First run (LAYR not installed): install packages and LAYR in preview, then ask
+# before switching the display.
+# Later runs: do not apt, download, build, or reinstall. Print the active display
+# and a menu: Switch to LAYR, Switch to KlipperScreen, Update, Repair, Diagnostics, Exit.
+# Exit, and a non-interactive run with no choice, change nothing.
+# Switching calls layr-display.sh. This file does not start or stop units itself.
+# If both displays are active, neither is active, or systemd cannot be read, the
+# status is printed and the display is not switched by itself.
+# Switch to KlipperScreen still runs when LAYR is broken or the kiosk is down.
+# It does not need the LAYR page or a network connection.
+# Offline, from SSH, without downloading this file again:
+#   ~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
+#
 #   bash deploy/bootstrap.sh diagnose
 #   bash deploy/bootstrap.sh --preflight
 #   bash deploy/bootstrap.sh --dry-run --yes
 #   bash deploy/bootstrap.sh --yes
 #   bash deploy/bootstrap.sh --yes --switch-display
+#   bash deploy/bootstrap.sh --switch-klipperscreen
+#   bash deploy/bootstrap.sh --update
+#   bash deploy/bootstrap.sh --repair
 #   LAYR_REF=<commit> bash deploy/bootstrap.sh
 set -euo pipefail
 
@@ -67,8 +84,23 @@ EOF
   cat <<'EOF'
 
 Those commands do not edit printer.cfg, moonraker.conf, mmu.cfg, or AFC / Box Turtle files.
-A text console is Ctrl+Alt+F1, or: sudo chvt 1
 EOF
+  print_offline_fallback
+}
+
+# Printed on its own so a later run can show it without downloading this file again.
+print_offline_fallback() {
+  local root script
+  root=$(layr_root)
+  script="${root}/src/deploy/layr-display.sh"
+  printf 'offline-fallback: %s to-klipperscreen --yes\n' "$script"
+  printf 'offline-fallback-needs-download: no\n'
+  printf 'That command is already on the Pi after a successful install. It does not download the installer, and it does not need GitHub or the LAYR page.\n'
+  printf 'A text console is Ctrl+Alt+F1, or: sudo chvt 1\n'
+}
+
+layr_root() {
+  printf '%s\n' "${LAYR_HOME_OVERRIDE:-${LAYR_HOME:-$HOME/layr}}"
 }
 
 require_complete_script() {
@@ -1136,14 +1168,412 @@ confirm_answer() {
   [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+systemctl_bin() {
+  if [ "${LAYR_SYSTEMCTL_BIN:-}" = "missing" ]; then
+    return 1
+  fi
+  if [ -n "${LAYR_SYSTEMCTL_BIN:-}" ]; then
+    printf '%s\n' "$LAYR_SYSTEMCTL_BIN"
+    return 0
+  fi
+  command -v systemctl
+}
+
+# Read-only. Prints missing, active, inactive, failed, or unknown.
+unit_observation() {
+  local unit="$1"
+  local bin listed state
+  bin=$(systemctl_bin) || {
+    printf 'unknown\n'
+    return 0
+  }
+  listed=$("$bin" list-unit-files --no-legend "$unit" 2>/dev/null || true)
+  if ! printf '%s\n' "$listed" | awk -v unit="$unit" '$1 == unit { found = 1 } END { exit(found ? 0 : 1) }'; then
+    printf 'missing\n'
+    return 0
+  fi
+  state=$("$bin" is-active "$unit" 2>/dev/null || true)
+  state=${state%%$'\n'*}
+  case "$state" in
+    active | inactive | failed) printf '%s\n' "$state" ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
+
+# installed: current release has index.html and both LAYR units exist, and the web
+# service is active, and the kiosk unit is not failed.
+# partial: some of those pieces exist.
+# broken: the pieces exist, but the web service is down or the kiosk unit failed.
+# not-installed: no current release and neither LAYR unit.
+# uncertain: systemd could not be read. Do not install or switch on a guess.
+inspect_install() {
+  local root current target
+  root=$(layr_root)
+  INSTALL_STATE=not-installed
+  ACTIVE_DISPLAY=uncertain
+  RELEASE_LABEL=absent
+  RELEASE_OK=0
+  WEB_STATE=unknown
+  KIOSK_STATE=unknown
+  KS_STATE=unknown
+  current="${root}/current"
+  if [ -L "$current" ] || [ -e "$current" ]; then
+    target=$(readlink -f "$current" 2>/dev/null || true)
+    if [ -n "$target" ] && [ -f "$target/index.html" ]; then
+      RELEASE_OK=1
+      RELEASE_LABEL="ok ${target}"
+    else
+      RELEASE_LABEL="broken ${target:-$current}"
+    fi
+  fi
+  if ! systemctl_bin >/dev/null 2>&1; then
+    ACTIVE_DISPLAY=uncertain
+    INSTALL_STATE=uncertain
+    return 0
+  fi
+  WEB_STATE=$(unit_observation layr-web.service)
+  KIOSK_STATE=$(unit_observation layr-kiosk.service)
+  KS_STATE=$(unit_observation KlipperScreen.service)
+  if [ "$WEB_STATE" = "unknown" ] || [ "$KIOSK_STATE" = "unknown" ] || [ "$KS_STATE" = "unknown" ]; then
+    ACTIVE_DISPLAY=uncertain
+    INSTALL_STATE=uncertain
+    return 0
+  fi
+  if [ "$KIOSK_STATE" = "active" ] && [ "$KS_STATE" = "active" ]; then
+    ACTIVE_DISPLAY=both
+  elif [ "$KIOSK_STATE" = "active" ]; then
+    ACTIVE_DISPLAY=layr
+  elif [ "$KS_STATE" = "active" ]; then
+    ACTIVE_DISPLAY=klipperscreen
+  else
+    ACTIVE_DISPLAY=neither
+  fi
+  if [ "$RELEASE_OK" != 1 ] && [ "$RELEASE_LABEL" = "absent" ] && [ "$WEB_STATE" = "missing" ] && [ "$KIOSK_STATE" = "missing" ]; then
+    INSTALL_STATE=not-installed
+    return 0
+  fi
+  if [ "$RELEASE_OK" = 1 ] && [ "$WEB_STATE" != "missing" ] && [ "$KIOSK_STATE" != "missing" ]; then
+    if [ "$WEB_STATE" = "active" ] && [ "$KIOSK_STATE" != "failed" ]; then
+      INSTALL_STATE=installed
+    else
+      INSTALL_STATE=broken
+    fi
+    return 0
+  fi
+  INSTALL_STATE=partial
+}
+
+print_install_status() {
+  printf 'install-state: %s\n' "$INSTALL_STATE"
+  printf 'active-display: %s\n' "$ACTIVE_DISPLAY"
+  printf 'release: %s\n' "$RELEASE_LABEL"
+  printf 'layr-web: %s\n' "$WEB_STATE"
+  printf 'layr-kiosk: %s\n' "$KIOSK_STATE"
+  printf 'klipperscreen: %s\n' "$KS_STATE"
+  if [ "$INSTALL_STATE" != "not-installed" ]; then
+    case "$ACTIVE_DISPLAY" in
+      both | neither | uncertain)
+        printf 'automatic-toggle: refused\n'
+        ;;
+    esac
+  fi
+}
+
+script_is_complete() {
+  local file="$1"
+  local last
+  [ -f "$file" ] || return 1
+  last=$(awk 'NF { line = $0 } END { print line }' "$file")
+  [ "$last" = "# LAYR_SCRIPT_END" ]
+}
+
+resolve_display_script() {
+  local root candidate
+  if [ -n "${LAYR_DISPLAY_SH:-}" ] && [ -f "$LAYR_DISPLAY_SH" ]; then
+    printf '%s\n' "$LAYR_DISPLAY_SH"
+    return 0
+  fi
+  root=$(layr_root)
+  candidate="${root}/src/deploy/layr-display.sh"
+  if script_is_complete "$candidate"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate="${SCRIPT_DIR}/layr-display.sh"
+  if script_is_complete "$candidate"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+# Calls layr-display.sh. Does not stop or start units itself, and does not
+# probe the LAYR page or GitHub. A missing KlipperScreen unit is not installed.
+switch_to_klipperscreen() {
+  local script
+  local -a args
+  if [ "$ACTIVE_DISPLAY" = "uncertain" ]; then
+    printf 'switch-refused: uncertain\n'
+    printf 'automatic-toggle: refused\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    return 1
+  fi
+  if [ "$KS_STATE" = "missing" ]; then
+    printf 'klipperscreen: absent\n'
+    printf 'switch-refused: klipperscreen-absent\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    printf 'KlipperScreen is not installed. It was not installed or removed, and the LAYR kiosk was not stopped.\n'
+    print_offline_fallback
+    return 1
+  fi
+  if [ "$ACTIVE_DISPLAY" = "klipperscreen" ]; then
+    printf 'already-active: klipperscreen\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    return 0
+  fi
+  if [ "$ACTIVE_DISPLAY" = "both" ] || [ "$ACTIVE_DISPLAY" = "neither" ]; then
+    printf 'display-conflict: %s\n' "$ACTIVE_DISPLAY"
+    printf 'explicit-switch: klipperscreen\n'
+  fi
+  if ! script=$(resolve_display_script); then
+    printf 'switch-refused: layr-display.sh missing\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    return 1
+  fi
+  args=(to-klipperscreen --yes)
+  if [ "$DRY_RUN" = 1 ]; then
+    args+=(--dry-run)
+  fi
+  print_offline_fallback
+  if ! bash "$script" "${args[@]}"; then
+    printf 'display-changed=no\n'
+    printf 'changed=no\n'
+    printf 'The switch back to KlipperScreen failed. The LAYR page was not required for this attempt.\n'
+    return 1
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    printf 'display-changed=no\n'
+    printf 'changed=no\n'
+    return 0
+  fi
+  printf 'display-switch: klipperscreen\n'
+  printf 'display-changed=yes\n'
+  return 0
+}
+
+switch_to_layr() {
+  local script
+  local -a args
+  if [ "$ACTIVE_DISPLAY" = "uncertain" ]; then
+    printf 'switch-refused: uncertain\n'
+    printf 'automatic-toggle: refused\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    return 1
+  fi
+  if [ "$ACTIVE_DISPLAY" = "layr" ]; then
+    printf 'already-active: layr\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    return 0
+  fi
+  if [ "$ACTIVE_DISPLAY" = "both" ] || [ "$ACTIVE_DISPLAY" = "neither" ]; then
+    printf 'display-conflict: %s\n' "$ACTIVE_DISPLAY"
+    printf 'explicit-switch: layr\n'
+  fi
+  if ! script=$(resolve_display_script); then
+    printf 'switch-refused: layr-display.sh missing\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    return 1
+  fi
+  args=(to-layr --yes)
+  if [ "$DRY_RUN" = 1 ]; then
+    args+=(--dry-run)
+  fi
+  print_offline_fallback
+  if ! bash "$script" "${args[@]}"; then
+    printf 'display-changed=no\n'
+    printf 'changed=no\n'
+    printf 'The LAYR kiosk was not left in place. KlipperScreen was not stopped, or it was restored, when the kiosk did not stay up.\n'
+    return 1
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    printf 'display-changed=no\n'
+    printf 'changed=no\n'
+    return 0
+  fi
+  printf 'display-switch: layr-kiosk\n'
+  printf 'display-changed=yes\n'
+  return 0
+}
+
+print_switch_menu() {
+  cat <<'EOF'
+Same installer, already on this Pi. Packages are not downloaded unless you choose Update or Repair.
+
+  1) Switch to LAYR
+  2) Switch to KlipperScreen
+  3) Update
+  4) Repair
+  5) Diagnostics
+  6) Exit
+EOF
+  printf 'Choosing Exit changes nothing. KlipperScreen stays installed either way.\n'
+  if [ "$ACTIVE_DISPLAY" = "both" ] || [ "$ACTIVE_DISPLAY" = "neither" ] || [ "$ACTIVE_DISPLAY" = "uncertain" ]; then
+    printf 'Status is %s, so this run will not switch the display by itself.\n' "$ACTIVE_DISPLAY"
+  fi
+}
+
+read_menu_choice() {
+  local reply
+  if [ -n "${LAYR_MENU_CHOICE:-}" ]; then
+    printf '%s\n' "$LAYR_MENU_CHOICE"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    printf 'exit\n'
+    return 0
+  fi
+  read -r -p "Choice [1-6]: " reply || {
+    printf 'exit\n'
+    return 0
+  }
+  case "$reply" in
+    1 | switch-layr) printf 'switch-layr\n' ;;
+    2 | switch-klipperscreen | klipperscreen) printf 'switch-klipperscreen\n' ;;
+    3 | update) printf 'update\n' ;;
+    4 | repair) printf 'repair\n' ;;
+    5 | diagnostics | diagnose) printf 'diagnostics\n' ;;
+    6 | exit | '') printf 'exit\n' ;;
+    *) printf 'invalid\n' ;;
+  esac
+}
+
+run_menu_diagnostics() {
+  printf 'action: diagnostics\n'
+  printf 'reinstall: no\n'
+  detect_platform
+  printf 'support=%s\n' "$PLATFORM_SUPPORT"
+  printf 'kind=%s\n' "${PLATFORM_KIND:-unknown}"
+  printf 'os=%s\n' "${PLATFORM_PRETTY:-unknown}"
+  printf 'arch=%s\n' "$PLATFORM_ARCH"
+  printf 'reason=%s\n' "$PLATFORM_REASON"
+  report_display
+  report_touch
+  probe_moonraker
+  print_controller_guidance
+  warn_moonraker_conf
+  report_services
+  print_install_status
+  printf 'changed=no\n'
+  printf 'display-changed=no\n'
+  print_offline_fallback
+}
+
+finish_noop() {
+  local how="$1"
+  printf 'menu: %s\n' "$how"
+  printf 'choice: exit\n'
+  printf 'reinstall: no\n'
+  printf 'changed=no\n'
+  printf 'display-changed=no\n'
+  print_offline_fallback
+}
+
+# Returns only when the choice is Update or Repair. Every other choice exits.
+installed_menu() {
+  local choice
+  print_switch_menu
+  if [ ! -t 0 ] && [ -z "${LAYR_MENU_CHOICE:-}" ]; then
+    finish_noop skipped
+    exit 0
+  fi
+  choice=$(read_menu_choice)
+  case "$choice" in
+    exit)
+      finish_noop exit
+      exit 0
+      ;;
+    invalid)
+      printf 'menu: invalid\n'
+      printf 'reinstall: no\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      exit 1
+      ;;
+    diagnostics)
+      run_menu_diagnostics
+      exit 0
+      ;;
+    switch-layr)
+      printf 'reinstall: no\n'
+      switch_to_layr || exit 1
+      exit 0
+      ;;
+    switch-klipperscreen)
+      printf 'reinstall: no\n'
+      switch_to_klipperscreen || exit 1
+      exit 0
+      ;;
+    update)
+      WANT_UPDATE=1
+      ASSUME_YES=1
+      HOLD_DISPLAY=1
+      printf 'action: update\n'
+      return 0
+      ;;
+    repair)
+      WANT_REPAIR=1
+      ASSUME_YES=1
+      HOLD_DISPLAY=1
+      printf 'action: repair\n'
+      return 0
+      ;;
+    *)
+      printf 'menu: invalid\n'
+      printf 'reinstall: no\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      exit 1
+      ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 Usage: bash deploy/bootstrap.sh [diagnose] [--preflight] [--dry-run] [--yes]
-                                [--switch-display] [--moonraker URL] [--port N]
+                                [--switch-display] [--switch-klipperscreen]
+                                [--update] [--repair]
+                                [--moonraker URL] [--port N]
                                 [--dist DIR] [--ref NAME] [--sample-touch]
 
-Installs LAYR in preview mode. KlipperScreen stays as it is until you confirm
-a display switch (or pass both --yes and --switch-display). The Pi is not rebooted.
+The first run installs LAYR in preview mode. KlipperScreen stays as it is until
+you confirm a display switch (or pass both --yes and --switch-display).
+
+When LAYR is already installed, the same command does not download, build, or
+reinstall. It prints the active display and a menu:
+
+  1) Switch to LAYR
+  2) Switch to KlipperScreen
+  3) Update
+  4) Repair
+  5) Diagnostics
+  6) Exit
+
+Exit changes nothing. --update and --repair are the actions that install again,
+and they leave the current display alone unless you also name a switch.
+--switch-klipperscreen does not need the LAYR page or a network connection.
+Switching calls layr-display.sh. The Pi is not rebooted.
 EOF
 }
 
@@ -1155,6 +1585,11 @@ bootstrap_main() {
   DRY_RUN=0
   ASSUME_YES=0
   SWITCH=0
+  SWITCH_KS=0
+  WANT_UPDATE=0
+  WANT_REPAIR=0
+  HOLD_DISPLAY=0
+  INSTALLED_REPORT=0
   PREFLIGHT_ONLY=0
   DO_DIAGNOSE=0
   RELOAD_KIOSK=0
@@ -1175,6 +1610,9 @@ bootstrap_main() {
       --dry-run) DRY_RUN=1; shift ;;
       --yes) ASSUME_YES=1; shift ;;
       --switch-display) SWITCH=1; shift ;;
+      --switch-klipperscreen) SWITCH_KS=1; shift ;;
+      --update) WANT_UPDATE=1; shift ;;
+      --repair) WANT_REPAIR=1; shift ;;
       --reload-kiosk) RELOAD_KIOSK=1; shift ;;
       --sample-touch) SAMPLE_TOUCH=1; shift ;;
       --moonraker) MOONRAKER="$2"; shift 2 ;;
@@ -1200,6 +1638,7 @@ bootstrap_main() {
     '' | *[!A-Za-z0-9._/-]* | *..*) fail_preflight "Refusing ref ${REF}." ;;
   esac
 
+  DIST_READY=0
   if [ -n "$DIST_ARG" ]; then
     case "$DIST_ARG" in
       /*) DIST_PATH=$DIST_ARG ;;
@@ -1208,11 +1647,51 @@ bootstrap_main() {
     if [ -d "$DIST_PATH" ]; then
       DIST_PATH=$(cd "$DIST_PATH" && pwd)
     fi
-    if [ ! -f "$DIST_PATH/index.html" ]; then
-      fail_preflight "No index.html in ${DIST_PATH}. Nothing was changed."
+    if [ -f "$DIST_PATH/index.html" ]; then
+      DIST_READY=1
     fi
   else
     DIST_PATH=""
+  fi
+
+  inspect_install
+  print_install_status
+  if [ "$SWITCH" = 1 ] && [ "$SWITCH_KS" = 1 ]; then
+    fail_preflight "Choose one display, not both. Nothing was changed."
+  fi
+  if [ "$INSTALL_STATE" = "not-installed" ] && [ "$SWITCH_KS" = 1 ] && [ "$WANT_UPDATE" != 1 ] && [ "$WANT_REPAIR" != 1 ] && [ "$SWITCH" != 1 ]; then
+    printf 'reinstall: no\n'
+    switch_to_klipperscreen || exit 1
+    exit 0
+  fi
+  if [ "$INSTALL_STATE" != "not-installed" ]; then
+    if [ "$WANT_UPDATE" = 1 ] || [ "$WANT_REPAIR" = 1 ]; then
+      if [ "$SWITCH" != 1 ] && [ "$SWITCH_KS" != 1 ]; then
+        HOLD_DISPLAY=1
+      fi
+      if [ "$WANT_REPAIR" = 1 ]; then
+        printf 'action: repair\n'
+      else
+        printf 'action: update\n'
+      fi
+      INSTALLED_REPORT=1
+    elif [ "$SWITCH" = 1 ] || [ "$SWITCH_KS" = 1 ]; then
+      printf 'reinstall: no\n'
+      if [ "$SWITCH_KS" = 1 ]; then
+        switch_to_klipperscreen || exit 1
+      else
+        switch_to_layr || exit 1
+      fi
+      exit 0
+    elif [ "$DO_DIAGNOSE" = 1 ] || [ "$PREFLIGHT_ONLY" = 1 ]; then
+      INSTALLED_REPORT=1
+    else
+      installed_menu
+      INSTALLED_REPORT=1
+    fi
+  fi
+  if [ -n "$DIST_ARG" ] && [ "$DIST_READY" != 1 ]; then
+    fail_preflight "No index.html in ${DIST_PATH}. Nothing was changed."
   fi
 
   detect_platform
@@ -1235,6 +1714,14 @@ bootstrap_main() {
 
   local memory disk disk_need mem_need
   if ! choose_source; then
+    if [ "${INSTALLED_REPORT:-0}" = 1 ] && { [ "$DO_DIAGNOSE" = 1 ] || [ "$PREFLIGHT_ONLY" = 1 ]; }; then
+      printf 'source: unavailable\n'
+      printf 'preflight=ok\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      print_offline_fallback
+      exit 0
+    fi
     fail_preflight "Could not reach GitHub to choose a LAYR release or commit. Nothing was changed."
   fi
   if [ "$SOURCE_MODE" = "build" ] || [ "$SOURCE_MODE" = "deferred" ]; then
@@ -1261,7 +1748,7 @@ bootstrap_main() {
     done
   fi
   printf 'klipperscreen: left as it is until you confirm a switch\n'
-  if [ -e "${LAYR_HOME_OVERRIDE:-$HOME/layr}/current" ]; then
+  if [ -e "$(layr_root)/current" ]; then
     printf 'install-kind: update\n'
   else
     printf 'install-kind: first\n'
@@ -1582,6 +2069,16 @@ kiosk_already_active() {
 
 maybe_switch_display() {
   local display_sh body do_switch=0
+  if [ "$SWITCH_KS" = 1 ]; then
+    switch_to_klipperscreen || exit 1
+    return 0
+  fi
+  if [ "${HOLD_DISPLAY:-0}" = 1 ] && [ "$SWITCH" != 1 ]; then
+    printf 'display-switch: no\n'
+    printf 'display-changed=no\n'
+    printf 'The current display was left as it is.\n'
+    return 0
+  fi
   if kiosk_already_active; then
     printf 'display: LAYR kiosk is already active and was not restarted\n'
     printf 'display-changed=no\n'

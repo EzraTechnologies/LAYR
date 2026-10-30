@@ -185,7 +185,9 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 A friend who already has Klipper, Moonraker, and a 5-inch touchscreen can use the one-command
 installer in [INSTALL-FOR-TESTERS.md](INSTALL-FOR-TESTERS.md). It installs LAYR only. It does not
 install AFC, Happy Hare, or a Box Turtle, and it does not edit `printer.cfg` or `moonraker.conf`.
-KlipperScreen stays up until a separate confirmation. AFC and Happy Hare stay optional and are
+KlipperScreen stays up until a separate confirmation. The same command, run again after
+LAYR is installed, shows which display is active and a switch menu. That later run does not
+download or reinstall unless you choose Update or Repair. AFC and Happy Hare stay optional and are
 mutually exclusive in one printer profile.
 
 Test on a spare card first, and test in a browser before the kiosk. A Pi 4 with a BTT HDMI7 has
