@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { integrations } from '../lib/integrations/store.svelte';
   import Icon from '../components/Icon.svelte';
   import SpoolBrowser from '../components/SpoolBrowser.svelte';
   import { MAX_EXTRUDE_MM, type PrinterCommand } from '../lib/actions/commands';
@@ -195,7 +196,15 @@
           <p class="hint">{spoolman.snapshot.message}</p>
         {/if}
       {:else}
-        <p class="hint">Spool tracking with Spoolman is planned for a later release.</p>
+        <p class="hint">
+          {#if !integrations.value.spoolman}
+            Spool tracking is disabled. Turn on Spoolman in Settings to use it.
+          {:else if spoolman.snapshot.phase === 'absent'}
+            Spoolman is not configured in Moonraker for this printer. Printing does not require tracking.
+          {:else}
+            Spoolman status is not available yet. Connect to the printer to read spool tracking.
+          {/if}
+        </p>
       {/if}
     </section>
   </div>

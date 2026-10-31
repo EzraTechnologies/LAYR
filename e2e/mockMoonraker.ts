@@ -268,6 +268,8 @@ export class MockMoonraker {
   spools: MockSpool[];
   activeSpoolId: number | null;
   failSpoolWrites = false;
+  directoryFailure: string | null = null;
+  directoryGate: Promise<void> | null = null;
   spoolReadGate: Promise<void> | null = null;
   omitComponents: boolean;
   failedComponents: string[];
@@ -329,6 +331,8 @@ export class MockMoonraker {
 
   async install(page: Page): Promise<void> {
     if (this.seedSwitches) await seedIntegrations(page, this.seedSwitches, MOONRAKER);
+    // A fixed non-secret key/token is used only by the authenticated browser-test project.
+    await page.route(/:7125\/access\/oneshot_token/, route => route.fulfill({ json: { result: 'layr-test-token' } }));
     await page.routeWebSocket(/:7125\/websocket/, (ws) => {
       if (!this.online) {
         void ws.close();
@@ -500,6 +504,8 @@ export class MockMoonraker {
         if (!this.afcHelp && !this.mmuHelp) throw new RpcFailure('Method not found: printer.gcode.help');
         return { ...(this.mmuHelp ?? {}), ...(this.afcHelp ?? {}) };
       case 'server.files.get_directory':
+        await this.directoryGate;
+        if (this.directoryFailure) throw new RpcFailure(this.directoryFailure, 500);
         return this.#directory(String(params.path ?? 'gcodes'));
       case 'server.files.metadata': {
         const file = this.files.find((f) => f.path === params.filename);

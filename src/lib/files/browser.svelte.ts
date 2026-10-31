@@ -1,3 +1,4 @@
+import { ThumbnailCache, type ThumbnailLease } from './thumbnailCache';
 import { errorMessage } from '../moonraker/client';
 import type { DirectoryResult, FileMetadata } from '../moonraker/types';
 import type { PrinterConnection } from '../printer/source';
@@ -21,19 +22,36 @@ export class FileBrowser {
   readonly #connection: PrinterConnection | null;
   #request = 0;
   #reloadTimer: ReturnType<typeof setTimeout> | null = null;
-  readonly #blobUrls = new Map<string, Promise<string>>();
+  readonly #thumbnails: ThumbnailCache;
+  #visible = false;
+  #ready = false;
+  #disposed = false;
   readonly #unsubscribe: Array<() => void> = [];
 
   constructor(connection: PrinterConnection | null) {
     this.#connection = connection;
+    this.#thumbnails = new ThumbnailCache(async path => {
+      if (!connection) throw new Error('Not connected');
+      return (await connection.fetchHttp(path)).blob();
+    });
     if (!connection) return;
     this.#unsubscribe.push(
       connection.onReady(() => {
-        if (this.loaded) void this.load();
+        this.#ready = true;
+        if ((this.#visible || this.loaded) && !this.loading) void this.load();
+      }),
+      connection.onTransport(state => {
+        if (state === 'connected') return;
+        this.#ready = false;
+        this.#request += 1;
+        this.loading = false;
+        if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
+        this.#reloadTimer = null;
+        this.#thumbnails.clear();
       }),
       connection.onFilelistChanged((change) => {
         if (change.root !== null && change.root !== 'gcodes') return;
-        if (!this.loaded) return;
+        if (!this.#ready || (!this.#visible && !this.loaded)) return;
         // Uploads and slicer metadata scans arrive in bursts; refresh once.
         if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
         this.#reloadTimer = setTimeout(() => {
@@ -44,21 +62,37 @@ export class FileBrowser {
     );
   }
 
+  /** One initial attempt per Files visit. Readiness events own reconnect recovery. */
+  enter(): () => void {
+    this.#visible = true;
+    if (this.#ready && !this.loaded && !this.loading) void this.load();
+    return () => { this.#visible = false; };
+  }
+
   dispose(): void {
+    this.#disposed = true;
+    this.#request += 1;
     this.#unsubscribe.forEach((u) => u());
     if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
-    for (const url of this.#blobUrls.values()) void url.then((u) => URL.revokeObjectURL(u)).catch(() => {});
-    this.#blobUrls.clear();
+    this.#thumbnails.dispose();
   }
 
   open(dir: string): Promise<void> {
+    if (dir !== this.dir) {
+      this.loaded = false;
+      this.files = [];
+      this.dirs = [];
+    }
     this.dir = dir;
     return this.load();
   }
 
   async load(): Promise<void> {
     const connection = this.#connection;
-    if (!connection) return;
+    if (!connection || this.#disposed) return;
+    if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
+    this.#reloadTimer = null;
+    this.#thumbnails.clear();
     const request = ++this.#request;
     const dir = this.dir;
     this.loading = true;
@@ -108,20 +142,11 @@ export class FileBrowser {
    * key the image is fetched with the `X-Api-Key` header and shown through a blob URL, because `<img>` cannot
    * send headers.
    */
-  thumbnailUrl(path: string, cacheKey: number | null): Promise<string> {
+  thumbnail(path: string, cacheKey: number | null): ThumbnailLease {
     const connection = this.#connection;
-    if (!connection) return Promise.reject(new Error('Not connected'));
+    if (!connection) throw new Error('Not connected');
     const urlPath = gcodesFileUrlPath(path, cacheKey);
-    if (!connection.hasApiKey) return Promise.resolve(connection.httpUrl(urlPath));
-    let pending = this.#blobUrls.get(urlPath);
-    if (!pending) {
-      pending = connection
-        .fetchHttp(urlPath)
-        .then((r) => r.blob())
-        .then((blob) => URL.createObjectURL(blob));
-      pending.catch(() => this.#blobUrls.delete(urlPath));
-      this.#blobUrls.set(urlPath, pending);
-    }
-    return pending;
+    if (!connection.hasApiKey) return { url: Promise.resolve(connection.httpUrl(urlPath)), release: () => {} };
+    return this.#thumbnails.acquire(urlPath);
   }
 }

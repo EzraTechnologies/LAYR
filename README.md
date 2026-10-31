@@ -151,6 +151,14 @@ On first launch the dashboard asks for a Moonraker URL. You can also open
 | `npm run verify` | check + test + build |
 
 Run `npx playwright install chromium` once before the first e2e run.
+Authenticated thumbnail lifecycle tests run separately with
+`npx playwright test --config playwright.auth.config.ts`. That project builds a temporary bundle
+with a fixed non-secret fixture key and talks only to mocked Moonraker.
+
+Authenticated thumbnails use a reference-counted LRU cache targeting 32 entries and 8 MiB of blob
+data. Mounted images retain ownership even if their working set exceeds that budget; unused URLs
+are evicted first. Thumbnail replacement and unmount release ownership after the old image leaves
+the DOM. Reconnects and file-list refreshes invalidate reusable entries without revoking active URLs.
 
 ## Configuration
 
