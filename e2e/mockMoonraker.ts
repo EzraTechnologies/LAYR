@@ -264,6 +264,8 @@ export class MockMoonraker {
   gcodeStore: Array<{ message: string; time: number; type: string }>;
   /** When false, new WebSocket connections are closed immediately. */
   online = true;
+  readonly silentMethods = new Set<string>();
+  socketCount = 0;
   spoolmanMode: SpoolmanMode;
   spools: MockSpool[];
   activeSpoolId: number | null;
@@ -338,6 +340,7 @@ export class MockMoonraker {
         void ws.close();
         return;
       }
+      this.socketCount += 1;
       this.#ws = ws;
       ws.onMessage((raw) => void this.#handle(ws, String(raw)));
     });
@@ -416,6 +419,7 @@ export class MockMoonraker {
   async #handle(ws: WebSocketRoute, raw: string): Promise<void> {
     const msg = JSON.parse(raw) as { id: number; method: string; params?: Record<string, unknown> };
     this.calls.push({ method: msg.method, params: msg.params });
+    if (this.silentMethods.has(msg.method)) return;
     const reply = (result: unknown) => ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
     const error = (message: string, code = 400) => ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code, message } }));
     try {

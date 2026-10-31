@@ -140,4 +140,26 @@ describe('authenticated thumbnail ownership', () => {
     active.release();
     expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith(url);
   });
+
+  it('aborts a pending download only after its final owner releases it', async () => {
+    const pending = deferred<Blob>(); let signal!: AbortSignal;
+    const cache = new ThumbnailCache((_key, current) => { signal = current; return pending.promise; });
+    const a = cache.acquire('a'); const b = cache.acquire('a');
+    await Promise.resolve();
+    a.release(); expect(signal.aborted).toBe(false);
+    b.release(); expect(signal.aborted).toBe(true);
+    pending.resolve(new Blob(['late']));
+    await expect(a.url).rejects.toThrow('released');
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('aborts pending downloads during disposal without revoking displayed images', async () => {
+    const pending = deferred<Blob>(); let signal!: AbortSignal;
+    const cache = new ThumbnailCache((_key, current) => { signal = current; return pending.promise; });
+    const a = cache.acquire('a'); await Promise.resolve();
+    cache.dispose(); expect(signal.aborted).toBe(true);
+    a.release(); pending.resolve(new Blob(['late']));
+    await expect(a.url).rejects.toThrow('released');
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
 });

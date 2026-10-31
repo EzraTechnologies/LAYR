@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { prepareCommand } from '../src/lib/actions/commands';
 import { Backoff } from '../src/lib/moonraker/backoff';
 import { LiveSource } from '../src/lib/printer/liveSource';
 import type { PrinterState } from '../src/lib/printer/model';
@@ -10,6 +11,25 @@ const profile = { id: 'p1', name: '', moonrakerUrl: 'http://pi:7125', apiKey: nu
 describe('LiveSource', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+
+  it('clears stale readings and disables controls after a silent socket is detected', async () => {
+    const server = new FakeMoonraker();
+    const states: PrinterState[] = [];
+    const source = new LiveSource(profile, { client: {
+      createSocket: server.createSocket, heartbeatIntervalMs: 200, heartbeatTimeoutMs: 100,
+      backoff: new Backoff({ initialMs: 100, maxMs: 800, jitter: 0 }),
+    } });
+    source.start(state => states.push(state)); await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.extruder?.temperature).toBe(25);
+    server.silent.add('server.info'); await vi.advanceTimersByTimeAsync(300);
+    expect(states.at(-1)?.status).toBe('disconnected');
+    expect(states.at(-1)?.extruder?.temperature ?? null).toBeNull();
+    expect(prepareCommand({ kind: 'home', axes: [] }, states.at(-1)!)).toMatchObject({ ok: false, message: 'Printer is offline' });
+    server.silent.clear(); await vi.advanceTimersByTimeAsync(100);
+    expect(states.at(-1)?.status).toBe('ready');
+    expect(states.at(-1)?.extruder?.temperature).toBe(25);
+    source.stop();
+  });
 
   function start(server: FakeMoonraker) {
     const states: PrinterState[] = [];

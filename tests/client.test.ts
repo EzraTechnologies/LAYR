@@ -423,7 +423,7 @@ describe('MoonrakerClient', () => {
     client.start();
     await flush();
     expect(fetchMock).toHaveBeenCalledWith('http://printer.local:7125/access/oneshot_token', {
-      headers: { 'X-Api-Key': 'secret' },
+      headers: { 'X-Api-Key': 'secret' }, signal: expect.any(AbortSignal),
     });
     expect(server.last.url).toBe('ws://printer.local:7125/websocket?token=tok123');
     client.stop();

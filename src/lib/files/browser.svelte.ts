@@ -30,9 +30,9 @@ export class FileBrowser {
 
   constructor(connection: PrinterConnection | null) {
     this.#connection = connection;
-    this.#thumbnails = new ThumbnailCache(async path => {
+    this.#thumbnails = new ThumbnailCache(async (path, signal) => {
       if (!connection) throw new Error('Not connected');
-      return (await connection.fetchHttp(path)).blob();
+      return (await connection.fetchHttp(path, signal)).blob();
     });
     if (!connection) return;
     this.#unsubscribe.push(

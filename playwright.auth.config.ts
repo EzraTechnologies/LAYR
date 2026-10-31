@@ -9,7 +9,7 @@ export default {
     ...project,
     name: 'authenticated-chromium',
     testIgnore: [],
-    testMatch: '**/thumbnail-cache.spec.ts',
+    testMatch: ['**/thumbnail-cache.spec.ts', '**/connection-http.spec.ts'],
   })),
   webServer: {
     command: 'npm run build -- --outDir /tmp/layr-auth-e2e --emptyOutDir && npx vite preview --outDir /tmp/layr-auth-e2e --port 4175 --strictPort --host 127.0.0.1',

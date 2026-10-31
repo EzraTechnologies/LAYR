@@ -15,7 +15,8 @@ for (const vp of VIEWPORTS) {
       const reads = () => mock.calls.filter(call => call.method === 'server.files.get_directory').length;
       expect(reads()).toBe(1);
       await page.clock.install();
-      await page.clock.fastForward(30_000);
+      // Keep this Files-only clock jump below the health-probe cadence; liveness has its own tests.
+      await page.clock.fastForward(14_000);
       expect(reads()).toBe(1);
       await expect(page.getByText('File service unavailable', { exact: true })).toBeVisible();
       await expectCleanLayout(page);
