@@ -51,6 +51,8 @@ export class SpoolmanSession implements SpoolmanService {
   #io: SpoolmanIo;
   #epoch = 0;
   #generation = 0;
+  #activeRevision = 0;
+  #activeNotice: { spoolId: number | null } | null = null;
   #probed = false;
   #seen = false;
   /** False after Settings turns Spoolman off, until `activate` runs again. */
@@ -78,6 +80,7 @@ export class SpoolmanSession implements SpoolmanService {
    */
   suspend(): void {
     this.#active = false;
+    this.#activeNotice = null;
     this.#epoch += 1;
     this.#generation += 1;
     this.#probed = false;
@@ -87,6 +90,7 @@ export class SpoolmanSession implements SpoolmanService {
 
   /** Drops the catalogue. Used when Moonraker disconnects or the printer URL changes. */
   dropConnection(): void {
+    this.#activeNotice = null;
     this.#epoch += 1;
     this.#generation += 1;
     this.#probed = false;
@@ -134,6 +138,7 @@ export class SpoolmanSession implements SpoolmanService {
     if (!this.#active || !this.snapshot.tracked || this.snapshot.phase === 'absent' || this.snapshot.phase === 'failed') return;
     if (notice.kind === 'link') {
       if (!notice.connected) {
+        this.#activeNotice = null;
         this.#generation += 1;
         this.#publish(this.#blank('offline', true, OFFLINE_MSG));
         return;
@@ -141,7 +146,9 @@ export class SpoolmanSession implements SpoolmanService {
       void this.refresh();
       return;
     }
-    if (this.snapshot.phase !== 'ready' || !notice.known) return;
+    if (!notice.known || (this.snapshot.phase !== 'ready' && this.snapshot.phase !== 'loading')) return;
+    this.#activeRevision += 1;
+    this.#activeNotice = { spoolId: notice.spoolId };
     const inList = notice.spoolId != null && this.snapshot.spools.some((spool) => spool.id === notice.spoolId);
     this.#publish({
       ...this.snapshot,
@@ -157,6 +164,7 @@ export class SpoolmanSession implements SpoolmanService {
     if (!call) return;
     const epoch = this.#epoch;
     const gen = ++this.#generation;
+    const activeRevision = this.#activeRevision;
     this.#publish({ ...this.#blank('loading', true, 'Reading Spoolman…'), spools: [] });
     try {
       const status = parseStatus(await call('server.spoolman.status'));
@@ -175,28 +183,34 @@ export class SpoolmanSession implements SpoolmanService {
         this.#fail(epoch, gen, 'error', active.error || ERROR_MSG);
         return;
       }
+      // Notifications received during this refresh take precedence over its read.
+      // Re-evaluate after every await, including an optional detail lookup.
+      const latestActiveId = () => this.#activeRevision !== activeRevision && this.#activeNotice
+        ? this.#activeNotice.spoolId : active.spoolId;
       const spools = await this.#loadSpools(call, epoch, gen);
       if (!spools || !this.#current(epoch, gen)) return;
       let catalogue = spools;
-      if (active.spoolId != null && !catalogue.some((spool) => spool.id === active.spoolId)) {
-        const extra = await this.#loadOne(call, epoch, gen, active.spoolId);
+      const detailId = latestActiveId();
+      if (detailId != null && !catalogue.some((spool) => spool.id === detailId)) {
+        const extra = await this.#loadOne(call, epoch, gen, detailId);
         if (extra === undefined || !this.#current(epoch, gen)) return;
         if (extra) catalogue = [extra, ...catalogue.filter((spool) => spool.id !== extra.id)];
       }
-      const known = active.spoolId != null && catalogue.some((spool) => spool.id === active.spoolId);
+      const activeId = latestActiveId();
+      const known = activeId != null && catalogue.some((spool) => spool.id === activeId);
       const message =
-        active.spoolId == null
+        activeId == null
           ? 'No active spool.'
           : known
             ? ''
-            : `Active spool ${active.spoolId} is not in the loaded catalogue. Quantity is not shown.`;
+            : `Active spool ${activeId} is not in the loaded catalogue. Quantity is not shown.`;
       this.#publish({
         printerId: this.#io.printerId,
         endpoint: this.#io.endpoint,
         phase: 'ready',
         tracked: true,
         message,
-        activeId: active.spoolId,
+        activeId,
         activeKnown: true,
         spools: catalogue,
       });
@@ -242,7 +256,8 @@ export class SpoolmanSession implements SpoolmanService {
    * Sets the active spool only after the gateway asks for confirmation and `confirm` accepts it.
    * A preview that is already `ok` is refused, so a missing confirmation cannot write.
    */
-  async setActiveSpool(printerId: string, spoolId: number): Promise<void> {
+  async setActiveSpool(printerId: string, spoolId: number, isCurrent: () => boolean = () => true): Promise<void> {
+    const epoch = this.#epoch;
     this.#assertPrinter(printerId);
     const id = spoolIdValue(spoolId);
     if (id === null) throw new Error('That spool id cannot be used');
@@ -254,6 +269,7 @@ export class SpoolmanSession implements SpoolmanService {
     if (preview.status === 'ok') throw new Error('Refusing a spool write that skipped confirmation');
     if (preview.status === 'needs_confirmation') {
       if (!(await confirm(preview.confirm))) throw new SpoolmanCancelled();
+      if (!this.#active || epoch !== this.#epoch || !isCurrent()) throw new SpoolmanCancelled();
       const outcome = await execute(command, { confirmed: true });
       if (outcome.status !== 'ok') throw new Error(outcomeMessage(outcome));
       return;

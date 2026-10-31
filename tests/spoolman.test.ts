@@ -104,6 +104,79 @@ describe('Spoolman parsing', () => {
 });
 
 describe('Spoolman session', () => {
+  for (const stage of ['status', 'active', 'catalogue', 'detail'] as const) {
+    for (const spoolId of [2, null]) {
+      it(`keeps the latest active notification during ${stage} (id ${spoolId})`, async () => {
+        let release!: () => void;
+        let reached!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const waiting = new Promise<void>(resolve => { reached = resolve; });
+        const calls: string[] = [];
+        const session = new SpoolmanSession(scripted(async (method, params) => {
+          calls.push(method);
+          const part = method === 'server.spoolman.status' ? 'status'
+            : method === 'server.spoolman.get_spool_id' ? 'active'
+            : params?.path === '/v1/spool' ? 'catalogue' : 'detail';
+          if (part === stage) { reached(); await blocked; }
+          if (part === 'status') return { spoolman_connected: true };
+          if (part === 'active') return { spool_id: stage === 'detail' ? 99 : 1 };
+          return { response: stage === 'detail' ? [] : [raw(1), raw(2)] };
+        }));
+        const refresh = session.refresh();
+        await waiting;
+        session.onNotice({ kind: 'active', known: true, spoolId: 3 });
+        session.onNotice({ kind: 'active', known: true, spoolId });
+        // A malformed/unknown notice must not erase the authoritative one.
+        session.onNotice({ kind: 'active', known: false, spoolId: 4 });
+        release();
+        await refresh;
+        expect(session.snapshot).toMatchObject({ phase: 'ready', activeKnown: true, activeId: spoolId });
+        expect(calls.filter(method => method === 'server.spoolman.status')).toHaveLength(1);
+        expect(calls.filter(method => method === 'server.spoolman.get_spool_id')).toHaveLength(1);
+      });
+    }
+  }
+
+  it('does not carry a notification across connection loss or override a later fresh read', async () => {
+    const session = new SpoolmanSession(scripted(async method => {
+      if (method === 'server.spoolman.status') return { spoolman_connected: true };
+      if (method === 'server.spoolman.get_spool_id') return { spool_id: 1 };
+      return { response: [raw(1), raw(2)] };
+    }));
+    await session.refresh();
+    session.onNotice({ kind: 'active', known: true, spoolId: 2 });
+    expect(session.snapshot.activeId).toBe(2);
+    await session.refresh();
+    expect(session.snapshot.activeId).toBe(1);
+    session.dropConnection();
+    session.onNotice({ kind: 'active', known: true, spoolId: 2 });
+    await session.refresh();
+    expect(session.snapshot.activeId).toBe(1);
+  });
+
+  it('keeps error and recovery behaviour after a notification during a failed refresh', async () => {
+    let reject!: (reason: Error) => void;
+    let reached!: () => void;
+    const waiting = new Promise<void>(resolve => { reached = resolve; });
+    let fail = true;
+    const session = new SpoolmanSession(scripted(async method => {
+      if (method === 'server.spoolman.status') return { spoolman_connected: true };
+      if (method === 'server.spoolman.get_spool_id') return { spool_id: 1 };
+      if (!fail) return { response: [raw(1)] };
+      reached();
+      return new Promise((_, no) => { reject = no; });
+    }));
+    const refresh = session.refresh();
+    await waiting;
+    session.onNotice({ kind: 'active', known: true, spoolId: 2 });
+    reject(new Error('Catalogue unavailable'));
+    await refresh;
+    expect(session.snapshot).toMatchObject({ phase: 'error', activeKnown: false, spools: [] });
+    fail = false;
+    await session.refresh();
+    expect(session.snapshot).toMatchObject({ phase: 'ready', activeKnown: true, activeId: 1 });
+  });
+
   it('ignores a stale response after the printer disconnects', async () => {
     let release: (value: unknown) => void = () => {};
     const session = new SpoolmanSession(scripted(() => new Promise((resolve) => {
@@ -287,6 +360,8 @@ describe('Spoolman session', () => {
     await expect(session.setActiveSpool('p1', 8)).rejects.toBeInstanceOf(SpoolmanCancelled);
     expect(calls).toEqual([]);
     accept = true;
+    await expect(session.setActiveSpool('p1', 8, () => false)).rejects.toBeInstanceOf(SpoolmanCancelled);
+    expect(calls).toEqual([]);
     await session.setActiveSpool('p1', 8);
     expect(calls).toEqual([{ method: 'server.spoolman.post_spool_id', params: { spool_id: 8 } }]);
 

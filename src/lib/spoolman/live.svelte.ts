@@ -87,8 +87,8 @@ export class SpoolmanLive {
     return this.#session.refresh();
   }
 
-  select(spool: SpoolSummary): Promise<void> {
-    return this.#session.setActiveSpool(this.snapshot.printerId, spool.id).then(() => this.#session.refresh());
+  select(spool: SpoolSummary, isCurrent?: () => boolean): Promise<void> {
+    return this.#session.setActiveSpool(this.snapshot.printerId, spool.id, isCurrent).then(() => this.#session.refresh());
   }
 
   clearAfterUnload(outcome: UnloadOutcome): Promise<'cleared' | 'kept' | 'skipped'> {

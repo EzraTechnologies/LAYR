@@ -16,6 +16,14 @@ and a confirmed choice can change it. The active spool is cleared only after an 
 accepted. Printers without Spoolman keep the previous Extrude screen. The native Qt controller has
 its own Filament screen for the same rules. Neither UI has been tested on a Pi.
 
+When starting a file with Spoolman enabled and a verified empty active-spool selection, Files offers
+Select spool, Print without tracking, or Cancel. Selecting a spool only updates tracking and returns
+to the normal print confirmation; it never loads filament or starts the print by itself. If spool
+status cannot be verified, Files explains that uncertainty and allows continuing without verified
+tracking. Leaving Files, closing the spool browser, losing the printer connection, or a file being
+removed or replaced cancels the pending print request. With Spoolman switched off, the ordinary
+print confirmation is unchanged.
+
 | 1024×600 | 800×480 |
 | --- | --- |
 | ![Printing, 1024×600](docs/screenshots/1024x600-home-printing.png) | ![Printing, 800×480](docs/screenshots/800x480-home-printing.png) |

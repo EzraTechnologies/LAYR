@@ -267,6 +267,8 @@ export class MockMoonraker {
   spoolmanMode: SpoolmanMode;
   spools: MockSpool[];
   activeSpoolId: number | null;
+  failSpoolWrites = false;
+  spoolReadGate: Promise<void> | null = null;
   omitComponents: boolean;
   failedComponents: string[];
   failScripts: string[];
@@ -451,6 +453,7 @@ export class MockMoonraker {
         return body;
       }
       case 'server.spoolman.status':
+        await this.spoolReadGate;
         if (this.spoolmanMode === 'absent') throw new RpcFailure('Method not found', -32601);
         if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
         return {
@@ -463,6 +466,7 @@ export class MockMoonraker {
         if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
         return { spool_id: this.activeSpoolId };
       case 'server.spoolman.post_spool_id': {
+        if (this.failSpoolWrites) throw new RpcFailure('Spool selection rejected', 500);
         if (this.spoolmanMode === 'unauthorized') throw new RpcFailure('Unauthorized', 401);
         if (this.spoolmanMode !== 'ready') throw new RpcFailure('Spoolman server not available', 503);
         const id = params.spool_id;

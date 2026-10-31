@@ -68,10 +68,13 @@ export class Ui {
     return group !== null && this.busyGroups.includes(group);
   }
 
-  async run(command: PrinterCommand, options: { quietSuccess?: boolean } = {}): Promise<CommandOutcome> {
+  async run(command: PrinterCommand, options: { quietSuccess?: boolean; isCurrent?: () => boolean } = {}): Promise<CommandOutcome> {
+    const abandoned = (): CommandOutcome => ({ status: 'blocked', message: 'This request is no longer current. Choose the file again.' });
+    if (options.isCurrent && !options.isCurrent()) return abandoned();
     let outcome = await this.#gateway.execute(command);
     if (outcome.status === 'needs_confirmation') {
       if (!(await this.confirm(outcome.confirm))) return outcome;
+      if (options.isCurrent && !options.isCurrent()) return abandoned();
       if (command.kind === 'gcode' || command.kind === 'macro' || command.kind === 'afc') {
         const text =
           command.kind === 'gcode' ? command.script.trim() : command.kind === 'macro' ? command.name : afcScript(command.action, command.lane);

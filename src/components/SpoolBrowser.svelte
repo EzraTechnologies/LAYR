@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { app } from '../lib/context';
   import { cssColor, matchesSpool, materialText, quantityText, sortSpools } from '../lib/spoolman/api';
   import { SpoolmanCancelled } from '../lib/spoolman/session';
@@ -8,14 +9,18 @@
   interface Props {
     open: boolean;
     onClose: () => void;
+    onSelected?: () => void;
   }
 
-  let { open, onClose }: Props = $props();
+  let { open, onClose, onSelected }: Props = $props();
 
   const { ui, spoolman, store } = app();
   const printerState = store.state;
 
   let query = $state('');
+  let choosing = $state(false);
+  let disposed = false;
+  onDestroy(() => { disposed = true; });
   let material = $state('');
 
   const locked = $derived(printerState.status === 'printing' || printerState.status === 'paused');
@@ -49,14 +54,20 @@
   }
 
   async function choose(spool: SpoolSummary) {
-    if (locked || spool.archived || spool.id === spoolman.snapshot.activeId) return;
+    if (choosing || locked || spool.archived || spool.id === spoolman.snapshot.activeId) return;
+    choosing = true;
     try {
-      await spoolman.select(spool);
+      await spoolman.select(spool, () => !disposed && open);
+      if (disposed || !open) return;
       ui.toast('ok', `Active spool set to ${spool.name}`);
+      if (spoolman.snapshot.phase === 'ready' && spoolman.snapshot.activeKnown && spoolman.snapshot.activeId === spool.id) onSelected?.();
+      else if (onSelected) ui.toast('warn', 'Spool selection could not be verified', 'Refresh the catalogue before continuing.');
     } catch (error) {
       if (error instanceof SpoolmanCancelled) return;
       const message = error instanceof Error ? error.message : 'Spoolman did not accept the spool';
       ui.toast('error', 'Could not set the active spool', message);
+    } finally {
+      choosing = false;
     }
   }
 </script>
@@ -110,7 +121,7 @@
               class="row"
               class:active
               aria-current={active ? 'true' : undefined}
-              disabled={!ready || locked || spool.archived || active}
+              disabled={choosing || !ready || locked || spool.archived || active}
               onclick={() => choose(spool)}
             >
               <span class="swatch" class:empty={!color} style:background={color ?? 'transparent'} aria-hidden="true"></span>
