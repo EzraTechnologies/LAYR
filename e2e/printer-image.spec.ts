@@ -1,7 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { integrationScopeKey } from '../src/lib/integrations/preferences';
 import { LIMITS } from '../src/lib/printerImage/policy';
 import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
+import { encodePng } from './png';
 import { MockMoonraker, MOONRAKER } from './mockMoonraker';
 import { choosePrinterPhoto, PRINTER_SCOPE, storedPrinterPhoto } from './printerImage';
 
@@ -12,14 +13,40 @@ async function savePhoto(page: import('@playwright/test').Page) {
   await choosePrinterPhoto(page);
 }
 
+async function expectOriginalIdle(page: Page) {
+  const card = page.locator('.job');
+  await expect(card.getByRole('heading', { name: 'Ready to print' })).toBeVisible();
+  await expect(card.getByText('No job is loaded. Choose a file to start a print.', { exact: true })).toBeVisible();
+  await expect(card.getByRole('img')).toHaveCount(0);
+  const geometry = await card.evaluate(el => {
+    const rect = (selector: string) => el.querySelector(selector)!.getBoundingClientRect();
+    const idle = rect('.idle');
+    const icon = rect('.idle-icon');
+    const heading = rect('h2');
+    const text = rect('.idle p');
+    const button = rect('.idle button');
+    return {
+      width: icon.width, height: icon.height,
+      centers: [icon, heading, text, button].map(r => r.x + r.width / 2 - (idle.x + idle.width / 2)),
+      verticalCenter: (icon.top + button.bottom) / 2 - (idle.top + idle.height / 2),
+      ordered: icon.bottom <= heading.top && heading.bottom <= text.top && text.bottom <= button.top,
+    };
+  });
+  expect(geometry.width).toBe(72);
+  expect(geometry.height).toBe(72);
+  expect(geometry.ordered).toBe(true);
+  for (const offset of geometry.centers) expect(Math.abs(offset)).toBeLessThan(1);
+  expect(Math.abs(geometry.verticalCenter)).toBeLessThan(1);
+  await expectCleanLayout(page);
+}
+
 for (const vp of VIEWPORTS) {
   test.describe(`printer image ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     test('idle shows the photo with Ready to print and Browse files', async ({ page }) => {
       const mock = await openWithMock(page, 'home', { scenario: 'ready', homed: true });
-      const placeholder = await page.getByRole('img', { name: 'Generic printer placeholder' }).boundingBox();
-      expect(placeholder?.height ?? 0).toBeGreaterThan(120);
+      await expectOriginalIdle(page);
       await expect(page.getByRole('heading', { name: 'Ready to print' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Browse files' })).toBeVisible();
       await expectCleanLayout(page);
@@ -34,6 +61,82 @@ for (const vp of VIEWPORTS) {
       await expectCleanLayout(page);
       expect(mock.controlCalls).toEqual([]);
     });
+
+    test('no photo restores the original idle layout and Browse files navigation', async ({ page }) => {
+      const mock = await openWithMock(page, 'home', { scenario: 'ready', homed: true });
+      await expectOriginalIdle(page);
+      await page.getByRole('button', { name: 'Browse files' }).click();
+      await expect(page).toHaveURL(/#\/files$/);
+      expect(mock.controlCalls).toEqual([]);
+    });
+
+    test('removing a photo restores the original idle layout after reload', async ({ page }) => {
+      const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+      await choosePrinterPhoto(page);
+      await page.getByRole('button', { name: 'Remove photo' }).click();
+      await expect(page.getByRole('button', { name: 'Remove photo' })).toHaveCount(0);
+      expect(await storedPrinterPhoto(page)).toBeNull();
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expectOriginalIdle(page);
+      await page.reload();
+      await expectOriginalIdle(page);
+      expect(mock.controlCalls).toEqual([]);
+    });
+
+    test('a failed photo load falls back to original idle and a replacement photo recovers', async ({ page }) => {
+      const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+      await choosePrinterPhoto(page);
+      // Revoke the actual blob URL before Home mounts: exercise the native image error event.
+      await page.getByRole('img', { name: 'Printer photo' }).evaluate(img => URL.revokeObjectURL((img as HTMLImageElement).src));
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expectOriginalIdle(page);
+      expect(await storedPrinterPhoto(page)).not.toBeNull();
+      await savePhoto(page);
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+      await expectCleanLayout(page);
+      expect(mock.controlCalls).toEqual([]);
+    });
+
+    for (const shape of [
+      { name: 'portrait', width: 300, height: 900 },
+      { name: 'landscape', width: 900, height: 600 },
+      { name: 'panoramic', width: 2400, height: 300 },
+    ]) {
+      test(`${shape.name} photo fits the idle container without cropping or distortion`, async ({ page }) => {
+        const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+        await page.locator('#printer-image-file').setInputFiles({
+          name: `${shape.name}.png`, mimeType: 'image/png',
+          buffer: encodePng(shape.width, shape.height, () => [62, 224, 240, 255]),
+        });
+        await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+        const saved = await storedPrinterPhoto(page);
+        expect(saved).not.toBeNull();
+        expect(saved!.width / saved!.height).toBeCloseTo(shape.width / shape.height, 1);
+        await page.getByRole('link', { name: 'Home', exact: true }).click();
+        const photo = page.getByRole('img', { name: 'Printer photo' });
+        await expect(photo).toBeVisible();
+        await expect.poll(() => photo.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+        const fit = await photo.evaluate(el => {
+          const img = el as HTMLImageElement;
+          const box = img.getBoundingClientRect();
+          const frame = img.parentElement!.getBoundingClientRect();
+          const style = getComputedStyle(img);
+          return { fit: style.objectFit, position: style.objectPosition,
+            width: box.width, height: box.height, frameWidth: frame.width, frameHeight: frame.height,
+            ratio: img.naturalWidth / img.naturalHeight };
+        });
+        expect(fit.fit).toBe('contain');
+        expect(fit.position).toBe('50% 50%');
+        expect(fit.width).toBeGreaterThan(100);
+        expect(fit.height).toBeGreaterThan(120);
+        expect(fit.width).toBeLessThanOrEqual(fit.frameWidth);
+        expect(fit.height).toBeLessThanOrEqual(fit.frameHeight);
+        expect(fit.ratio).toBeCloseTo(shape.width / shape.height, 1);
+        await expectCleanLayout(page);
+        expect(mock.controlCalls).toEqual([]);
+      });
+    }
 
     test('a finished job shows the printer photo instead of the old file thumbnail', async ({ page }) => {
       const mock = await openWithMock(page, 'settings', { scenario: 'complete' });

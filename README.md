@@ -47,9 +47,10 @@ They are not a Box Turtle or any other physical unit.
   volumetric flow (mm³/s), nozzle, bed and chamber (when that sensor exists), fans, and the
   latest console alert. Speed and flow are Klipper `motion_report` values, not the M220/M221
   percentages. Those percentages sit behind the speed and flow readouts.
-  While the printer is idle, finished, or standing by, the preview is a photo chosen in Settings,
-  or a generic printer mark when none is set. Printing and paused keep the G-code thumbnail, and use
-  that photo only when the file has none.
+  With no job loaded, Home shows the original centered Ready to print screen unless a usable photo
+  is chosen in Settings. Removing a photo or a photo failing to load restores that screen. Finished
+  jobs keep their summary with the photo or a generic printer mark. Printing and paused keep the
+  G-code thumbnail, and use the photo only when the file has none.
 - **Files**: G-code folders, sort, metadata, thumbnails (including nested paths), start and delete.
   Both ask before acting. Files without a thumbnail show a placeholder. The screen can stay on the
   compact list (the default, including on profiles saved before this choice existed) or switch to

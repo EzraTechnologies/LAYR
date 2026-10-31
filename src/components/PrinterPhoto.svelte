@@ -2,11 +2,12 @@
   interface Props {
     /** Blob URL created for this printer, or null for the generic placeholder. */
     src: string | null;
+    onError?: () => void;
     /** Square edge in px. Omit to fill the parent. */
     size?: number;
   }
 
-  let { src, size }: Props = $props();
+  let { src, size, onError }: Props = $props();
 
   const safeSrc = $derived(src?.startsWith('blob:') ? src : null);
   let brokenSrc = $state<string | null>(null);
@@ -26,7 +27,10 @@
       alt={label}
       draggable="false"
       decoding="async"
-      onerror={() => (brokenSrc = safeSrc)}
+      onerror={() => {
+        brokenSrc = safeSrc;
+        onError?.();
+      }}
     />
   {:else}
     <div class="generic" role="img" aria-label={label}>
@@ -61,6 +65,8 @@
   }
 
   img {
+    min-width: 0;
+    min-height: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;
