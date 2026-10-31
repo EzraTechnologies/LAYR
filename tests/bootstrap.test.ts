@@ -1312,10 +1312,18 @@ describe('bootstrap safety helpers', () => {
 });
 
 describe('display switch guards', () => {
-  function displayEnv(root: string, options: { units: string; active: string; enabled: string; curlFail?: boolean; withCage?: boolean }) {
+  function displayEnv(root: string, options: { units: string; active: string; enabled: string; curlFail?: boolean; withCage?: boolean; withCurl?: boolean; withChromium?: boolean; startFail?: boolean }) {
     const bin = path.join(root, 'bin');
     const log = path.join(root, 'systemctl.log');
     mkdirSync(bin, { recursive: true });
+    // Missing dependencies must stay missing on a Pi that has Cage/Chromium installed.
+    // Allow only the shell utilities needed by layr-display.sh and lib.sh; application
+    // dependencies and service operations below are always explicit fixtures.
+    for (const name of ['bash', 'awk', 'cat', 'date', 'dirname', 'grep', 'mkdir', 'rm', 'sed', 'sleep', 'tail']) {
+      const tool = execFileSync('bash', ['-c', 'command -v "$1"', 'bash', name], { encoding: 'utf8' }).trim();
+      symlinkSync(tool, path.join(bin, name));
+    }
+    writeExe(path.join(bin, 'id'), '#!/bin/sh\n[ "$1" = "-u" ] || exit 1\nprintf "1000\\n"\n');
     writeExe(
       path.join(bin, 'systemctl'),
       `#!/bin/sh
@@ -1347,13 +1355,16 @@ case "$verb" in
     esac
     exit 1
     ;;
+  enable)
+    if [ "$LAYR_KIOSK_START_FAIL" = 1 ] && [ "$*" = "--now layr-kiosk.service" ]; then exit 1; fi
+    ;;
 esac
 exit 0
 `,
     );
     writeExe(path.join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n');
-    writeExe(path.join(bin, 'curl'), `#!/bin/sh\nexit ${options.curlFail ? 1 : 0}\n`);
-    writeExe(path.join(bin, 'chromium'), '#!/bin/sh\nexit 0\n');
+    if (options.withCurl !== false) writeExe(path.join(bin, 'curl'), `#!/bin/sh\nexit ${options.curlFail ? 1 : 0}\n`);
+    if (options.withChromium !== false) writeExe(path.join(bin, 'chromium'), '#!/bin/sh\nexit 0\n');
     if (options.withCage !== false) writeExe(path.join(bin, 'cage'), '#!/bin/sh\nexit 0\n');
     const home = path.join(root, 'home');
     mkdirSync(home, { recursive: true });
@@ -1362,11 +1373,12 @@ exit 0
       env: {
         HOME: home,
         LAYR_HOME: path.join(home, 'layr'),
-        PATH: `${bin}:/usr/bin:/bin`,
+        PATH: bin,
         LAYR_SYSTEMCTL_LOG: log,
         LAYR_UNITS: options.units,
         LAYR_ACTIVE_UNITS: options.active,
         LAYR_ENABLED_UNITS: options.enabled,
+        LAYR_KIOSK_START_FAIL: options.startFail ? '1' : '0',
         LAYR_KIOSK_WAIT_SECS: '1',
         LAYR_KIOSK_WAIT_INTERVAL: '0',
       },
@@ -1376,59 +1388,59 @@ exit 0
   it('does not stop KlipperScreen when cage, the page, or the web service is missing', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'layr-display-guard-'));
     try {
-      const missingCage = displayEnv(root, {
-        units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
-        active: 'layr-web.service',
-        enabled: 'KlipperScreen.service',
-        withCage: false,
-      });
-      const cage = run('bash deploy/layr-display.sh to-layr --yes', missingCage.env);
-      expect(cage.status).not.toBe(0);
-      expect(textOf(cage)).toContain('cage is not installed');
-      expect(readFileSync(missingCage.log, 'utf8')).not.toContain('disable');
-
-      rmSync(missingCage.log, { force: true });
-      const inactive = displayEnv(path.join(root, 'web'), {
-        units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
-        active: '',
-        enabled: 'KlipperScreen.service',
-      });
-      const web = run('bash deploy/layr-display.sh to-layr --yes', inactive.env);
-      expect(web.status).not.toBe(0);
-      expect(textOf(web)).toContain('not running');
-      expect(readFileSync(inactive.log, 'utf8')).not.toContain('disable');
-
-      const curled = displayEnv(path.join(root, 'curl'), {
-        units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
-        active: 'layr-web.service',
-        enabled: 'KlipperScreen.service',
-        curlFail: true,
-      });
-      const page = run('bash deploy/layr-display.sh to-layr --yes', curled.env);
-      expect(page.status).not.toBe(0);
-      expect(textOf(page)).toContain('did not answer');
-      expect(readFileSync(curled.log, 'utf8')).not.toContain('disable');
+      const installed = 'layr-kiosk.service layr-web.service KlipperScreen.service';
+      const cases = [
+        { name: 'cage', options: { withCage: false }, message: 'cage is not installed' },
+        { name: 'web-inactive', options: { active: 'KlipperScreen.service' }, message: 'not running' },
+        { name: 'page', options: { curlFail: true }, message: 'did not answer' },
+        { name: 'web-missing', options: { units: 'layr-kiosk.service KlipperScreen.service' }, message: 'layr-web.service is not installed' },
+        { name: 'kiosk-missing', options: { units: 'layr-web.service KlipperScreen.service' }, message: 'layr-kiosk.service is not installed' },
+        { name: 'chromium', options: { withChromium: false }, message: 'Chromium is not installed' },
+        { name: 'curl', options: { withCurl: false }, message: 'curl is not installed' },
+      ];
+      for (const scenario of cases) {
+        const fx = displayEnv(path.join(root, scenario.name), {
+          units: installed,
+          active: 'layr-web.service KlipperScreen.service',
+          enabled: 'KlipperScreen.service',
+          ...scenario.options,
+        });
+        const result = run('bash deploy/layr-display.sh to-layr --yes', fx.env);
+        expect(result.status, scenario.name).not.toBe(0);
+        expect(textOf(result), scenario.name).toContain(scenario.message);
+        const log = readFileSync(fx.log, 'utf8');
+        // All failures must occur before any service mutation, not just before disable.
+        expect(log, scenario.name).not.toMatch(/^(enable|disable|start|stop|restart) /m);
+        expect(existsSync(path.join(fx.env.LAYR_HOME!, 'state', 'klipperscreen-disabled-by-layr')), scenario.name).toBe(false);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('turns KlipperScreen back on when the kiosk does not stay up', () => {
+  it('turns KlipperScreen back on when the kiosk fails to start or does not stay up', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'layr-display-restore-'));
-    const fx = displayEnv(root, {
-      units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
-      active: 'layr-web.service',
-      enabled: 'KlipperScreen.service',
-    });
     try {
-      const result = run('bash deploy/layr-display.sh to-layr --yes', fx.env);
-      const log = readFileSync(fx.log, 'utf8');
-      expect(result.status).not.toBe(0);
-      expect(log).toContain('disable --now KlipperScreen.service');
-      expect(log).toContain('enable --now layr-kiosk.service');
-      expect(log).toContain('disable --now layr-kiosk.service');
-      expect(log).toContain('enable --now KlipperScreen.service');
-      expect(textOf(result)).toContain('turned back on');
+      for (const startFail of [false, true]) {
+        const fx = displayEnv(path.join(root, String(startFail)), {
+          units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
+          active: 'layr-web.service KlipperScreen.service',
+          enabled: 'KlipperScreen.service',
+          startFail,
+        });
+        const result = run('bash deploy/layr-display.sh to-layr --yes', fx.env);
+        const log = readFileSync(fx.log, 'utf8');
+        expect(result.status, textOf(result)).not.toBe(0);
+        expect(log.split('\n').filter(line => /^(enable|disable) /.test(line))).toEqual([
+          'disable --now KlipperScreen.service',
+          'enable --now layr-kiosk.service',
+          'disable --now layr-kiosk.service',
+          'enable --now KlipperScreen.service',
+        ]);
+        expect(textOf(result)).toContain('turned back on');
+        expect(textOf(result)).toContain(startFail ? 'layr-kiosk.service did not start' : 'The LAYR kiosk did not stay active');
+        expect(existsSync(path.join(fx.env.LAYR_HOME!, 'state', 'klipperscreen-disabled-by-layr'))).toBe(false);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
