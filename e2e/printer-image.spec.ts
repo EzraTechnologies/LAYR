@@ -100,6 +100,8 @@ for (const vp of VIEWPORTS) {
 
     for (const shape of [
       { name: 'portrait', width: 300, height: 900 },
+      { name: 'square', width: 800, height: 800 },
+      { name: 'large portrait', width: 1200, height: 2400 },
       { name: 'landscape', width: 900, height: 600 },
       { name: 'panoramic', width: 2400, height: 300 },
     ]) {
@@ -113,6 +115,9 @@ for (const vp of VIEWPORTS) {
         const saved = await storedPrinterPhoto(page);
         expect(saved).not.toBeNull();
         expect(saved!.width / saved!.height).toBeCloseTo(shape.width / shape.height, 1);
+        // Settings still uses its full-size preview; only idle Home opts into the inset.
+        const settingsFit = await page.getByRole('img', { name: 'Printer photo' }).evaluate(img => img.getBoundingClientRect().width / img.parentElement!.getBoundingClientRect().width);
+        expect(settingsFit).toBeGreaterThan(0.9);
         await page.getByRole('link', { name: 'Home', exact: true }).click();
         const photo = page.getByRole('img', { name: 'Printer photo' });
         await expect(photo).toBeVisible();
@@ -124,14 +129,24 @@ for (const vp of VIEWPORTS) {
           const style = getComputedStyle(img);
           return { fit: style.objectFit, position: style.objectPosition,
             width: box.width, height: box.height, frameWidth: frame.width, frameHeight: frame.height,
-            ratio: img.naturalWidth / img.naturalHeight };
+            ratio: img.naturalWidth / img.naturalHeight,
+            centerX: box.x + box.width / 2 - (frame.x + frame.width / 2),
+            centerY: box.y + box.height / 2 - (frame.y + frame.height / 2),
+            paintedWidth: Math.min(box.width, box.height * img.naturalWidth / img.naturalHeight),
+            paintedHeight: Math.min(box.height, box.width * img.naturalHeight / img.naturalWidth),
+          };
         });
         expect(fit.fit).toBe('contain');
         expect(fit.position).toBe('50% 50%');
-        expect(fit.width).toBeGreaterThan(100);
-        expect(fit.height).toBeGreaterThan(120);
-        expect(fit.width).toBeLessThanOrEqual(fit.frameWidth);
-        expect(fit.height).toBeLessThanOrEqual(fit.frameHeight);
+        expect(fit.width / fit.frameWidth).toBeGreaterThan(0.55);
+        expect(fit.width / fit.frameWidth).toBeLessThanOrEqual(0.60);
+        expect(fit.height / fit.frameHeight).toBeGreaterThan(0.55);
+        expect(fit.height / fit.frameHeight).toBeLessThanOrEqual(0.60);
+        expect(Math.abs(fit.centerX)).toBeLessThan(1);
+        expect(Math.abs(fit.centerY)).toBeLessThan(1);
+        expect(fit.paintedWidth).toBeLessThanOrEqual(fit.frameWidth * 0.60);
+        expect(fit.paintedHeight).toBeLessThanOrEqual(fit.frameHeight * 0.60);
+        expect(fit.paintedWidth / fit.paintedHeight).toBeCloseTo(shape.width / shape.height, 1);
         expect(fit.ratio).toBeCloseTo(shape.width / shape.height, 1);
         await expectCleanLayout(page);
         expect(mock.controlCalls).toEqual([]);
@@ -145,7 +160,9 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText('Print complete')).toBeVisible();
       await expect(page.getByRole('heading', { name: FILE_THUMB })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Files' })).toBeVisible();
-      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+      const photo = page.getByRole('img', { name: 'Printer photo' });
+      await expect(photo).toBeVisible();
+      expect(await photo.evaluate(img => img.getBoundingClientRect().width / img.parentElement!.getBoundingClientRect().width)).toBeGreaterThan(0.9);
       await expect(page.getByRole('img', { name: FILE_THUMB })).toHaveCount(0);
       await expect(page.getByRole('heading', { name: 'Ready to print' })).toHaveCount(0);
       await expectCleanLayout(page);
