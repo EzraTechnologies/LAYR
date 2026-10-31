@@ -19,6 +19,8 @@
   const title = $derived(headline(printerState));
   const active = $derived(isJobActive(printerState.status));
   const printerPhoto = $derived(printerImages.url);
+  let failedIdlePhoto = $state<string | null>(null);
+  const showIdlePhoto = $derived(!!printerPhoto && failedIdlePhoto !== printerPhoto);
   const ringTone = $derived(
     printerState.status === 'paused' ? 'warn' : job?.state === 'complete' ? 'ok' : active ? 'cyan' : 'dim',
   );
@@ -194,12 +196,14 @@
       </footer>
     {/if}
   {:else}
-    <div class="idle">
-      <div class="hero">
-        <PrinterPhoto src={printerPhoto} />
-      </div>
+    <div class="idle" class:with-photo={showIdlePhoto}>
+      {#if showIdlePhoto}
+        <div class="hero">
+          <PrinterPhoto src={printerPhoto} onError={() => (failedIdlePhoto = printerPhoto)} />
+        </div>
+      {/if}
       <div class="idle-copy">
-        <div class="idle-icon" aria-hidden="true"><Icon name="check" size={22} strokeWidth={2} /></div>
+        <div class="idle-icon" aria-hidden="true"><Icon name="check" size={showIdlePhoto ? 22 : 34} strokeWidth={2} /></div>
         <div class="idle-text">
           <h2 id="job-title" title="Ready to print">Ready to print</h2>
           <p title="No job is loaded. Choose a file to start a print.">No job is loaded. Choose a file to start a print.</p>
@@ -474,7 +478,16 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     gap: 8px;
+  }
+
+  .idle.with-photo {
+    align-items: stretch;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .hero {
@@ -484,6 +497,10 @@
   }
 
   .idle-copy {
+    display: contents;
+  }
+
+  .with-photo .idle-copy {
     flex: none;
     display: flex;
     align-items: center;
@@ -499,19 +516,34 @@
     display: grid;
     place-items: center;
     flex: none;
-    width: 40px;
-    height: 40px;
+    width: 72px;
+    height: 72px;
     border-radius: 50%;
     color: var(--ok);
     background: var(--ok-soft);
   }
 
+  .with-photo .idle-icon {
+    width: 40px;
+    height: 40px;
+  }
+
   .idle-text {
+    display: contents;
+  }
+
+  .with-photo .idle-text {
+    display: block;
     flex: 1;
     min-width: 0;
   }
 
   .idle h2 {
+    margin: 4px 0 0;
+    font-size: var(--fs-xl);
+  }
+
+  .with-photo h2 {
     margin: 0;
     font-size: var(--fs-lg);
     white-space: nowrap;
@@ -521,7 +553,13 @@
 
   .idle p {
     margin: 0;
+    max-width: 34ch;
     color: var(--text-dim);
+    font-size: var(--fs-sm);
+  }
+
+  .with-photo p {
+    max-width: none;
     font-size: var(--fs-xs);
   }
 
