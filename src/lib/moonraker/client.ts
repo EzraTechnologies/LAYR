@@ -1,3 +1,4 @@
+import { boundedHttp } from './http';
 import type { KlippyState, TransportState } from '../printer/model';
 import { parseSpoolmanNotice, spoolmanParamsAllowed, type SpoolmanNotice } from '../spoolman/api';
 import { Backoff } from './backoff';
@@ -142,6 +143,12 @@ export interface MoonrakerClientOptions {
   requestTimeoutMs?: number;
   /** Interval for polling `server.info` while Klipper is not ready. */
   klippyPollMs?: number;
+  /** HTTP deadline including response body consumption. */
+  httpTimeoutMs?: number;
+  connectTimeoutMs?: number;
+  /** Read-only server.info health probe cadence and deadline, independent of command timeouts. */
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
   now?: () => number;
 }
 
@@ -198,7 +205,10 @@ export class MoonrakerClient {
   #running = false;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   #klippyTimer: ReturnType<typeof setTimeout> | null = null;
-  #initializing = false;
+  #connectTimer: ReturnType<typeof setTimeout> | null = null;
+  #heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #httpRequests = new Set<AbortController>();
+  #initializing: number | null = null;
   #klippy: KlippyState = 'unknown';
 
   constructor(options: MoonrakerClientOptions) {
@@ -209,10 +219,17 @@ export class MoonrakerClient {
       backoff: new Backoff(),
       requestTimeoutMs: 10_000,
       klippyPollMs: 2_000,
+      httpTimeoutMs: 10_000,
+      connectTimeoutMs: 10_000,
+      heartbeatIntervalMs: 15_000,
+      heartbeatTimeoutMs: 10_000,
       now: () => Date.now(),
       ...options,
       apiKey: options.apiKey?.trim() || null,
     };
+    for (const value of [this.#opts.httpTimeoutMs, this.#opts.connectTimeoutMs, this.#opts.heartbeatIntervalMs, this.#opts.heartbeatTimeoutMs]) {
+      if (!Number.isFinite(value) || value <= 0 || value > 2_147_483_647) throw new Error('Invalid connection timeout');
+    }
   }
 
   get running(): boolean {
@@ -238,6 +255,8 @@ export class MoonrakerClient {
     this.#running = false;
     this.#generation += 1;
     this.#clearTimers();
+    this.#abortHttp();
+    this.#initializing = null;
     this.#teardownSocket('Client stopped');
     this.#emit({ type: 'transport', state: 'idle', attempt: 0, nextRetryAt: null, reason: null });
   }
@@ -262,12 +281,38 @@ export class MoonrakerClient {
    * GET request that carries the API key header when one is configured. Used for thumbnails, because an
    * `<img src>` cannot send headers; trusted clients can use `httpUrl` directly.
    */
-  async fetchHttp(path: string): Promise<Response> {
-    const headers: Record<string, string> = {};
-    if (this.#opts.apiKey) headers['X-Api-Key'] = this.#opts.apiKey;
-    const response = await this.#opts.fetch(this.httpUrl(path), { headers });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response;
+  async fetchHttp(path: string, signal?: AbortSignal): Promise<Response> {
+    return this.#http(this.httpUrl(path), async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // Buffer under the same deadline; returning raw headers would leave .blob() unbounded.
+      const blob = await response.blob();
+      return new Response(blob, { status: response.status, statusText: response.statusText, headers: response.headers });
+    }, signal);
+  }
+
+  async #http<T>(url: string, read: (response: Response) => Promise<T>, caller?: AbortSignal): Promise<T> {
+    const controller = new AbortController();
+    this.#httpRequests.add(controller);
+    try {
+      return await boundedHttp(async signal => {
+        const headers: Record<string, string> = {};
+        if (this.#opts.apiKey) headers['X-Api-Key'] = this.#opts.apiKey;
+        const response = await this.#opts.fetch(url, { headers, signal });
+        if (signal.aborted) {
+          void response.body?.cancel().catch(() => {});
+          signal.throwIfAborted();
+        }
+        return read(response);
+      }, this.#opts.httpTimeoutMs, controller, caller);
+    } finally {
+      this.#httpRequests.delete(controller);
+      controller.abort();
+    }
+  }
+
+  #abortHttp(): void {
+    for (const controller of this.#httpRequests) controller.abort(new DOMException('Connection changed', 'AbortError'));
+    this.#httpRequests.clear();
   }
 
   #emit(event: ClientEvent): void {
@@ -311,9 +356,14 @@ export class MoonrakerClient {
       return;
     }
     this.#socket = socket;
+    this.#connectTimer = setTimeout(() => {
+      this.#handleDisconnect(generation, 'Moonraker WebSocket connection timed out');
+    }, this.#opts.connectTimeoutMs);
 
     socket.onopen = () => {
       if (generation !== this.#generation) return;
+      if (this.#connectTimer) clearTimeout(this.#connectTimer);
+      this.#connectTimer = null;
       void this.#onOpen(generation);
     };
     socket.onmessage = (event) => {
@@ -329,16 +379,15 @@ export class MoonrakerClient {
   }
 
   async #fetchOneshotToken(): Promise<string> {
-    const response = await this.#opts.fetch(toHttpUrl(this.#opts.baseUrl, '/access/oneshot_token'), {
-      headers: { 'X-Api-Key': this.#opts.apiKey ?? '' },
+    return this.#http(toHttpUrl(this.#opts.baseUrl, '/access/oneshot_token'), async response => {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Authentication failed (HTTP ${response.status}). Check the API key or trusted_clients`);
+      }
+      if (!response.ok) throw new Error(`Authentication failed (HTTP ${response.status})`);
+      const body = (await response.json()) as { result?: unknown };
+      if (typeof body.result !== 'string') throw new Error('Unexpected oneshot token response');
+      return body.result;
     });
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(`Authentication failed (HTTP ${response.status}). Check the API key or trusted_clients`);
-    }
-    if (!response.ok) throw new Error(`Authentication failed (HTTP ${response.status})`);
-    const body = (await response.json()) as { result?: unknown };
-    if (typeof body.result !== 'string') throw new Error('Unexpected oneshot token response');
-    return body.result;
   }
 
   async #onOpen(generation: number): Promise<void> {
@@ -350,15 +399,29 @@ export class MoonrakerClient {
         url: 'https://github.com/EzraTechnologies/LAYR',
       });
       if (generation !== this.#generation) return;
-      this.#opts.backoff.reset();
       this.#emit({ type: 'transport', state: 'connected', attempt: 0, nextRetryAt: null, reason: null });
       await this.#refreshKlippy(generation);
+      if (generation !== this.#generation) return;
+      this.#opts.backoff.reset();
+      this.#scheduleHeartbeat(generation);
     } catch (error) {
       if (generation !== this.#generation) return;
       // Identification or the initial query failed: drop the socket and let backoff retry.
-      this.#teardownSocket(errorMessage(error));
       this.#handleDisconnect(generation, errorMessage(error));
     }
+  }
+
+  #scheduleHeartbeat(generation: number): void {
+    if (!this.#running || generation !== this.#generation) return;
+    this.#heartbeatTimer = setTimeout(() => {
+      this.#heartbeatTimer = null;
+      if (!this.#running || generation !== this.#generation) return;
+      void this.#call('server.info', undefined, this.#opts.heartbeatTimeoutMs).then(() => {
+        this.#scheduleHeartbeat(generation);
+      }).catch(() => {
+        this.#handleDisconnect(generation, 'Moonraker is not responding');
+      });
+    }, this.#opts.heartbeatIntervalMs);
   }
 
   /** Queries `server.info`; initialises printer objects when Klippy is ready, otherwise polls. */
@@ -375,15 +438,17 @@ export class MoonrakerClient {
 
     let message: string | null = null;
     if (state === 'shutdown' || state === 'error' || state === 'startup') {
-      message = await this.#printerMessage();
+      message = await this.#printerMessage(generation);
     }
+    if (generation !== this.#generation) return;
     this.#setKlippy(state, message);
     this.#scheduleKlippyPoll(generation);
   }
 
-  async #printerMessage(): Promise<string | null> {
+  async #printerMessage(generation: number): Promise<string | null> {
     try {
       const printer = await this.#call<PrinterInfo>('printer.info');
+      if (generation !== this.#generation) return null;
       const hostname = printer.hostname?.trim();
       if (hostname) this.#emit({ type: 'host', hostname });
       return printer.state_message?.trim() || null;
@@ -393,10 +458,11 @@ export class MoonrakerClient {
   }
 
   async #initPrinter(generation: number): Promise<void> {
-    if (this.#initializing) return;
-    this.#initializing = true;
+    if (this.#initializing === generation || generation !== this.#generation) return;
+    this.#initializing = generation;
     try {
       const printer = await this.#call<PrinterInfo>('printer.info');
+      if (generation !== this.#generation) return;
       const list = await this.#call<ObjectsListResult>('printer.objects.list');
       if (generation !== this.#generation) return;
       const objects = Array.isArray(list.objects) ? list.objects.filter((o) => typeof o === 'string') : [];
@@ -437,7 +503,7 @@ export class MoonrakerClient {
       this.#setKlippy(parseKlippyState(printer.state ?? 'ready'), printer.state_message?.trim() || null);
       if (this.#klippy !== 'ready') this.#scheduleKlippyPoll(generation);
     } finally {
-      this.#initializing = false;
+      if (this.#initializing === generation) this.#initializing = null;
     }
   }
 
@@ -461,6 +527,7 @@ export class MoonrakerClient {
   }
 
   #scheduleKlippyPoll(generation: number): void {
+    if (!this.#running || generation !== this.#generation) return;
     if (this.#klippyTimer) clearTimeout(this.#klippyTimer);
     this.#klippyTimer = setTimeout(() => {
       this.#klippyTimer = null;
@@ -537,7 +604,7 @@ export class MoonrakerClient {
         return;
       case 'notify_klippy_shutdown':
         this.#setKlippy('shutdown', null);
-        void this.#printerMessage().then((msg) => {
+        void this.#printerMessage(generation).then((msg) => {
           if (generation === this.#generation && this.#klippy === 'shutdown' && msg) this.#setKlippy('shutdown', msg);
         });
         this.#scheduleKlippyPoll(generation);
@@ -587,12 +654,10 @@ export class MoonrakerClient {
     if (generation !== this.#generation) return;
     // Invalidate this connection so late callbacks from it are ignored.
     this.#generation += 1;
-    this.#rejectPending(reason);
-    this.#socket = null;
-    if (this.#klippyTimer) {
-      clearTimeout(this.#klippyTimer);
-      this.#klippyTimer = null;
-    }
+    this.#clearTimers();
+    this.#abortHttp();
+    this.#initializing = null;
+    this.#teardownSocket(reason);
     this.#klippy = 'unknown';
     if (!this.#running) return;
 
@@ -640,6 +705,10 @@ export class MoonrakerClient {
   #clearTimers(): void {
     if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
     if (this.#klippyTimer) clearTimeout(this.#klippyTimer);
+    if (this.#connectTimer) clearTimeout(this.#connectTimer);
+    if (this.#heartbeatTimer) clearTimeout(this.#heartbeatTimer);
+    this.#connectTimer = null;
+    this.#heartbeatTimer = null;
     this.#reconnectTimer = null;
     this.#klippyTimer = null;
   }

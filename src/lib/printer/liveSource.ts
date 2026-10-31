@@ -130,9 +130,9 @@ export class LiveSource implements PrinterSource, PrinterConnection {
     return this.#client.httpUrl(path);
   }
 
-  fetchHttp(path: string): Promise<Response> {
+  fetchHttp(path: string, signal?: AbortSignal): Promise<Response> {
     if (!this.#client) return Promise.reject(new Error('Not connected to Moonraker'));
-    return this.#client.fetchHttp(path);
+    return this.#client.fetchHttp(path, signal);
   }
 
   reconnect(): void {

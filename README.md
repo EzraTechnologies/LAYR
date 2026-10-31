@@ -179,6 +179,14 @@ Copy `.env.example` to `.env.local`. All variables are optional.
 URL precedence: query parameter, then saved setting, then the build variable. If none is set, LAYR does
 not connect.
 
+Authentication token requests and authenticated thumbnail downloads have a 10-second deadline,
+including response bodies. Stopping or reconnecting cancels pending HTTP requests; releasing the
+last thumbnail owner cancels its unfinished download. Displayed thumbnail URLs remain valid.
+WebSocket opening is bounded to 10 seconds. After initialization, a read-only `server.info` probe
+runs every 15 seconds with a 10-second response deadline. A failed probe closes the stale socket
+and reconnects with the existing bounded backoff. In-flight controls are reported as result unknown
+and are never automatically replayed; fresh state is subscribed after reconnection.
+
 - **AFC** (only when Settings → AFC is on for this printer and Klipper lists an `AFC` object): units, lanes, what is loaded, loading state,
   and errors from the AFC add-on. The switch defaults off. Turning it on turns Happy Hare off, and both can stay off.
   Load, tool change, unload, hub load, and eject are the documented

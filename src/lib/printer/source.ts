@@ -23,7 +23,7 @@ export interface PrinterConnection {
   readonly connected: boolean;
   call<T = unknown>(method: string, params?: Record<string, unknown>, options?: CallOptions): Promise<T>;
   httpUrl(path: string): string;
-  fetchHttp(path: string): Promise<Response>;
+  fetchHttp(path: string, signal?: AbortSignal): Promise<Response>;
   reconnect(): void;
   /** Called after every (re)subscription, i.e. whenever fresh printer state is available. */
   onReady(listener: () => void): () => void;
