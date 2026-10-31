@@ -31,7 +31,7 @@ origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
 - [ ] Extrude and retract of a short length work, and the speed is capped.
 - [ ] Below `min_extrude_temp` both buttons are refused and no G-code is sent.
 - [ ] LOAD / UNLOAD appear only when those macros exist. The toast says the macro finished only after Klipper replies. A failed or cancelled run does not say the filament was unloaded.
-- [ ] With no `[spoolman]` section, Extrude still says spool tracking is planned for a later release, and printing, jogging, and heating behave as before.
+- [ ] With no `[spoolman]` section, Extrude accurately reports that tracking is disabled or Spoolman is not configured, and printing, jogging, and heating behave as before.
 - [ ] Optional, and only if you already run Spoolman: turn Spoolman on under Settings for this printer. It is off by default, and a second printer address does not inherit it. Add the server in Moonraker's own configuration and restart Moonraker yourself. LAYR must not have edited `moonraker.conf`. On Extrude, confirm the active spool's material, colour, and remaining weight or length. Set a different spool only while the printer is idle, and only after the confirmation. Home and the file detail should name that same spool. Run Unload only if you mean to move filament. The active spool clears only after Klipper accepts that macro. Cancel the dialog, or fail the macro, and the previous spool stays. If Moonraker cannot reach Spoolman, the screen says so and does not show a weight.
 
 ## Files and a short print

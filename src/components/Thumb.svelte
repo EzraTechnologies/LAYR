@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { app } from '../lib/context';
   import Icon from './Icon.svelte';
 
@@ -28,8 +29,8 @@
     failed = false;
     if (!path) return;
     let cancelled = false;
-    files
-      .thumbnailUrl(path, cacheKey)
+    const lease = files.thumbnail(path, cacheKey);
+    lease.url
       .then((url) => {
         if (!cancelled) src = url;
       })
@@ -38,6 +39,8 @@
       });
     return () => {
       cancelled = true;
+      // Let Svelte remove/replace the old <img> before its URL can be revoked.
+      void tick().then(() => lease.release());
     };
   });
 </script>

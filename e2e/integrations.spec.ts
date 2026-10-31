@@ -147,7 +147,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('link', { name: 'AFC', exact: true })).toHaveCount(0);
       await page.getByRole('link', { name: 'Extrude' }).click();
       await expect(page.getByRole('heading', { name: /Extruder/ })).toBeVisible();
-      await expect(page.getByText('Spool tracking with Spoolman is planned for a later release.')).toBeVisible();
+      await expect(page.getByText('Spoolman is not configured in Moonraker for this printer. Printing does not require tracking.')).toBeVisible();
       await expect(page.getByRole('button', { name: /spool/i })).toHaveCount(0);
       await expectNoMotion(mock);
       await expectCleanLayout(page);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import SpoolBrowser from '../components/SpoolBrowser.svelte';
   import { integrations } from '../lib/integrations/store.svelte';
   import Icon from '../components/Icon.svelte';
@@ -31,9 +31,7 @@
     settings.update({ filesViewMode: mode });
   }
 
-  $effect(() => {
-    if (connected && !files.loaded && !files.loading) void files.load();
-  });
+  onMount(() => files.enter());
 
   // Keep the detail sheet in sync after a reload (metadata may arrive later).
   const detail = $derived(selected ? (files.files.find((f) => f.path === selected!.path) ?? selected) : null);
@@ -169,7 +167,7 @@
       class="btn ghost refresh"
       aria-label="Refresh file list"
       aria-busy={files.loading}
-      disabled={!connected}
+      disabled={!connected || files.loading}
       onclick={() => files.load()}
     >
       <Icon name="refresh" size={20} />
@@ -177,6 +175,9 @@
   </header>
 
   <div class="list-wrap card">
+    {#if connected && files.error && files.loaded}
+      <p class="hint load-error" role="alert">{files.error} <button type="button" class="btn" disabled={files.loading} onclick={() => files.load()}>Try again</button></p>
+    {/if}
     {#if !connected}
       <div class="empty fill">
         <Icon name="plug" size={32} />
@@ -188,7 +189,7 @@
         <Icon name="alert" size={32} />
         <strong>Could not load files</strong>
         <span>{files.error}</span>
-        <button type="button" class="btn" onclick={() => files.load()}>Try again</button>
+        <button type="button" class="btn" disabled={files.loading} onclick={() => files.load()}>Try again</button>
       </div>
     {:else if files.loaded && files.dirs.length === 0 && files.files.length === 0}
       <div class="empty fill">
@@ -368,6 +369,7 @@
 {/if}
 
 <style>
+  .load-error { padding: 10px; margin: 0; flex: none; overflow-wrap: anywhere; }
   .preflight-backdrop { z-index: 34; }
   .spool-preflight {
     width: min(560px, 100%);

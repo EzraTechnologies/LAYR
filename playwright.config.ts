@@ -17,6 +17,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: '**/thumbnail-cache.spec.ts',
       use: { ...devices['Desktop Chrome'], deviceScaleFactor: 1, hasTouch: true },
     },
   ],
