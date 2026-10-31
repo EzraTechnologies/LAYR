@@ -5,9 +5,11 @@
     onError?: () => void;
     /** Square edge in px. Omit to fill the parent. */
     size?: number;
+    /** Leave generous space around the idle Home photo without shrinking its preview frame. */
+    inset?: boolean;
   }
 
-  let { src, size, onError }: Props = $props();
+  let { src, size, onError, inset = false }: Props = $props();
 
   const safeSrc = $derived(src?.startsWith('blob:') ? src : null);
   let brokenSrc = $state<string | null>(null);
@@ -18,6 +20,7 @@
 <div
   class="frame"
   class:fill={size === undefined}
+  class:inset
   style:width={size !== undefined ? `${size}px` : undefined}
   style:height={size !== undefined ? `${size}px` : undefined}
 >
@@ -70,6 +73,17 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+
+  .frame.inset {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    place-items: center;
+  }
+
+  .inset img {
+    width: 58%;
+    height: 58%;
   }
 
   .generic {

@@ -199,7 +199,7 @@
     <div class="idle" class:with-photo={showIdlePhoto}>
       {#if showIdlePhoto}
         <div class="hero">
-          <PrinterPhoto src={printerPhoto} onError={() => (failedIdlePhoto = printerPhoto)} />
+          <PrinterPhoto src={printerPhoto} inset onError={() => (failedIdlePhoto = printerPhoto)} />
         </div>
       {/if}
       <div class="idle-copy">
