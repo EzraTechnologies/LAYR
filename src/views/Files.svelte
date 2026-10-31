@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+  import SpoolBrowser from '../components/SpoolBrowser.svelte';
+  import { integrations } from '../lib/integrations/store.svelte';
   import Icon from '../components/Icon.svelte';
   import Thumb from '../components/Thumb.svelte';
   import { app } from '../lib/context';
@@ -35,12 +38,54 @@
   // Keep the detail sheet in sync after a reload (metadata may arrive later).
   const detail = $derived(selected ? (files.files.find((f) => f.path === selected!.path) ?? selected) : null);
 
-  async function startPrint(file: FileEntry) {
-    const outcome = await ui.run({ kind: 'start_print', filename: file.path });
-    if (outcome.status === 'ok') {
-      selected = null;
-      navigate('home');
+  type PendingPrint = { path: string; dir: string; size: number | null; modified: number | null; step: 'prompt' | 'select' | 'confirm' };
+  let pending = $state<PendingPrint | null>(null);
+  let disposed = false;
+
+  function current(request: PendingPrint): boolean {
+    return !disposed && pending === request && connected && selected?.path === request.path && files.dir === request.dir &&
+      files.files.some(file => file.path === request.path && file.size === request.size && file.modified === request.modified);
+  }
+
+  function abandonPrint() {
+    pending = null;
+  }
+
+  onDestroy(() => { disposed = true; abandonPrint(); });
+
+  $effect(() => {
+    if (pending && !current(pending)) abandonPrint();
+  });
+
+  const noActiveSpool = $derived(spoolman.snapshot.phase === 'ready' && spoolman.snapshot.activeKnown && spoolman.snapshot.activeId === null);
+  const spoolWarning = $derived(noActiveSpool
+    ? 'No active spool is selected. Select a spool for filament tracking, or continue without tracking. Selecting a spool does not load filament.'
+    : 'Active spool status cannot be verified. ' + (spoolman.snapshot.message || 'Spoolman is unavailable or still loading.') + ' You can continue without verified tracking.');
+
+  function startPrint(file: FileEntry) {
+    if (pending) return;
+    pending = { path: file.path, dir: files.dir, size: file.size, modified: file.modified, step: 'prompt' };
+    if (!integrations.value.spoolman || (spoolman.snapshot.phase === 'ready' && spoolman.snapshot.activeKnown && spoolman.snapshot.activeId !== null)) {
+      void confirmPrint(pending);
     }
+  }
+
+  async function confirmPrint(request: PendingPrint) {
+    if (!current(request) || request.step === 'confirm') return;
+    request.step = 'confirm';
+    try {
+      const outcome = await ui.run({ kind: 'start_print', filename: request.path }, { isCurrent: () => current(request) });
+      if (outcome.status === 'ok' && current(request)) {
+        selected = null;
+        navigate('home');
+      }
+    } finally {
+      if (pending === request) abandonPrint();
+    }
+  }
+
+  function onKey(event: KeyboardEvent) {
+    if (event.key === 'Escape' && !ui.confirmRequest && !ui.promptRequest) abandonPrint();
   }
 
   async function remove(file: FileEntry) {
@@ -287,7 +332,7 @@
           <button
             type="button"
             class="btn primary start"
-            disabled={!startCheck?.allowed}
+            disabled={pending !== null || !startCheck?.allowed}
             aria-busy={ui.isBusy({ kind: 'start_print', filename: detail.path })}
             onclick={() => startPrint(detail)}
           >
@@ -299,7 +344,45 @@
   </div>
 {/if}
 
+<svelte:window onkeydown={onKey} />
+
+{#if pending?.step === 'prompt'}
+  {@const request = pending}
+  <div class="sheet-backdrop preflight-backdrop" role="presentation" onpointerdown={(event) => event.target === event.currentTarget && abandonPrint()}>
+    <div class="card spool-preflight" role="dialog" aria-modal="true" aria-labelledby="spool-preflight-title">
+      <h2 id="spool-preflight-title">{noActiveSpool ? 'No active spool selected' : 'Spool tracking unavailable'}</h2>
+      <p>{displayFilename(request.path)}</p>
+      <p>{spoolWarning}</p>
+      <div class="preflight-actions">
+        {#if noActiveSpool}
+          <button type="button" class="btn primary" onclick={() => (request.step = 'select')}>Select spool</button>
+        {/if}
+        <button type="button" class="btn" onclick={() => confirmPrint(request)}>Print without tracking</button>
+        <button type="button" class="btn ghost" onclick={abandonPrint}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{:else if pending?.step === 'select'}
+  {@const request = pending}
+  <SpoolBrowser open onClose={abandonPrint} onSelected={() => confirmPrint(request)} />
+{/if}
+
 <style>
+  .preflight-backdrop { z-index: 34; }
+  .spool-preflight {
+    width: min(560px, 100%);
+    max-height: 100%;
+    overflow: auto;
+    padding: var(--pad);
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+  }
+  .spool-preflight h2, .spool-preflight p { margin: 0; overflow-wrap: anywhere; }
+  .spool-preflight h2 { font-size: var(--fs-lg); }
+  .preflight-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .preflight-actions .btn { flex: 1 1 auto; }
+
   .files {
     display: flex;
     flex-direction: column;
