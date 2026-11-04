@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { integrationScopeKey } from '../src/lib/integrations/preferences';
 import { ImageLibrary, MemoryPrinterImageRepository } from '../src/lib/printerImage/library';
+import { PRINTER_ILLUSTRATIONS, printerIllustrationFile } from '../src/lib/printerImage/illustrations';
 import {
   LIMITS,
   classifyFile,
@@ -58,6 +59,28 @@ describe('printer image scope', () => {
 });
 
 describe('printer image files', () => {
+  it('bundles bounded PNG illustrations that use the existing raster-file policy offline', async () => {
+    expect(PRINTER_ILLUSTRATIONS).toHaveLength(3);
+    expect(new Set(PRINTER_ILLUSTRATIONS.map((item) => item.id)).size).toBe(3);
+    for (const item of PRINTER_ILLUSTRATIONS) {
+      expect(item.src.startsWith('data:image/png;base64,')).toBe(true);
+      const file = printerIllustrationFile(item.id);
+      expect(file.type).toBe('image/png');
+      expect(file.size).toBeLessThanOrEqual(LIMITS.maxInputBytes);
+      expect(classifyFile(file)).toBeNull();
+      const header = new DataView(await file.slice(0, 24).arrayBuffer());
+      expect(header.getUint32(0)).toBe(0x89504e47);
+      expect(header.getUint32(16)).toBeLessThanOrEqual(LIMITS.maxEdge);
+      expect(header.getUint32(20)).toBeLessThanOrEqual(LIMITS.maxEdge);
+    }
+  });
+
+  it('never treats an arbitrary URL or filename as a bundled illustration', () => {
+    for (const value of ['https://example.org/photo.png', 'javascript:alert(1)', '../photo.png', 'data:image/svg+xml,<svg/>', '']) {
+      expect(() => printerIllustrationFile(value)).toThrow('could not read');
+    }
+  });
+
   it('accepts the formats the chooser offers and refuses svg and other files', () => {
     expect(classifyFile({ type: 'image/jpeg', size: 100 })).toBeNull();
     expect(classifyFile({ type: 'image/png', size: 100 })).toBeNull();

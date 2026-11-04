@@ -52,7 +52,7 @@ export const READ_METHODS: ReadonlySet<string> = new Set([
  * JSON-RPC methods that change the printer. They are only called by the command gateway
  * (`src/lib/actions/gateway.ts`), which validates and, where needed, confirms every command first.
  * `server.restart`, updates, and config/file writes other than deleting a G-code file are deliberately absent.
- * Raspberry Pi power is only `HOST_METHODS`, not this set.
+ * printer host power is only `HOST_METHODS`, not this set.
  */
 export const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'printer.gcode.script',

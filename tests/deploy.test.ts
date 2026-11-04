@@ -83,16 +83,18 @@ describe('install.sh --dist', () => {
 });
 
 describe('layr.env upgrades', () => {
-  it('refreshes port and Moonraker URL without dropping the engine or cursor override', () => {
+  it('refreshes port and Moonraker URL without dropping the engine, backend, profile or cursor override', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'layr-env-'));
     const envFile = path.join(root, 'layr.env');
-    writeFileSync(envFile, 'LAYR_PORT=1\nLAYR_MOONRAKER_URL=http://old\nLAYR_KIOSK_ENGINE=wpe\nLAYR_HIDE_CURSOR=1\n');
+    writeFileSync(envFile, 'LAYR_PORT=1\nLAYR_MOONRAKER_URL=http://old\nLAYR_KIOSK_ENGINE=wpe\nLAYR_CHROMIUM_BACKEND=x11\nLAYR_PROFILE=/home/tablet/.config/layr-chromium\nLAYR_HIDE_CURSOR=1\n');
     const output = run(
       `. deploy/lib.sh && write_layr_env ${JSON.stringify(envFile)} 7180 http://localhost:7125 && cat ${JSON.stringify(envFile)}`,
     );
     expect(output).toContain('LAYR_PORT=7180');
     expect(output).toContain('LAYR_MOONRAKER_URL=http://localhost:7125');
     expect(output).toContain('LAYR_KIOSK_ENGINE=wpe');
+    expect(output).toContain('LAYR_CHROMIUM_BACKEND=x11');
+    expect(output).toContain('LAYR_PROFILE=/home/tablet/.config/layr-chromium');
     expect(output).toContain('LAYR_HIDE_CURSOR=1');
     expect(output).not.toContain('LAYR_PORT=1');
     rmSync(root, { recursive: true, force: true });
@@ -468,6 +470,9 @@ function writeInput(root: string, event: string, name: string, props: Record<str
 function hdmiFixture(root: string) {
   const home = path.join(root, 'home');
   mkdirSync(home, { recursive: true });
+  const bin = path.join(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, 'sudo'), "#!/bin/sh\ncase \"$*\" in\n  '-n -v' | '-v') exit 0 ;;\n  '-n -- id -u') printf '0\\n'; exit 0 ;;\nesac\nexec \"$@\"\n", { mode: 0o755 });
   mkdirSync(path.join(root, 'input'), { recursive: true });
   return {
     script: path.join(repo, 'deploy/layr-hdmi-input.sh'),
@@ -475,6 +480,7 @@ function hdmiFixture(root: string) {
     log: path.join(root, 'udev.log'),
     env: {
       HOME: home,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
       LAYR_HOME: path.join(home, 'layr'),
       LAYR_INPUT_FIXTURE: path.join(root, 'input'),
       LAYR_UDEV_RULES_PATH: path.join(root, 'udev', '99-layr-ignore-hdmi-pointers.rules'),
@@ -516,7 +522,7 @@ exit 0
 `,
     { mode: 0o755 },
   );
-  writeFileSync(path.join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(path.join(bin, 'sudo'), "#!/bin/sh\ncase \"$*\" in\n  '-n -v' | '-v') exit 0 ;;\n  '-n -- id -u') printf '0\\n'; exit 0 ;;\nesac\nexec \"$@\"\n", { mode: 0o755 });
 }
 
 describe('kiosk page URL', () => {

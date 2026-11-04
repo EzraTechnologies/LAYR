@@ -19,7 +19,7 @@ export type CommandOutcome =
   | { status: 'blocked'; message: string }
   /** A command in the same group is still running; nothing was sent. */
   | { status: 'busy'; message: string }
-  /** Moonraker or Klipper rejected the command. `reason` is set for Raspberry Pi host power only. */
+  /** Moonraker or Klipper rejected the command. `reason` is set for printer host power only. */
   | { status: 'failed'; summary: string; message: string; reason?: HostRefusal }
   /** The request was sent but no reply arrived (timeout or disconnect). It may or may not have run. */
   | { status: 'unconfirmed'; summary: string; message: string };

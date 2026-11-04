@@ -1,0 +1,1015 @@
+#!/usr/bin/env python3
+"""LAYR terminal management. Uses prebuilt web assets on every architecture."""
+import argparse
+import copy
+from datetime import datetime, timezone
+import json
+import hashlib
+import importlib.util
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+from urllib.parse import quote, urlsplit
+
+DEPLOY = Path(__file__).resolve().parent
+# A global symlink must keep targeting its installation, regardless of the
+# caller's HOME. Checkout invocation still supports isolated installation roots.
+ROOT = DEPLOY.parent if DEPLOY.name == 'management' else Path(os.environ.get('LAYR_HOME', str(Path.home() / 'layr'))).resolve()
+POWER_HELPER = Path('/usr/local/lib/layr-display-power/controller.py')
+
+
+
+def capture(*args):
+    try:
+        result = subprocess.run(args, text=True, capture_output=True, timeout=15)
+        return result.stdout.strip() if result.returncode == 0 else ''
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+
+
+def detect(base=Path('/')):
+    fields = {}
+    for line in (base / 'etc/os-release').read_text().splitlines():
+        if '=' in line:
+            key, value = line.split('=', 1)
+            fields[key] = value.strip('"\'')
+    arch = capture('dpkg', '--print-architecture')
+    kernel_arch = capture('uname', '-m')
+    release_ok = fields.get('VERSION_ID') == '12' if fields.get('VERSION_ID') else fields.get('VERSION_CODENAME') == 'bookworm'
+    supported = arch in ('i386', 'amd64', 'armhf', 'arm64') and fields.get('ID') in ('debian', 'raspbian', 'mainsailos') and release_ok and kernel_arch not in ('armv6l', 'armv5tel')
+    model = base / 'proc/device-tree/model'
+    memory = (base / 'proc/meminfo').read_text()
+    inputs = base / 'proc/bus/input/devices'
+    touch = touch_inventory(base, inputs)
+    return dict(architecture=arch, kernel_architecture=kernel_arch, distribution=fields, supported=supported,
+                model=model.read_text().strip('\0') if model.exists() else capture('cat', str(base / 'sys/class/dmi/id/product_name')) or 'unknown',
+                cpu=capture('lscpu'),
+                graphics={p.parent.name: str((p.parent / 'device/driver').resolve()) for p in (base / 'sys/class/drm').glob('card*/dev')},
+                disk_free_mb=shutil.disk_usage(base).free // (1024 * 1024),
+                ram_available_mb=(int(re.search(r'MemAvailable:\s+(\d+)', memory)[1]) // 1024 if 'MemAvailable:' in memory else None),
+                ram_mb=int(re.search(r'MemTotal:\s+(\d+)', memory)[1]) // 1024,
+                connectors={p.parent.name: p.read_text().strip() for p in (base / 'sys/class/drm').glob('card*-*/status')},
+                touchscreen=touch['detection'],
+                touch_devices=touch['devices'], touchscreen_function='unverified',
+                graphical_environment={key: os.environ.get(key, '') for key in ('XDG_SESSION_TYPE', 'DISPLAY', 'WAYLAND_DISPLAY')},
+                services={unit: capture('systemctl', 'is-active', unit) or 'inactive/unknown' for unit in ('display-manager.service', 'KlipperScreen.service', 'klipper.service', 'moonraker.service', 'layr-web.service', 'layr-kiosk.service')})
+
+
+def prompt_endpoint(default='localhost:7125'):
+    value = input(f'Moonraker IP, hostname or URL [{default}]: ').strip() or default
+    if ':' not in value:
+        port = input('Moonraker port [7125]: ').strip() or '7125'
+        if not port.isdigit() or not 1 <= int(port) <= 65535:
+            raise RuntimeError('Moonraker port must be between 1 and 65535')
+        value += ':' + port
+    return value
+
+
+def moonraker(value):
+    if '://' not in value:
+        value = 'http://' + value + ':7125' if ':' not in value else 'http://' + value
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/') or re.search(r'[\s\x00-\x1f\x7f\\\'"`$]', value):
+            raise ValueError()
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError()
+    except ValueError:
+        raise RuntimeError('Moonraker must be an HTTP(S) hostname/IP URL without credentials, query or path')
+    return value.rstrip('/')
+
+
+def execute(args, dry=False):
+    print('+ ' + ' '.join(map(str, args)), flush=True)
+    if not dry:
+        subprocess.run(list(map(str, args)), check=True)
+
+
+def saved():
+    path = ROOT / 'state/installer.json'
+    state = json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(state, dict):
+        raise RuntimeError('Invalid installer state; restore state/installer.json or run install with explicit configuration')
+    return state
+
+
+def installed_endpoint():
+    path = ROOT / 'layr.env'
+    if path.is_file():
+        matches = re.findall(r'^LAYR_MOONRAKER_URL=(.*)$', path.read_text(), re.M)
+        if matches:
+            return matches[-1]
+    return None
+
+
+def configured_chromium_backend():
+    """Read systemd's saved browser setting without evaluating shell content."""
+    path = ROOT / 'layr.env'
+    if path.is_file():
+        matches = re.findall(r'^LAYR_CHROMIUM_BACKEND=(.*)$', path.read_text(), re.M)
+        if matches:
+            value = matches[-1].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            return value
+    return 'wayland'
+
+
+def validate_chromium_backend(value):
+    if value not in ('wayland', 'x11'):
+        raise RuntimeError('LAYR_CHROMIUM_BACKEND must be wayland or x11; no backend fallback was attempted')
+    return value
+
+
+def running_service_backend():
+    pid = capture('systemctl', 'show', 'layr-kiosk.service', '-p', 'MainPID', '--value')
+    if not pid.isdigit() or int(pid) <= 0:
+        return None
+    try:
+        environment = Path(f'/proc/{pid}/environ').read_bytes()
+    except OSError:
+        return None
+    if not environment:
+        return None
+    for field in environment.split(b'\0'):
+        if field.startswith(b'LAYR_CHROMIUM_BACKEND='):
+            return field.partition(b'=')[2].decode(errors='replace')
+    return 'wayland'
+
+
+def select_chromium_backend(options, facts, profile):
+    explicit = getattr(options, 'chromium_backend', None) or os.environ.get('LAYR_CHROMIUM_BACKEND')
+    current = configured_chromium_backend()
+    if explicit is not None:
+        return validate_chromium_backend(explicit)
+    if profile == 'kiosk' and not options.yes and sys.stdin.isatty():
+        installed = (ROOT / 'layr.env').is_file()
+        intel_kiosk = facts['architecture'] in ('i386', 'amd64')
+        default = current if installed else ('x11' if intel_kiosk else 'wayland')
+        if intel_kiosk:
+            print('Older Intel tablets: X11 through XWayland is recommended for touch. Native Wayland remains selectable. This does not verify service startup.')
+        return validate_chromium_backend(input(f'Chromium backend (x11 / wayland) [{default}]: ').strip() or default)
+    return validate_chromium_backend(current)
+
+
+def save_chromium_backend(backend):
+    path = ROOT / 'layr.env'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text().splitlines() if path.is_file() else []
+    lines = [line for line in lines if not line.startswith('LAYR_CHROMIUM_BACKEND=')]
+    temp = path.with_suffix('.tmp')
+    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+        handle.write('\n'.join(lines + ['LAYR_CHROMIUM_BACKEND=' + backend]) + '\n')
+    temp.chmod(0o600)
+    temp.replace(path)
+
+
+def invalidate_display_confirmation():
+    path = ROOT / 'state/display-verification.json'
+    if path.exists():
+        try:
+            record = json.loads(path.read_text())
+            if not isinstance(record, dict):
+                record = {}
+        except ValueError:
+            record = {}
+        record['invalidated_at'] = datetime.now(timezone.utc).isoformat()
+        record['invalidated_reason'] = 'Chromium backend changed; service-based physical validation required'
+        path.write_text(json.dumps(record) + '\n')
+
+
+def backend_config(options):
+    backend = getattr(options, 'chromium_backend', None)
+    current = configured_chromium_backend()
+    print('Configured Chromium backend:', current)
+    if backend is None:
+        print('Select with layr backend --chromium-backend x11|wayland, or the Display and touchscreen menu.')
+        return
+    validate_chromium_backend(backend)
+    if not (ROOT / 'layr.env').is_file():
+        raise RuntimeError('Install LAYR before changing its browser backend')
+    require_privileges(interactive=not options.yes)
+    packages = ['xwayland'] if backend == 'x11' else []
+    for package in packages:
+        if not re.search(r'Candidate:\s+(?!\(none\))\S+', capture('apt-cache', 'policy', package)):
+            raise RuntimeError(f'No compatible APT candidate for {package}; browser configuration was not changed')
+    if packages:
+        apt_plan(packages)
+    if not options.yes and not options.dry_run:
+        if not sys.stdin.isatty() or input(f'Save Chromium backend {backend}? The kiosk will not restart; changed backends disable boot startup. [y/N] ').lower() != 'y':
+            raise RuntimeError('Cancelled; browser configuration was not changed')
+    changed = backend != current
+    if changed and capture('systemctl', 'list-unit-files', '--no-legend', 'layr-kiosk.service').startswith('layr-kiosk.service '):
+        execute(['sudo', 'systemctl', 'disable', 'layr-kiosk.service'], options.dry_run)
+    if packages:
+        install_packages(packages, options.dry_run)
+    if not options.dry_run:
+        if changed:
+            invalidate_display_confirmation()
+        save_chromium_backend(backend)
+    print(f'Chromium backend {backend}: ' + ('dry run; no configuration changed.' if options.dry_run else 'saved; the current browser was not restarted.'))
+    print('Use layr recover to stop an existing kiosk, then layr switch layr for a service-based preview. Only after physical validation: layr enable-kiosk.')
+
+
+def require_privileges(interactive=False):
+    """Use the same validation as the shell installers, without changing files."""
+    if os.geteuid() == 0:
+        raise RuntimeError('Run LAYR as its normal installation owner, not root. Use the root account only to install sudo and grant that user access; see docs/mecer-bt26-test.md.')
+    lib = DEPLOY / 'lib.sh'
+    if not lib.is_file() or not lib.read_text().rstrip().endswith('\n# LAYR_SCRIPT_END'):
+        raise RuntimeError('Privilege preflight requires a complete deploy/lib.sh; no changes were made')
+    interactive = interactive and sys.stdin.isatty()
+    try:
+        result = subprocess.run(
+            ['bash', '-c', '. "$1"; LAYR_PRIVILEGE_INTERACTIVE=$2; require_not_root',
+             'layr-privilege-check', str(lib), '1' if interactive else '0'],
+            text=True, stdout=subprocess.PIPE, stderr=None if interactive else subprocess.PIPE,
+            timeout=None if interactive else 30,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('sudo privilege validation timed out; no changes were made') from error
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() if result.stderr else 'sudo privilege validation failed; see the setup instructions above. No changes were made.')
+
+
+def install(options, facts):
+    if not facts['supported']:
+        raise RuntimeError(f'Unsupported OS/architecture: {facts["distribution"].get("ID", "unknown")} {facts["distribution"].get("VERSION_ID", "unknown")} / {facts["architecture"]} (kernel {facts.get("kernel_architecture", "unknown")}); require Debian 12, Raspberry Pi OS or MainsailOS Bookworm; i386, amd64, armhf (ARMv7+) or arm64')
+    if os.geteuid() == 0:
+        raise RuntimeError('Run as the intended LAYR user, not root; sudo is used only where needed')
+    for name in ('install.sh', 'lib.sh', 'layr-display.sh', 'rollback.sh', 'uninstall.sh', 'layr-session.py', 'pam/layr-kiosk'):
+        script = DEPLOY / name
+        if not script.is_file() or not script.read_text().rstrip().endswith('\n# LAYR_SCRIPT_END'):
+            raise RuntimeError(f'Incomplete management script: {script}; no changes made')
+    require_privileges(interactive=not options.yes)
+    global_cli = Path('/usr/local/bin/layr')
+    if global_cli.exists() or global_cli.is_symlink():
+        if not global_cli.is_symlink() or os.readlink(global_cli) != str(ROOT / 'management/layr'):
+            raise RuntimeError('/usr/local/bin/layr belongs to another installation; no changes made')
+    print_hardware(facts)
+    state = saved()
+    profile = options.profile or state.get('profile')
+    if getattr(options, 'command', None) == 'configure' and sys.stdin.isatty():
+        if not options.profile:
+            profile = input(f'Profile (headless / desktop / kiosk) [{profile or "headless"}]: ').strip() or profile or 'headless'
+    if not profile:
+        if not sys.stdin.isatty():
+            raise RuntimeError('Automation requires --profile headless|desktop|kiosk')
+        profile = input('Profile (headless / desktop / kiosk): ').strip()
+    if profile not in ('headless', 'desktop', 'kiosk'):
+        raise RuntimeError('Unknown installation profile')
+    backend = select_chromium_backend(options, facts, profile)
+    previous_backend = configured_chromium_backend()
+    print('Chromium backend:', backend, '(XWayland)' if backend == 'x11' else '(native Wayland)')
+    endpoint = options.moonraker or installed_endpoint() or state.get('moonraker')
+    if getattr(options, 'command', None) == 'configure' and sys.stdin.isatty() and not options.moonraker:
+        endpoint = input(f'Moonraker IP, hostname or URL [{endpoint or "localhost:7125"}]: ').strip() or endpoint or 'localhost:7125'
+    if not endpoint and sys.stdin.isatty():
+        endpoint = prompt_endpoint()
+    if not endpoint:
+        raise RuntimeError('Automation requires --moonraker URL')
+    endpoint = moonraker(endpoint)
+    dist = Path(options.dist).resolve() if options.dist else (ROOT / 'current').resolve()
+    if not options.dist and not (dist / 'index.html').is_file():
+        dist = DEPLOY.parent / 'dist'
+    if not (dist / 'index.html').is_file():
+        raise RuntimeError('Prebuilt assets missing: pass --dist DIR (build on a supported workstation; Node is not installed on targets)')
+    port = '7180'
+    env_file = ROOT / 'layr.env'
+    if env_file.is_file():
+        match = re.search(r'^LAYR_PORT=([0-9]+)$', env_file.read_text(), re.M)
+        if match:
+            port = match[1]
+    if not 1 <= int(port) <= 65535 or int(port) == 7125:
+        raise RuntimeError('Saved LAYR port is invalid; repair layr.env before continuing')
+    if facts['disk_free_mb'] < 256:
+        raise RuntimeError('At least 256 MiB free space is required before installation')
+    packages = ['python3', 'curl', 'ca-certificates']
+    if profile == 'kiosk':
+        if facts['ram_mb'] < 512:
+            raise RuntimeError('Dedicated Chromium kiosk requires at least 512 MiB RAM')
+        if facts['services']['display-manager.service'] == 'active':
+            raise RuntimeError('Desktop display manager is active; use --profile desktop to preserve its session')
+        if any(facts['graphical_environment'].get(key) for key in ('DISPLAY', 'WAYLAND_DISPLAY')):
+            raise RuntimeError('Graphical session detected; use --profile desktop')
+        if 'connected' not in facts['connectors'].values():
+            raise RuntimeError('No connected DRM display found; use --profile headless or attach the kiosk display')
+        packages += ['cage', 'chromium', 'libpam-systemd', 'dbus-user-session', 'libinput-tools', 'kbd', 'libgl1-mesa-dri', 'libegl1', 'libgbm1', 'polkitd']
+        if backend == 'x11':
+            packages.append('xwayland')
+    for package in packages:
+        policy = capture('apt-cache', 'policy', package)
+        if not re.search(r'Candidate:\s+(?!\(none\))\S+', policy):
+            raise RuntimeError(f'No compatible APT candidate for {package} on {facts["architecture"]}; check Bookworm repositories (no changes made)')
+    apt_plan(packages)
+    runtime_preflight(profile)
+    reachable, detail = probe_moonraker(endpoint)
+    print(f'Moonraker connectivity: {detail}')
+    if not reachable and not getattr(options, 'allow_offline', False):
+        raise RuntimeError('Moonraker connectivity failed; check address/port/authorization or explicitly use --allow-offline to stage installation')
+    if getattr(options, 'command', None) == 'preflight':
+        print('preflight=ok; changed=no; Node.js is not required on targets')
+        return
+    if not options.yes and not options.dry_run:
+        if not sys.stdin.isatty() or input(f'Install {profile}, Moonraker {endpoint}? [y/N] ').lower() != 'y':
+            raise RuntimeError('Cancelled; use --yes for automation')
+    autostart = getattr(options, 'autostart', False)
+    if autostart and profile != 'kiosk':
+        raise RuntimeError('--autostart requires --profile kiosk')
+    # Phase 1: a useful, independently validated web service comes first.
+    install_packages(['python3', 'curl', 'ca-certificates'], options.dry_run)
+    args = ['bash', DEPLOY / 'install.sh', '--dist', dist, '--moonraker', endpoint, '--port', port, '--yes', '--headless']
+    if options.dry_run:
+        args.append('--dry-run')
+    execute(args)
+    if not options.dry_run:
+        http = probe_web()
+        if not http['ok']:
+            raise RuntimeError('Web installation finished but local HTTP validation failed: ' + http['error'] + '. Kiosk was not started. Use layr kiosk-diagnose; recovery: layr recover')
+    if profile == 'kiosk':
+        # Disable persistence before any later kiosk phase can fail. This does not
+        # stop an existing graphical process or affect another display service.
+        if capture('systemctl', 'list-unit-files', '--no-legend', 'layr-kiosk.service').startswith('layr-kiosk.service '):
+            execute(['sudo', 'systemctl', 'disable', 'layr-kiosk.service'], options.dry_run)
+        try:
+            install_packages(packages[3:], options.dry_run)
+            kiosk_args = ['bash', DEPLOY / 'install.sh', '--kiosk-only', '--dist', dist, '--moonraker', endpoint, '--port', port, '--yes']
+            if options.dry_run:
+                kiosk_args.append('--dry-run')
+            execute(kiosk_args)
+        except subprocess.SubprocessError as error:
+            raise RuntimeError('Web service is installed; kiosk setup failed and was not started. Check layr kiosk-diagnose; SSH recovery: layr recover') from error
+    if not options.dry_run:
+        if backend != previous_backend:
+            if profile != 'kiosk' and capture('systemctl', 'list-unit-files', '--no-legend', 'layr-kiosk.service').startswith('layr-kiosk.service '):
+                execute(['sudo', 'systemctl', 'disable', 'layr-kiosk.service'])
+            invalidate_display_confirmation()
+        save_chromium_backend(backend)
+        path = ROOT / 'state/installer.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix('.tmp')
+        temp.write_text(json.dumps(dict(profile=profile, moonraker=endpoint)) + '\n')
+        temp.replace(path)
+    print(f'Preview: http://127.0.0.1:{port}/?moonraker={quote(endpoint, safe="")}#/home')
+    if autostart:
+        if display_confirmed() and capture('systemctl', 'is-active', 'KlipperScreen.service') != 'active':
+            flags = ['--yes'] + (['--dry-run'] if options.dry_run else [])
+            execute(['bash', DEPLOY / 'layr-display.sh', 'to-layr', *flags], options.dry_run)
+        else:
+            print('Automatic kiosk startup is held until a visible display test succeeds. Use layr switch layr, then layr enable-kiosk after physical confirmation.')
+    print('Web installation complete; graphical display and touchscreen remain unverified.' if not options.dry_run else 'Dry run complete; no installation changes made.')
+    print('Management: layr; SSH recovery: layr recover; rollback: layr rollback --yes; uninstall: layr uninstall --yes')
+    print('Kiosk preview: layr switch layr. Boot startup remains a separate, physically confirmed action.')
+
+
+
+def install_packages(packages, dry=False):
+    execute(['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'NEEDRESTART_MODE=l', 'apt-get', 'install', '-y', '--no-remove', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confold', *packages], dry)
+
+
+def apt_plan(packages):
+    result = subprocess.run(['apt-get', '--simulate', '--no-remove', '--no-install-recommends', 'install', *packages], capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError('APT dependency resolution failed before changes: ' + result.stderr.strip())
+
+
+def runtime_preflight(profile):
+    if not Path('/run/systemd/system').is_dir():
+        raise RuntimeError('A running systemd system is required; containers/chroots without systemd are unsupported')
+    if profile == 'kiosk':
+        if not Path('/dev/tty7').exists() or not list(Path('/dev/dri').glob('card*')):
+            raise RuntimeError('Kiosk requires a Linux VT (/dev/tty7) and DRM device (/dev/dri/card*); check kernel graphics support')
+
+
+def probe_moonraker(endpoint):
+    # A reachable HTTP server is insufficient: require a Moonraker API result.
+    try:
+        result = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--connect-timeout', '3', '--max-time', '8', '--max-filesize', '2000000', '--proto', '=http,https', endpoint + '/server/info'], text=True, capture_output=True, timeout=10)
+        if result.returncode:
+            return False, f'HTTP/network failure: {result.stderr.strip()}'
+        data = json.loads(result.stdout)
+        if not isinstance(data, dict) or not isinstance(data.get('result'), dict) or 'moonraker_version' not in data['result']:
+            return False, 'response is not a Moonraker server/info result'
+        return True, 'Moonraker API reachable (browser CORS/WebSocket access still needs device validation)'
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        return False, str(error)
+
+
+def display_config(options):
+    print_hardware(detect())
+    cursor = options.cursor
+    if not cursor and sys.stdin.isatty() and not getattr(options, 'inventory_only', False):
+        cursor = input('Cursor: hidden / visible [leave unchanged]: ').strip()
+    if cursor:
+        path = ROOT / 'layr.env'
+        if not path.is_file():
+            raise RuntimeError('Install LAYR before saving display settings')
+        if cursor not in ('hidden', 'visible'):
+            raise RuntimeError('Cursor must be hidden or visible')
+        if not options.dry_run:
+            lines = [line for line in path.read_text().splitlines() if not line.startswith('LAYR_HIDE_CURSOR=')]
+            temp = path.with_suffix('.tmp')
+            with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+                handle.write('\n'.join(lines + ['LAYR_HIDE_CURSOR=' + ('1' if cursor == 'hidden' else '0')]) + '\n')
+            temp.chmod(0o600)
+            temp.replace(path)
+        print('Cursor setting saved (dry run)' if options.dry_run else 'Cursor setting saved; restart the active kiosk to apply')
+    print('Touchscreen inventory: sudo libinput list-devices')
+    print('Touch event test: sudo timeout 15s libinput debug-events (exit 124 means sampling timeout)')
+    print('Resolution uses the panel preferred mode. Rotation/calibration changes are not implemented; no input rules or boot files were changed.')
+
+
+def power_module():
+    path = DEPLOY / 'layr-display-power.py'
+    if not path.is_file() or not path.read_text().rstrip().endswith('\n# LAYR_SCRIPT_END'):
+        raise RuntimeError('Complete display-power module missing; use a reviewed installer update')
+    spec = importlib.util.spec_from_file_location('layr_display_power', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def trusted_power_helper():
+    for directory in (POWER_HELPER.parent, *POWER_HELPER.parent.parents):
+        if directory.is_symlink() or (directory.exists() and (directory.stat().st_uid != 0 or directory.stat().st_mode & 0o022)):
+            raise RuntimeError('Privileged display-power directory is not trusted: ' + str(directory))
+    if POWER_HELPER.exists() or POWER_HELPER.is_symlink():
+        info = POWER_HELPER.lstat()
+        if POWER_HELPER.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022 or not POWER_HELPER.read_text().startswith('#!/usr/bin/python3\n# LAYR-managed display power controller v1.'):
+            raise RuntimeError('Existing privileged display-power helper is not a trusted LAYR copy')
+
+
+def display_power(options):
+    action = options.target or 'status'
+    if action not in ('status', 'diagnose', 'enable', 'disable', 'configure', 'wake'):
+        raise RuntimeError('Display power: use status, diagnose, enable, disable, configure or wake')
+    module = power_module()
+    if action in ('status', 'diagnose'):
+        data = module.diagnostics()
+        if getattr(options, 'json', False):
+            print(json.dumps(data, indent=2))
+        else:
+            config = data['settings']
+            support = data['support']
+            print('Display power:', 'enabled (opt-in)' if config['enabled'] else 'disabled (default)')
+            print('Hardware support:', 'capability checks passed; physical validation required' if support['supported'] else '; '.join(support['reasons']))
+            for device in support['backlights']:
+                print('Backlight:', device['name'], f"brightness={device['brightness']}/{device['maximum']} bl_power={device['bl_power']}")
+            for device in support['inputs']:
+                if device['power']:
+                    print('Power button:', device['name'], device['node'])
+            timeout = config['timeout_minutes']
+            print('Screen off:', 'Never' if timeout is None else str(timeout) + ' minutes')
+            print('Dim before off:', f"{config['dim_percent']}% after {timeout * 48:g} seconds" if config['dim'] and timeout is not None else 'disabled')
+            print('Wake: short power-button press; SSH: layr display-power wake')
+            print('Controller:', data['runtime'].get('state', 'unknown'))
+            service = data.get('service', {})
+            print('Service:', service.get('stdout') or service.get('stderr') or 'unknown/not installed')
+            if data['runtime'].get('session_ready') is False:
+                print('Waiting for the kiosk local session; idle transitions are held.')
+            print(data['logind_policy'])
+            print(data['note'])
+            print('Detailed JSON: layr display-power diagnose --json; logs: sudo journalctl -u layr-display-power -b')
+        return
+    require_privileges(interactive=not options.yes)
+    values = {}
+    for attr, key in (('idle_minutes', 'timeout_minutes'), ('power_dim', 'dim'), ('dim_percent', 'dim_percent'), ('wake_method', 'wake_method'), ('backlight', 'backlight')):
+        value = getattr(options, attr, None)
+        if value is not None:
+            values[key] = None if attr == 'idle_minutes' and value == 'never' else (int(value) if attr == 'idle_minutes' else value)
+    module.settings(values)
+    if action in ('enable', 'configure'):
+        if saved().get('profile') != 'kiosk':
+            raise RuntimeError('Display power requires the explicitly selected kiosk profile; headless/desktop and Raspberry Pi defaults are unchanged')
+        previous = module.Manager().config()
+        support = module.discover(selected=values.get('backlight', previous.get('backlight')))
+        if not support['supported']:
+            raise RuntimeError('; '.join(support['reasons']))
+        for name in ('systemd-inhibit', 'udevadm', 'loginctl'):
+            if not shutil.which(name):
+                raise RuntimeError(f'{name} is required before enabling display power; no packages/settings changed')
+        if action == 'enable' and capture('systemctl', 'is-active', 'layr-kiosk.service') != 'active':
+            raise RuntimeError('Start and physically validate a service-based kiosk preview first')
+    # Validate before EVERY root invocation, including wake/disable/recovery.
+    trusted_power_helper()
+    if action != 'wake' and not options.yes and not options.dry_run:
+        message = 'Enable display dim/off? Short power presses will wake the screen while this service runs. Linux keeps running.' if action == 'enable' else 'Apply display-power ' + action + '?'
+        if not sys.stdin.isatty() or input(message + ' [y/N] ').strip().lower() != 'y':
+            raise RuntimeError('Cancelled; no display-power changes made')
+    if action in ('enable', 'configure'):
+        # Never execute a root daemon out of the user-writable management tree.
+        execute(['sudo', 'install', '-d', '-o', 'root', '-g', 'root', '-m', '755', POWER_HELPER.parent], options.dry_run)
+        execute(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '755', DEPLOY / 'layr-display-power.py', POWER_HELPER], options.dry_run)
+    elif not POWER_HELPER.is_file():
+        if action == 'disable':
+            print('Display power is disabled; its optional root service is not installed.')
+            return
+        raise RuntimeError('No installed display-power controller; use display-power status or enable first')
+    args = ['sudo', '/usr/bin/python3', '-I', POWER_HELPER, action]
+    if values:
+        args += ['--settings', json.dumps(values)]
+    execute(args, options.dry_run)
+    print('Display-power ' + action + (' planned; no changes made.' if options.dry_run else ' completed. Check status/journal and validate on the physical device.'))
+    print('Recovery: layr display-power wake; disable: layr display-power disable. Normal local shutdown: sudo systemctl poweroff')
+
+
+def power_menu(options):
+    action = submenu('Display power management (optional; disabled by default)', [('1', 'Hardware support and diagnostics', 'status'), ('2', 'Enable', 'enable'), ('3', 'Disable and restore original brightness', 'disable'), ('4', 'Inactivity timeout', 'timeout'), ('5', 'Dim settings', 'dim'), ('6', 'Restore screen now', 'wake'), ('7', 'Wake method: power button', 'method')])
+    if action in (None, 'method'):
+        if action == 'method':
+            print('Wake method: short power-button press. Linux is never suspended. Remote wake: layr display-power wake')
+        return action == 'method'
+    options.command = 'display-power'
+    options.target = action
+    if action == 'timeout':
+        value = submenu('Screen-off timeout (dim starts at 80% of timeout)', [('1', '1 minute', '1'), ('2', '5 minutes (default)', '5'), ('3', '10 minutes', '10'), ('4', 'Never', 'never')])
+        if value is None:
+            return False
+        options.target, options.idle_minutes = 'configure', value
+    elif action == 'dim':
+        value = submenu('Dim before screen-off', [('1', 'Enable dimming', 'on'), ('2', 'Disable dimming', 'off')])
+        if value is None:
+            return False
+        options.target, options.power_dim = 'configure', value == 'on'
+        if options.power_dim:
+            value = input('Dim percentage of configured normal brightness [20]: ').strip() or '20'
+            if not value.isdigit() or not 1 <= int(value) <= 100:
+                raise RuntimeError('Dim percentage must be between 1 and 100')
+            options.dim_percent = int(value)
+    dispatch(options)
+    return True
+
+
+def require_owner():
+    if os.geteuid() == 0:
+        raise RuntimeError('Run layr as its installation owner, not root')
+    if ROOT.exists() and ROOT.stat().st_uid != os.getuid():
+        raise RuntimeError(f'Run layr as the owner of {ROOT}')
+    os.environ['LAYR_HOME'] = str(ROOT)
+
+
+def configure(options):
+    """Configure the connection without APT, new releases or lost rollback state."""
+    path = ROOT / 'layr.env'
+    if not path.is_file():
+        raise RuntimeError('LAYR is not installed; run layr install first')
+    state = saved()
+    profile = state.get('profile')
+    if options.profile and options.profile != profile:
+        raise RuntimeError('Profile changes require layr install --profile (dependencies and services must be checked)')
+    values = dict(line.split('=', 1) for line in path.read_text().splitlines() if '=' in line)
+    endpoint = options.moonraker
+    if not endpoint:
+        if not sys.stdin.isatty():
+            raise RuntimeError('Automation requires --moonraker URL')
+        default = values.get('LAYR_MOONRAKER_URL', 'http://localhost:7125')
+        endpoint = prompt_endpoint(default)
+    endpoint = moonraker(endpoint)
+    reachable, detail = probe_moonraker(endpoint)
+    print(f'Moonraker connectivity: {detail}')
+    if not reachable and not getattr(options, 'allow_offline', False):
+        raise RuntimeError('Moonraker connectivity failed; existing configuration retained (or explicitly use --allow-offline)')
+    if not options.yes and not options.dry_run:
+        if not sys.stdin.isatty() or input(f'Save Moonraker {endpoint}? [y/N] ').lower() != 'y':
+            raise RuntimeError('Cancelled; use --yes for automation')
+    if not options.dry_run:
+        lines = [line for line in path.read_text().splitlines() if not line.startswith('LAYR_MOONRAKER_URL=')]
+        temp = path.with_suffix('.tmp')
+        # Restrict before writing, so no broader-permission intermediate file exists.
+        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+            handle.write('\n'.join(lines + ['LAYR_MOONRAKER_URL=' + endpoint]) + '\n')
+        temp.chmod(0o600)
+        temp.replace(path)
+        # The env file is authoritative. Ignore any older endpoint in installer.json.
+    print(f'Moonraker: {endpoint}' + (' (dry run)' if options.dry_run else ' saved; restart the active kiosk to apply'))
+    port = values.get('LAYR_PORT', '7180')
+    print(f'Preview: http://127.0.0.1:{port}/?moonraker={quote(endpoint, safe="")}#/home')
+
+
+def service_control(action, dry=False):
+    require_privileges(interactive=sys.stdin.isatty())
+    # Resume only an already-enabled dedicated kiosk; a first activation is explicit.
+    if action == 'start':
+        execute(['sudo', 'systemctl', 'start', 'layr-web.service'], dry)
+        if capture('systemctl', 'is-enabled', 'layr-kiosk.service') == 'enabled':
+            if capture('systemctl', 'is-active', 'KlipperScreen.service') == 'active':
+                raise RuntimeError('KlipperScreen is active; web started, display unchanged. Use layr switch layr to switch explicitly')
+            flags = ['--yes'] + (['--dry-run'] if dry else [])
+            execute(['bash', DEPLOY / 'layr-display.sh', 'to-layr', *([] if display_confirmed() else ['--preview']), *flags], dry)
+        else:
+            print('Web server started. Activate a dedicated kiosk with: layr switch layr')
+    elif action == 'stop':
+        if capture('systemctl', 'list-unit-files', '--no-legend', 'layr-kiosk.service').startswith('layr-kiosk.service '):
+            execute(['sudo', 'systemctl', 'stop', 'layr-kiosk.service'], dry)
+        execute(['sudo', 'systemctl', 'stop', 'layr-web.service'], dry)
+        print('LAYR stopped temporarily; boot enablement is unchanged. Use layr recover to disable the kiosk.')
+    else:
+        execute(['sudo', 'systemctl', 'restart', 'layr-web.service'], dry)
+        if capture('systemctl', 'is-active', 'layr-kiosk.service') == 'active':
+            execute(['sudo', 'systemctl', 'restart', 'layr-kiosk.service'], dry)
+
+
+
+def input_bitmap(path, word_bits):
+    try:
+        value = 0
+        for word in re.split(r'[\s,]+', path.read_text().strip()):
+            value = (value << word_bits) | int(word, 16)
+        return value
+    except (OSError, ValueError):
+        return 0
+
+
+def touch_inventory(base, inputs):
+    devices = []
+    kernel = capture('uname', '-m') or os.uname().machine
+    word_bits = 64 if kernel in ('x86_64', 'aarch64', 'arm64', 'amd64') else 32
+    for event in sorted((base / 'sys/class/input').glob('event*')):
+        properties = capture('udevadm', 'info', '--query=property', '--path', str(event))
+        source = None
+        if 'ID_INPUT_TOUCHSCREEN=1' in properties.splitlines():
+            source = 'udev ID_INPUT_TOUCHSCREEN'
+        else:
+            # Standard kernel input interfaces distinguish direct touch from a
+            # touchpad, regardless of names such as ELAN1001 or Goodix.
+            direct = input_bitmap(event / 'device/properties', word_bits) & (1 << 1)
+            absolute = input_bitmap(event / 'device/capabilities/abs', word_bits)
+            keys = input_bitmap(event / 'device/capabilities/key', word_bits)
+            multitouch_xy = absolute & ((1 << 53) | (1 << 54)) == ((1 << 53) | (1 << 54))
+            single_touch = absolute & 3 == 3 and keys & (1 << 330)
+            if direct and (multitouch_xy or single_touch):
+                source = 'kernel direct-touch properties/capabilities'
+        if source:
+            name = event / 'device/name'
+            devices.append(dict(event=event.name, node='/dev/input/' + event.name, name=name.read_text().strip() if name.is_file() else 'unnamed', source=source))
+    if devices:
+        source = 'udev' if any('udev' in device['source'] for device in devices) else 'kernel input interfaces'
+        return dict(detection='identified by ' + source + '; function unverified', devices=devices)
+    if inputs.exists() and re.search(r'touch|goodix|egalax|ads7846', inputs.read_text(), re.I):
+        return dict(detection='possible touchscreen by name; function unverified', devices=[])
+    return dict(detection='not identified; inspect libinput/kernel logs (absence not established)', devices=[])
+
+
+def print_hardware(facts):
+    distro = facts.get('distribution', {})
+    print('Device:', facts.get('model', 'unknown'))
+    print('OS:', distro.get('PRETTY_NAME') or ' '.join(str(distro.get(k, 'unknown')) for k in ('ID', 'VERSION_ID')))
+    cpu = re.search(r'^Model name:\s*(.+)$', facts.get('cpu', ''), re.M)
+    if cpu:
+        print('CPU:', cpu[1])
+    print('Graphics drivers:', ', '.join(f'{card}={Path(driver).name}' for card, driver in facts.get('graphics', {}).items()) or 'not reported')
+    print('Architecture:', facts.get('architecture', 'unknown'), '(kernel:', facts.get('kernel_architecture', 'unknown') + ')')
+    print('RAM:', facts.get('ram_mb', '?'), 'MiB total;', facts.get('ram_available_mb') or 'unknown', 'MiB available')
+    print('Disk:', facts.get('disk_free_mb', '?'), 'MiB free')
+    print('Displays:', ', '.join(f'{name}={state}' for name, state in facts.get('connectors', {}).items()) or 'none reported')
+    print('Touch detection:', facts.get('touchscreen', 'unknown'))
+    for device in facts.get('touch_devices', []):
+        print('Touch device:', device.get('name', 'unnamed'), device.get('node', '/dev/input/' + device.get('event', '?')), '(' + device.get('source', 'unknown') + ')')
+    print('Touch function: unverified; a device name or active service is not an input test')
+
+
+def run_probe(command, timeout=8):
+    try:
+        result = subprocess.run(list(map(str, command)), text=True, capture_output=True, timeout=timeout)
+        return dict(command=list(map(str, command)), returncode=result.returncode, stdout=result.stdout.strip(), stderr=result.stderr.strip())
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return dict(command=list(map(str, command)), returncode=None, stdout='', stderr=str(error))
+
+
+def probe_web():
+    port = '7180'
+    path = ROOT / 'layr.env'
+    if path.is_file():
+        matches = re.findall(r'^LAYR_PORT=([0-9]+)$', path.read_text(), re.M)
+        if matches:
+            port = matches[-1]
+    if not 1 <= int(port) <= 65535:
+        return dict(ok=False, error='Invalid local web port', url='unknown')
+    url = f'http://127.0.0.1:{port}/'
+    result = run_probe(['curl', '--fail', '--silent', '--show-error', '--max-time', '3', '--max-filesize', '2000000', url], timeout=5)
+    error = result['stderr'] or ('HTTP probe failed' if result['returncode'] != 0 else '')
+    if result['returncode'] == 0:
+        expected = ROOT / 'current/index.html'
+        try:
+            if hashlib.sha256(result['stdout'].encode()).digest() != hashlib.sha256(expected.read_text().strip().encode()).digest():
+                error = 'HTTP response does not match the installed LAYR index; check port conflicts or stale services'
+        except OSError as exc:
+            error = 'Installed index unavailable: ' + str(exc)
+    return dict(ok=result['returncode'] == 0 and not error, error=error, url=url)
+
+
+def status_snapshot():
+    facts = detect()
+    try:
+        profile = saved().get('profile', 'legacy/unknown')
+    except (ValueError, RuntimeError) as error:
+        profile = 'invalid installer state: ' + str(error)
+    facts['installation'] = dict(root=str(ROOT), current=str((ROOT / 'current').resolve()), profile=profile, moonraker=installed_endpoint(), chromium_backend=configured_chromium_backend())
+    facts['web_http'] = probe_web()
+    facts['kiosk_process'] = 'running' if facts.get('services', {}).get('layr-kiosk.service') == 'active' else 'not running/unknown'
+    facts['service_chromium_backend'] = running_service_backend()
+    facts['graphical_display'] = 'unverified; requires an actual visible display test'
+    facts['touchscreen_function'] = 'unverified; requires real input events and UI interaction'
+    try:
+        facts['last_operator_confirmation'] = json.loads((ROOT / 'state/display-verification.json').read_text())
+    except (OSError, ValueError):
+        facts['last_operator_confirmation'] = None
+    return facts
+
+
+def print_status(facts):
+    print_hardware(facts)
+    install = facts.get('installation', {})
+    services = facts.get('services', {})
+    print('Profile:', install.get('profile', 'unknown'))
+    print('Moonraker:', install.get('moonraker') or 'not configured')
+    print('Chromium backend:', install.get('chromium_backend', 'wayland'))
+    print('Running service backend:', facts.get('service_chromium_backend') or 'unverified/not running')
+    print('Web service:', services.get('layr-web.service', 'unknown'))
+    http = facts.get('web_http', {})
+    print('Local HTTP:', 'responding' if http.get('ok') else 'not healthy: ' + http.get('error', 'unknown'))
+    print('Kiosk process:', facts.get('kiosk_process', 'unknown'))
+    print('Graphical display:', facts.get('graphical_display', 'unverified'))
+    print('Touchscreen function:', facts.get('touchscreen_function', 'unverified'))
+    print('Kiosk boot startup:', capture('systemctl', 'is-enabled', 'layr-kiosk.service') or 'disabled/unknown')
+    prior = facts.get('last_operator_confirmation')
+    if prior:
+        print('Previous operator confirmation:', prior.get('at', 'unknown'), '(historical, not a live rendering check)')
+    print('Detailed evidence: layr kiosk-diagnose; JSON: layr diagnose or layr status --json')
+    print('SSH recovery: layr recover (stop and disable only the LAYR kiosk)')
+
+
+def kiosk_diagnostics():
+    commands = [
+        ['systemctl', 'show', 'layr-kiosk.service', '-p', 'ActiveState', '-p', 'SubState', '-p', 'MainPID', '-p', 'NRestarts', '-p', 'ExecMainStatus', '-p', 'User', '-p', 'PAMName', '-p', 'TTYPath', '-p', 'ControlGroup'],
+        ['systemctl', 'cat', 'layr-kiosk.service'],
+        ['cat', '/etc/pam.d/layr-kiosk'],
+        ['journalctl', '-b', '-u', 'layr-kiosk.service', '-u', 'layr-web.service', '-n', '200', '--no-pager', '-o', 'short-monotonic'],
+        ['loginctl', 'list-sessions', '--no-legend'],
+        ['systemctl', 'status', 'polkit.service', 'systemd-logind.service', 'dbus.service', '--no-pager'],
+        ['pkaction', '--action-id', 'org.freedesktop.login1.chvt', '--verbose'],
+        ['id'],
+        ['cage', '-h'],
+        [shutil.which('chromium') or shutil.which('chromium-browser') or 'chromium', '--version'],
+        ['dpkg-query', '-W', 'cage', 'chromium', 'libwlroots10', 'libpam-systemd', 'dbus-user-session', 'libegl1', 'libgbm1', 'libgl1-mesa-dri', 'libinput-tools', 'libwayland-client0', 'libwayland-server0', 'libgles2', 'libseat1', 'polkitd', 'xwayland'],
+    ]
+    results = [run_probe(command) for command in commands]
+    processes = run_probe(['ps', '-eo', 'pid,ppid,sid,pgid,tty,stat,comm'])
+    if processes['stdout']:
+        processes['stdout'] = '\n'.join(line for line in processes['stdout'].splitlines() if re.search(r'cage|chromium|Xwayland|sd-pam|layr', line))
+    results.append(processes)
+    nodes = []
+    for path in [Path('/dev/tty7'), *sorted(Path('/dev/dri').glob('*'))]:
+        try:
+            info = path.stat()
+            nodes.append(dict(path=str(path), mode=oct(info.st_mode & 0o777), uid=info.st_uid, gid=info.st_gid, invoking_user_read=os.access(path, os.R_OK), invoking_user_write=os.access(path, os.W_OK)))
+        except OSError as error:
+            nodes.append(dict(path=str(path), error=str(error)))
+    process_env = {}
+    pid = capture('systemctl', 'show', 'layr-kiosk.service', '-p', 'MainPID', '--value')
+    if pid.isdigit() and int(pid) > 0:
+        try:
+            allowed = {'XDG_RUNTIME_DIR', 'WAYLAND_DISPLAY', 'DISPLAY', 'XDG_SESSION_TYPE', 'XDG_SEAT', 'XDG_VTNR', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_SESSION_ID', 'LIBSEAT_BACKEND', 'WLR_BACKENDS', 'WLR_RENDERER', 'LAYR_CHROMIUM_BACKEND'}
+            for field in Path(f'/proc/{pid}/environ').read_bytes().split(b'\0'):
+                key, _, value = field.partition(b'=')
+                if key.decode(errors='replace') in allowed:
+                    process_env[key.decode()] = value.decode(errors='replace')
+        except OSError as error:
+            process_env['read_error'] = str(error)
+    if process_env.get('XDG_SESSION_ID'):
+        results.append(run_probe(['loginctl', 'show-session', process_env['XDG_SESSION_ID'], '-p', 'User', '-p', 'Seat', '-p', 'VTNr', '-p', 'Type', '-p', 'Class', '-p', 'Active', '-p', 'Leader', '-p', 'Remote']))
+    return dict(probes=results, device_permissions=nodes, service_session_environment=process_env, chromium_backend=configured_chromium_backend(),
+                interpretation='Active process, DRM nodes, a display variable or HTTP response do not establish visible rendering. Journal access failures must be reported; rerun journalctl with sudo if denied. Manual Cage/X11 touch operation does not validate the service session or boot startup.')
+
+
+def print_diagnostics(data):
+    print('Configured Chromium backend:', data['chromium_backend'])
+    for probe in data['probes']:
+        print('\n$ ' + ' '.join(probe['command']) + f" [exit={probe['returncode']}]")
+        if probe['stdout']:
+            print(probe['stdout'])
+        if probe['stderr']:
+            print('stderr:', probe['stderr'])
+    print('\nDevice permissions:')
+    for node in data['device_permissions']:
+        print(' ', ' '.join(f'{key}={value}' for key, value in node.items()))
+    print('Service session environment (allowlisted):', data['service_session_environment'] or 'unavailable')
+    print(data['interpretation'])
+
+
+def display_confirmed():
+    try:
+        record = json.loads((ROOT / 'state/display-verification.json').read_text())
+        machine = Path('/etc/machine-id').read_text().strip()
+        return (bool(machine) and record.get('machine_id') == machine
+                and record.get('display') == 'operator-confirmed'
+                and record.get('service') == 'layr-kiosk.service'
+                and record.get('chromium_backend') == configured_chromium_backend()
+                and not record.get('invalidated_at'))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def enable_kiosk(options):
+    backend = validate_chromium_backend(configured_chromium_backend())
+    if not probe_web()['ok'] or capture('systemctl', 'is-active', 'layr-kiosk.service') != 'active':
+        raise RuntimeError('Start a temporary kiosk preview and validate local HTTP first. Boot startup was not enabled.')
+    if options.dry_run:
+        print('Dry run: boot startup would require a visible display test and explicit VISIBLE confirmation.')
+        return
+    if not sys.stdin.isatty():
+        raise RuntimeError('Boot startup requires physical display confirmation from an interactive terminal; --yes cannot bypass it.')
+    if running_service_backend() != backend:
+        raise RuntimeError('Current service backend does not match the saved backend, or cannot be verified. Use layr recover, then layr switch layr and physically validate that service preview. Boot startup was not enabled.')
+    answer = input('Only if the LAYR UI from layr-kiosk.service is visible and usable on this device, type VISIBLE (manual Cage, a flashing cursor or active service is insufficient): ')
+    if answer.strip() != 'VISIBLE':
+        raise RuntimeError('Display was not confirmed. Boot startup remains unchanged; recover with layr recover.')
+    touch = input('Have you tested real touchscreen interaction successfully? [y/N] ').strip().lower() == 'y'
+    if not probe_web()['ok'] or capture('systemctl', 'is-active', 'layr-kiosk.service') != 'active':
+        raise RuntimeError('Kiosk/web stopped during confirmation. Boot startup was not enabled.')
+    if running_service_backend() != backend or configured_chromium_backend() != backend:
+        raise RuntimeError('Service backend changed or became unverifiable during confirmation. Boot startup was not enabled.')
+    path = ROOT / 'state/display-verification.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(at=datetime.now(timezone.utc).isoformat(), release=str((ROOT / 'current').resolve()), machine_id=Path('/etc/machine-id').read_text().strip(), service='layr-kiosk.service', chromium_backend=backend, display='operator-confirmed', touchscreen='operator-confirmed' if touch else 'unverified')) + '\n')
+    execute(['sudo', 'systemctl', 'enable', 'layr-kiosk.service'])
+    print('Kiosk boot startup enabled after operator confirmation. This is not automatic proof of future rendering or input readiness.')
+
+
+def submenu(prompt, choices):
+    while True:
+        print(prompt)
+        for key, label, value in choices:
+            print(f'{key}. {label}')
+        print('0. Back')
+        answer = input('Choice: ').strip()
+        if answer == '0':
+            return None
+        for key, label, value in choices:
+            if answer == key or answer == value:
+                return value
+        print('Invalid selection. Choose a listed option or 0 for Back.')
+
+
+def interactive_menu(base):
+    labels = ['LAYR status', 'Start / stop / restart LAYR', 'Configure Moonraker connections', 'Display and touchscreen', 'Switch display (temporary preview)', 'Update LAYR', 'Roll back previous release', 'Repair installation', 'Uninstall', 'Install LAYR', 'SSH recovery', 'Kiosk error diagnostics', 'Enable kiosk boot startup after display test']
+    commands = ['status', 'control', 'configure', 'display-menu', 'switch', 'update', 'rollback', 'repair', 'uninstall', 'install', 'recover', 'kiosk-diagnose', 'enable-kiosk']
+    while True:
+        options = None
+        try:
+            print('\nLAYR management')
+            for index, label in enumerate(labels, 1):
+                print(f'{index}. {label}')
+            print('0. Exit')
+            choice = input('Choice: ').strip()
+            if choice == '0':
+                return
+            if not choice.isdigit() or not 1 <= int(choice) <= len(commands):
+                print('Invalid selection. Choose a listed option.')
+                continue
+            options = copy.copy(base)
+            options.command = commands[int(choice) - 1]
+            options.target = None
+            if options.command == 'control':
+                options.command = submenu('LAYR service controls', [('1', 'Start LAYR', 'start'), ('2', 'Stop LAYR', 'stop'), ('3', 'Restart LAYR', 'restart')])
+            elif options.command == 'switch':
+                targets = [('1', 'LAYR temporary preview (boot disabled)', 'layr')]
+                if capture('systemctl', 'list-unit-files', '--no-legend', 'KlipperScreen.service').startswith('KlipperScreen.service '):
+                    targets.append(('2', 'KlipperScreen', 'klipperscreen'))
+                options.target = submenu('Display selection', targets)
+                if options.target is None:
+                    continue
+            elif options.command == 'configure':
+                options.command = submenu('Moonraker connections', [('1', 'Show current connection', 'status'), ('2', 'Change connection', 'configure')])
+            elif options.command == 'display-menu':
+                action = submenu('Display and touchscreen', [('1', 'Show inventory', 'inventory'), ('2', 'Hide cursor', 'hidden'), ('3', 'Show cursor', 'visible'), ('4', 'Chromium X11 / XWayland (recommended for older Intel tablets)', 'x11'), ('5', 'Chromium native Wayland (Raspberry Pi default)', 'wayland'), ('6', 'Display power management (optional Intel tablet feature)', 'power')])
+                if action is None:
+                    continue
+                if action == 'power':
+                    if not power_menu(options):
+                        continue
+                    input('Press Enter to return to the main menu...')
+                    continue
+                options.command = 'backend' if action in ('x11', 'wayland') else 'display'
+                options.chromium_backend = action if options.command == 'backend' else None
+                options.cursor = action if action != 'inventory' else None
+                options.inventory_only = action == 'inventory'
+            if options.command is None:
+                continue
+            dispatch(options)
+            print('Operation completed. Review the reported verification limits above.')
+        except EOFError:
+            print('\nEnd of input. Exiting LAYR.')
+            return
+        except KeyboardInterrupt:
+            if options is None or options.command is None:
+                print('\nExiting LAYR.')
+                return
+            print('\nOperation cancelled. Completed steps may remain; check status before retrying.')
+        except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+            print(f'Operation failed: {error}')
+        try:
+            input('Press Enter to return to the main menu...')
+        except EOFError:
+            print('\nEnd of input. Exiting LAYR.')
+            return
+        except KeyboardInterrupt:
+            print()
+
+
+def dispatch(options):
+    if options.command not in ('diagnose', 'status', 'kiosk-diagnose') and not (options.command == 'display-power' and options.target in (None, 'status', 'diagnose')):
+        require_owner()
+    if options.command in ('preflight', 'install', 'update', 'repair', 'start', 'stop', 'restart', 'switch', 'rollback', 'uninstall', 'recover', 'enable-kiosk'):
+        # Validate before profile/endpoint/update prompts and before delegating
+        # to any privileged recovery or service operation. --yes never prompts.
+        require_privileges(interactive=not options.yes)
+    if options.command in ('diagnose', 'status', 'kiosk-diagnose'):
+        facts = status_snapshot()
+        if options.command == 'kiosk-diagnose':
+            facts['kiosk_diagnostics'] = kiosk_diagnostics()
+        if options.command == 'diagnose' or getattr(options, 'json', False):
+            print(json.dumps(facts, indent=2))
+        else:
+            print_status(facts)
+            if options.command == 'kiosk-diagnose':
+                print_diagnostics(facts['kiosk_diagnostics'])
+    elif options.command == 'enable-kiosk':
+        enable_kiosk(options)
+    elif options.command == 'display':
+        display_config(options)
+    elif options.command == 'backend':
+        backend_config(options)
+    elif options.command == 'display-power':
+        display_power(options)
+    elif options.command == 'configure':
+        configure(options)
+    elif options.command in ('start', 'stop', 'restart'):
+        service_control(options.command, options.dry_run)
+    elif options.command in ('install', 'repair', 'update', 'preflight'):
+        if options.command == 'update' and not options.dist:
+            if sys.stdin.isatty():
+                options.dist = input('Reviewed new build directory: ').strip()
+            if not options.dist:
+                raise RuntimeError('Update requires --dist DIR containing the reviewed new build')
+        install(options, detect())
+    else:
+        flags = (['--yes'] if options.yes else []) + (['--dry-run'] if options.dry_run else [])
+        if options.command == 'switch':
+            if options.target not in ('layr', 'klipperscreen'):
+                raise RuntimeError('Specify layr or klipperscreen')
+            if options.target == 'layr' and capture('systemctl', 'is-active', 'display-manager.service') == 'active':
+                raise RuntimeError('Desktop session active; open the preview URL in your desktop browser')
+            execute(['bash', DEPLOY / 'layr-display.sh', 'to-' + options.target, *(['--preview'] if options.target == 'layr' else []), *flags])
+        elif options.command == 'recover':
+            execute(['sudo', 'systemctl', 'disable', '--now', 'layr-kiosk.service'], options.dry_run)
+            print('Kiosk disabled. Console: sudo chvt 1. If installed: layr switch klipperscreen. Previous UI: layr rollback --yes')
+        else:
+            execute(['bash', DEPLOY / (options.command + '.sh'), *flags])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', nargs='?', choices=['preflight', 'display', 'display-power', 'backend', 'status', 'start', 'stop', 'restart', 'install', 'configure', 'update', 'repair', 'diagnose', 'rollback', 'uninstall', 'recover', 'switch', 'kiosk-diagnose', 'enable-kiosk'])
+    parser.add_argument('target', nargs='?', choices=['layr', 'klipperscreen', 'status', 'diagnose', 'enable', 'disable', 'configure', 'wake'])
+    parser.add_argument('--allow-offline', action='store_true', help='Explicitly allow unreachable Moonraker during installation')
+    parser.add_argument('--autostart', action='store_true', help='Request automatic startup; held until physical confirmation via enable-kiosk')
+    parser.add_argument('--json', action='store_true', help='Detailed status/diagnostics as JSON')
+    parser.add_argument('--cursor', choices=['hidden', 'visible'])
+    parser.add_argument('--idle-minutes', choices=['1', '5', '10', 'never'])
+    parser.add_argument('--dim', dest='power_dim', action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument('--dim-percent', type=int)
+    parser.add_argument('--wake-method', choices=['power-button'])
+    parser.add_argument('--backlight', help='Explicit discovered backlight class name when selection is ambiguous')
+    parser.add_argument('--chromium-backend', choices=['wayland', 'x11'], help='Browser Ozone backend; X11 uses Cage XWayland. Existing installations default to their saved value, otherwise Wayland.')
+    parser.add_argument('--profile', choices=['headless', 'desktop', 'kiosk'])
+    parser.add_argument('--moonraker')
+    parser.add_argument('--dist', help='Reviewed prebuilt web distribution; required for fresh install and update')
+    parser.add_argument('--yes', action='store_true')
+    parser.add_argument('--dry-run', action='store_true')
+    options = parser.parse_args()
+    if options.command is None:
+        if not sys.stdin.isatty():
+            parser.print_help()
+            return
+        interactive_menu(options)
+        return
+    dispatch(options)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('LAYR: cancelled. Completed steps may remain; check layr status.', file=sys.stderr)
+        sys.exit(130)
+    except EOFError:
+        print('LAYR: input ended; requested operation stopped.', file=sys.stderr)
+        sys.exit(1)
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f'LAYR: {error}', file=sys.stderr)
+        sys.exit(1)

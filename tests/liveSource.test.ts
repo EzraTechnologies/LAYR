@@ -135,7 +135,7 @@ describe('LiveSource', () => {
     await expect(source.call('printer.gcode.script', { script: 'G28' })).rejects.toThrow('Not connected to Moonraker');
   });
 
-  it('learns Raspberry Pi host controls from server.info and forgets them when the socket drops', async () => {
+  it('learns printer host controls from server.info and forgets them when the socket drops', async () => {
     const server = new FakeMoonraker();
     server.components = ['database', 'machine'];
     server.apiVersion = [1, 5, 0];

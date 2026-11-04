@@ -66,7 +66,7 @@ export function printerImageErrorText(code: ImageProblem): string {
 export function printerImageStorageNote(): string {
   const megabytes = LIMITS.maxInputBytes / (1024 * 1024);
   const kilobytes = Math.round(LIMITS.maxStoredBytes / 1024);
-  return `Saved in this browser for this Moonraker address, so a different printer does not reuse it. It remains after a LAYR update and a Chromium restart. It is not sent to the printer and it is not included in the app. A photo must be ${megabytes} MB or smaller; LAYR stores a copy up to ${LIMITS.maxEdge} px and ${kilobytes} KB. GIF files keep the first frame. At most ${LIMITS.maxPrinters} printers are kept.`;
+  return `Saved in this browser for this Moonraker address, so a different printer does not reuse it. It remains after a LAYR update and a Chromium restart. Your saved copy is not sent to the printer or added to an app release. A photo must be ${megabytes} MB or smaller; LAYR stores a copy up to ${LIMITS.maxEdge} px and ${kilobytes} KB. GIF files keep the first frame. At most ${LIMITS.maxPrinters} printers are kept.`;
 }
 
 export class PrinterImageError extends Error {

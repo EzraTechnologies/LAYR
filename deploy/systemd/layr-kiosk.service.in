@@ -3,7 +3,8 @@
 # @VARS@ are replaced at install time.
 [Unit]
 Description=LAYR kiosk display (Chromium in cage on tty7)
-After=systemd-user-sessions.service network-online.target @WEB_UNIT@
+After=systemd-user-sessions.service systemd-logind.service dbus.service polkit.service network-online.target @WEB_UNIT@
+Requires=systemd-logind.service dbus.service polkit.service
 Wants=@WEB_UNIT@ network-online.target
 Conflicts=getty@tty7.service
 ConditionPathExists=/dev/tty7
@@ -11,7 +12,7 @@ ConditionPathExists=/dev/tty7
 [Service]
 Type=simple
 User=@USER@
-PAMName=login
+PAMName=layr-kiosk
 TTYPath=/dev/tty7
 TTYReset=yes
 TTYVHangup=yes
@@ -22,12 +23,19 @@ StandardError=journal
 UtmpIdentifier=tty7
 UtmpMode=user
 EnvironmentFile=@LAYR_HOME@/layr.env
-# Never fight KlipperScreen for the display: refuse to start while it is running.
-ExecStartPre=/bin/sh -c 'if systemctl is-active --quiet @KS_UNIT@; then echo "@KS_UNIT@ is running. Use layr-display.sh to switch." >&2; exit 1; fi'
-ExecStartPre=/usr/bin/chvt 7
-ExecStart=@LAYR_HOME@/bin/layr-kiosk.sh
-Restart=on-failure
-RestartSec=5
+# Register a local Wayland session; pam_systemd supplies the session ID/runtime.
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_SESSION_CLASS=user
+Environment=XDG_SEAT=seat0
+Environment=XDG_VTNR=7
+Environment=LIBSEAT_BACKEND=logind
+UnsetEnvironment=DISPLAY WAYLAND_DISPLAY
+# The supervisor owns PAM's (sd-pam) child. Cage is its unprivileged child.
+ExecStart=/usr/bin/python3 @LAYR_HOME@/bin/layr-session.py
+KillMode=mixed
+TimeoutStopSec=10s
+SendSIGKILL=yes
+Restart=no
 
 [Install]
 WantedBy=multi-user.target

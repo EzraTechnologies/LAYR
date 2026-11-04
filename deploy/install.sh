@@ -2,7 +2,7 @@
 # Install LAYR onto a Raspberry Pi (or any Debian-like host) as a localhost static site.
 #
 #   ./deploy/install.sh [--dist DIR] [--port N] [--moonraker URL]
-#                       [--dry-run] [--yes] [--reload-kiosk] [--ignore-hdmi-pointers]
+#                       [--dry-run] [--yes] [--headless] [--kiosk-only] [--reload-kiosk] [--ignore-hdmi-pointers]
 #
 # What it does:
 #   - Copies a pre-built dist/ into ~/layr/releases/<timestamp> and points ~/layr/current at it.
@@ -23,7 +23,7 @@
 #     and it does not overwrite a rule file LAYR did not write.
 #
 # Build on a workstation first (`npm ci && npm run build`), copy the repo or dist/ to the Pi,
-# then run this script as the printer user (the same user that owns printer_data). Test in a
+# then run this script as the installation owner (the same user that owns printer_data). Test in a
 # normal browser before switching the display with deploy/layr-display.sh.
 #
 # --dist is resolved from the directory you ran the script in (or as an absolute path).
@@ -37,6 +37,8 @@ cd "$SCRIPT_DIR" || exit 1
 . ./lib.sh
 require_complete_script "$SCRIPT_DIR/install.sh"
 require_complete_script "$SCRIPT_DIR/lib.sh"
+require_complete_script "$SCRIPT_DIR/layr-session.py"
+require_complete_script "$SCRIPT_DIR/pam/layr-kiosk"
 
 # Empty means "the dist directory next to this script", resolved after the caller cwd is known.
 DIST_ARG=""
@@ -44,11 +46,13 @@ PORT=7180
 MOONRAKER="http://localhost:7125"
 RELOAD_KIOSK=0
 IGNORE_HDMI=0
+HEADLESS=0
+KIOSK_ONLY=0
 
 usage() {
   cat <<'EOF'
 Usage: ./deploy/install.sh [--dist DIR] [--port N] [--moonraker URL]
-                           [--dry-run] [--yes] [--reload-kiosk] [--ignore-hdmi-pointers]
+                           [--dry-run] [--yes] [--headless] [--kiosk-only] [--reload-kiosk] [--ignore-hdmi-pointers]
 
 --reload-kiosk            Restart layr-kiosk.service only if it is already active.
                           Does not start a disabled kiosk. Does not restart Klipper,
@@ -61,6 +65,8 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --kiosk-only) KIOSK_ONLY=1; shift ;;
+    --headless) HEADLESS=1; shift ;;
     --dist) DIST_ARG="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --moonraker) MOONRAKER="$2"; shift 2 ;;
@@ -93,44 +99,12 @@ DIST=$(resolve_dist "$CALLER_PWD" "$SCRIPT_DIR" "$DIST_ARG") || die "Build direc
 [ -f "$DIST/index.html" ] || die "No index.html in $DIST. Run 'npm run build' first."
 
 USER_NAME=$(id -un)
-STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+STAMP=$(date -u +%Y%m%dT%H%M%S%NZ)
 RELEASE="$LAYR_HOME/releases/$STAMP"
 
-info "LAYR will be installed for $USER_NAME"
-echo "  files:    $RELEASE"
-echo "  url:      http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}&layr_build=${STAMP}#/home"
-echo "  kiosk:    installed, left disabled (KlipperScreen is not touched)"
-echo
-confirm "Install now?" || die "Cancelled"
-
-if [ "$DRY_RUN" = 1 ]; then
-  info "Dry run only. No files or services will be changed."
-fi
-
-run mkdir -p "$LAYR_HOME/releases" "$LAYR_HOME/bin" "$LAYR_STATE"
-run cp -a "$DIST" "$RELEASE"
-# Every install refreshes the launcher. rollback.sh only moves the web symlink, not these files.
-for launcher in layr-kiosk.sh kiosk-lib.sh layr-engine.sh layr-hdmi-input.sh read-hide-cursor.py blank-cursor.py; do
-  run cp -a "./$launcher" "$LAYR_HOME/bin/$launcher"
-  run chmod 755 "$LAYR_HOME/bin/$launcher"
-done
-
-if [ -L "$LAYR_HOME/current" ] || [ -d "$LAYR_HOME/current" ]; then
-  previous=$(readlink -f "$LAYR_HOME/current" || true)
-  if [ -n "${previous:-}" ] && [ -d "$previous" ]; then
-    if [ "$DRY_RUN" = 1 ]; then
-      printf '   [dry-run] record previous release %s\n' "$previous"
-    else
-      printf '%s\n' "$previous" >"$LAYR_STATE/previous"
-    fi
-  fi
-fi
-run ln -sfn "$RELEASE" "$LAYR_HOME/current"
-
-if [ "$DRY_RUN" = 1 ]; then
-  printf '   [dry-run] write %s (keep every key except LAYR_PORT and LAYR_MOONRAKER_URL)\n' "$LAYR_ENV"
-else
-  write_layr_env "$LAYR_ENV" "$PORT" "$MOONRAKER"
+# Refuse to replace another application's global command.
+if [ -e /usr/local/bin/layr ] || [ -L /usr/local/bin/layr ]; then
+  [ "$(readlink /usr/local/bin/layr)" = "$LAYR_HOME/management/layr" ] || die "/usr/local/bin/layr already belongs to another installation"
 fi
 
 render_unit() {
@@ -148,8 +122,83 @@ render_unit() {
   rm -f "$rendered"
 }
 
+install_kiosk_pam() {
+  local pam_dest=/etc/pam.d/layr-kiosk
+  if [ -e "$pam_dest" ] && ! grep -q '^# LAYR-managed kiosk PAM session' "$pam_dest"; then
+    die "$pam_dest is not LAYR-managed and was not overwritten."
+  fi
+  run sudo install -m 644 "$SCRIPT_DIR/pam/layr-kiosk" "$pam_dest"
+}
+
+# Second phase of a universal kiosk install: the web service and launchers already
+# exist. Do not create another web release or replace rollback history.
+if [ "$KIOSK_ONLY" = 1 ]; then
+  [ "$DRY_RUN" = 1 ] || { [ -f "$LAYR_ENV" ] && [ -f "$LAYR_HOME/current/index.html" ]; } || die "Install and validate the web service before configuring the kiosk."
+  info "Install kiosk service for a temporary physical test; boot startup disabled."
+  confirm "Install the disabled kiosk unit?" || die "Cancelled"
+  install_kiosk_pam
+  render_unit ./systemd/layr-kiosk.service.in "$UNIT_DIR/$KIOSK_UNIT"
+  run sudo systemctl daemon-reload
+  run sudo systemctl disable "$KIOSK_UNIT"
+  echo "Kiosk unit prepared. No graphical process was started; display and touch remain unverified."
+  echo "Preview: layr switch layr. SSH recovery: layr recover"
+  exit 0
+fi
+
+info "LAYR will be installed for $USER_NAME"
+echo "  files:    $RELEASE"
+echo "  url:      http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}&layr_build=${STAMP}#/home"
+if [ "$HEADLESS" = 1 ]; then
+  echo "  kiosk:    configuration left untouched"
+else
+  echo "  kiosk:    installed, left disabled (KlipperScreen is not touched)"
+fi
+echo
+confirm "Install now?" || die "Cancelled"
+
+if [ "$DRY_RUN" = 1 ]; then
+  info "Dry run only. No files or services will be changed."
+fi
+
+run mkdir -p "$LAYR_HOME/releases" "$LAYR_HOME/bin" "$LAYR_STATE"
+run cp -a "$DIST" "$RELEASE"
+# Every install refreshes the launcher. rollback.sh only moves the web symlink, not these files.
+for launcher in layr-kiosk.sh layr-session.py lib.sh kiosk-lib.sh layr-engine.sh layr-hdmi-input.sh read-hide-cursor.py blank-cursor.py; do
+  run cp -a "./$launcher" "$LAYR_HOME/bin/$launcher"
+  run chmod 755 "$LAYR_HOME/bin/$launcher"
+done
+
+if [ -L "$LAYR_HOME/current" ] || [ -d "$LAYR_HOME/current" ]; then
+  previous=$(readlink -f "$LAYR_HOME/current" || true)
+  if [ -n "${previous:-}" ] && [ -d "$previous" ]; then
+    if [ "$DRY_RUN" = 1 ]; then
+      printf '   [dry-run] record previous release %s\n' "$previous"
+    else
+      printf '%s\n' "$previous" >"$LAYR_STATE/previous"
+    fi
+  fi
+fi
+# Keep management tools available without the source checkout or network.
+if [ "$SCRIPT_DIR" != "$LAYR_HOME/management" ]; then
+  run mkdir -p "$LAYR_HOME/management"
+  run cp -a "$SCRIPT_DIR/." "$LAYR_HOME/management/"
+fi
+run chmod 755 "$LAYR_HOME/management/layr"
+run sudo ln -sfn "$LAYR_HOME/management/layr" /usr/local/bin/layr
+run ln -sfn "$RELEASE" "$LAYR_HOME/current"
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf '   [dry-run] write %s (keep every key except LAYR_PORT and LAYR_MOONRAKER_URL)\n' "$LAYR_ENV"
+else
+  write_layr_env "$LAYR_ENV" "$PORT" "$MOONRAKER"
+fi
+
+
 render_unit ./systemd/layr-web.service.in "$UNIT_DIR/$WEB_UNIT"
-render_unit ./systemd/layr-kiosk.service.in "$UNIT_DIR/$KIOSK_UNIT"
+if [ "$HEADLESS" != 1 ]; then
+  install_kiosk_pam
+  render_unit ./systemd/layr-kiosk.service.in "$UNIT_DIR/$KIOSK_UNIT"
+fi
 run sudo systemctl daemon-reload
 run sudo systemctl enable "$WEB_UNIT"
 # Restart only the static file server so an upgrade is what the browser loads.
@@ -162,7 +211,9 @@ fi
 # A first install leaves the kiosk disabled. An upgrade must not disable a kiosk
 # that layr-display.sh already turned on. The kiosk is restarted only with --reload-kiosk,
 # and only when that unit is already active.
-if unit_enabled "$KIOSK_UNIT"; then
+if [ "$HEADLESS" = 1 ]; then
+  info "Headless/desktop profile: existing kiosk configuration left untouched."
+elif unit_enabled "$KIOSK_UNIT"; then
   if [ "$RELOAD_KIOSK" = 1 ]; then
     info "layr-kiosk.service is already enabled."
   else
@@ -195,7 +246,7 @@ fi
 
 info "Web UI is (or would be) at http://127.0.0.1:${PORT}/?moonraker=${MOONRAKER}&layr_build=${STAMP}#/home"
 echo "The kiosk uses the same layr_build value, percent-encoded, and keeps the #/home route."
-echo "Open that address in Chromium on this Pi before using the kiosk."
+echo "Open that address in Chromium on this device before using the kiosk."
 echo "KlipperScreen was not modified. To switch displays later: ./deploy/layr-display.sh to-layr"
 echo "To undo this install: ./deploy/uninstall.sh"
 print_recovery_instructions "$SCRIPT_DIR"

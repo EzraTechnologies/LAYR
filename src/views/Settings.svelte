@@ -188,7 +188,7 @@
 
     <section class="card panel" aria-labelledby="set-printer">
       <h2 id="set-printer" class="eyebrow">Klipper</h2>
-      <p class="hint">Klipper only. This does not reboot the Raspberry Pi or cut printer power.</p>
+      <p class="hint">Klipper only. This does not reboot the printer host or cut printer power.</p>
       <div class="row">
         <button
           type="button"
@@ -223,9 +223,9 @@
     </section>
 
     <section class="card panel" aria-labelledby="set-pi">
-      <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
+      <h2 id="set-pi" class="eyebrow">Printer host</h2>
       <p class="hint">
-        Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the Raspberry Pi running Moonraker. This is not a Klipper
+        Host {printerState.hostname ?? 'not reported'}. Reboot and shut down the printer host running Moonraker. This is not a Klipper
         firmware restart and it does not switch off the printer power supply.
       </p>
       {#if hostBlock}
@@ -243,7 +243,7 @@
           aria-describedby={hostBlock ? 'pi-block' : undefined}
           onclick={() => runHost(rebootCommand)}
         >
-          <Icon name="refresh" size={22} />Reboot Raspberry Pi
+          <Icon name="refresh" size={22} />Reboot printer host
         </button>
         <button
           type="button"
@@ -253,7 +253,7 @@
           aria-describedby={hostBlock ? 'pi-block' : undefined}
           onclick={() => runHost(shutdownCommand)}
         >
-          <Icon name="power" size={22} />Shut down Raspberry Pi
+          <Icon name="power" size={22} />Shut down printer host
         </button>
       </div>
     </section>

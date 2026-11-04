@@ -4,6 +4,8 @@
 # display's preferred mode. Chromium is the default. WPE (Cog) runs only when LAYR_KIOSK_ENGINE=wpe
 # and the Bookworm packages are actually present. This script does not restart Klipper.
 set -euo pipefail
+status=0
+trap 'status=$?; printf "LAYR launcher failed at line %s (exit %s). Inspect journalctl -u layr-kiosk -b.\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=deploy/kiosk-lib.sh
@@ -18,12 +20,30 @@ LAYR_STATE="${LAYR_STATE:-$LAYR_HOME/state}"
 # loads the restored bundle instead of the page it already had open.
 PAGE=$(kiosk_page_url "$LAYR_PORT" "$LAYR_MOONRAKER_URL" "$LAYR_HOME")
 echo "Kiosk page: $PAGE"
+printf 'Session: uid=%s groups=%s runtime=%s seat=%s vt=%s session_type=%s\n' "$(id -u)" "$(id -nG)" "${XDG_RUNTIME_DIR:-unset}" "${XDG_SEAT:-unset}" "${XDG_VTNR:-unset}" "${XDG_SESSION_TYPE:-unset}"
+echo "Starting a kiosk process does not verify visible rendering or touchscreen input."
 
 command -v cage >/dev/null || { echo "cage is not installed" >&2; exit 1; }
 
+engine=$(resolve_launch_engine)
+backend="${LAYR_CHROMIUM_BACKEND-wayland}"
+if [ "$engine" = chromium ]; then
+  case "$backend" in
+    wayland) ;;
+    x11)
+      command -v Xwayland >/dev/null || {
+        echo "LAYR_CHROMIUM_BACKEND=x11 requires XWayland. Run layr backend --chromium-backend x11 to prepare its dependency." >&2
+        exit 1
+      }
+      ;;
+    *) echo "LAYR_CHROMIUM_BACKEND must be wayland or x11 (actual: $backend). No fallback was attempted." >&2; exit 1 ;;
+  esac
+  echo "Chromium backend: $backend (Cage remains the Wayland compositor)."
+fi
+
 ready=0
 for _ in $(seq 1 30); do
-  if curl -fsS -o /dev/null "http://localhost:${LAYR_PORT}/"; then
+  if curl -fsS --connect-timeout 2 --max-time 3 -o /dev/null "http://localhost:${LAYR_PORT}/"; then
     ready=1
     break
   fi
@@ -31,7 +51,6 @@ for _ in $(seq 1 30); do
 done
 [ "$ready" = 1 ] || { echo "LAYR web server did not answer on port ${LAYR_PORT}" >&2; exit 1; }
 
-engine=$(resolve_launch_engine)
 mkdir -p "$LAYR_STATE"
 printf '%s\n' "$engine" >"$LAYR_STATE/last-engine"
 
@@ -81,20 +100,33 @@ if [ -f "$prefs" ]; then
   sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$prefs"
 fi
 
-echo "Starting Chromium."
+echo "Starting Chromium; ozone-platform=$backend; profile=$LAYR_PROFILE"
 # -s keeps VT switching (Ctrl+Alt+F1..) available for recovery; -d drops client-side decorations.
-exec cage -s -d -- "$browser" \
+chromium_args=("$browser"
   --kiosk \
   --user-data-dir="$LAYR_PROFILE" \
-  --ozone-platform=wayland \
+  --ozone-platform="$backend" \
   --touch-events=enabled \
   --noerrdialogs \
   --disable-infobars \
   --no-first-run \
   --disable-session-crashed-bubble \
-  --disable-features=TranslateUI,Translate \
+  '--disable-features=TranslateUI,Translate' \
   --overscroll-history-navigation=0 \
   --disable-pinch \
   --check-for-update-interval=31536000 \
   --password-store=basic \
-  "$PAGE"
+  "$PAGE")
+if [ "$backend" = x11 ]; then
+  # Cage creates its own XWayland DISPLAY. Never reuse an unrelated X server.
+  # Some Cage builds omit XWayland support; report that explicitly inside Cage.
+  unset DISPLAY
+  exec cage -s -d -- bash -c '
+    [ -n "${DISPLAY:-}" ] || {
+      echo "Cage did not provide an XWayland DISPLAY. Check Cage XWayland build support and its journal; Chromium was not started." >&2
+      exit 1
+    }
+    exec "$@"
+  ' layr-chromium "${chromium_args[@]}"
+fi
+exec cage -s -d -- "${chromium_args[@]}"

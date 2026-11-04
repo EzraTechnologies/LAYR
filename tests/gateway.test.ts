@@ -108,7 +108,7 @@ describe('CommandGateway', () => {
     expect(calls.map((c) => c.timeoutMs)).toEqual([180_000, 15 * 60_000]);
   });
 
-  it('sends Raspberry Pi host power only after confirmation, and only on this connection', async () => {
+  it('sends printer host power only after confirmation, and only on this connection', async () => {
     const idle = readyState({ hostMachine: 'available', printState: 'standby', hostname: 'trident', idleState: 'Idle' });
     const { connection, calls } = fakeConnection();
     const other = fakeConnection();
@@ -117,13 +117,13 @@ describe('CommandGateway', () => {
     const preview = await gateway.execute({ kind: 'host_reboot' });
     expect(preview).toMatchObject({
       status: 'needs_confirmation',
-      confirm: { title: 'Reboot this Raspberry Pi?', confirmLabel: 'Reboot Raspberry Pi' },
+      confirm: { title: 'Reboot the printer host?', confirmLabel: 'Reboot printer host' },
     });
     expect(calls).toEqual([]);
     expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toMatchObject({
       status: 'ok',
-      summary: 'Reboot Raspberry Pi',
-      note: expect.stringContaining('does not mean the Raspberry Pi has finished restarting'),
+      summary: 'Reboot printer host',
+      note: expect.stringContaining('does not mean the printer host has finished restarting'),
     });
     expect(calls).toEqual([{ method: 'machine.reboot', params: undefined, timeoutMs: 15_000 }]);
     expect(other.calls).toEqual([]);
@@ -166,14 +166,14 @@ describe('CommandGateway', () => {
     const gateway = new CommandGateway(connection, () => idle);
     expect(await gateway.execute({ kind: 'host_reboot' }, { confirmed: true })).toEqual({
       status: 'unconfirmed',
-      summary: 'Reboot Raspberry Pi',
+      summary: 'Reboot printer host',
       message:
-        'Connection closed before Moonraker replied. The Raspberry Pi may still be running. This is not a confirmed reboot or shutdown',
+        'Connection closed before Moonraker replied. The printer host may still be running. This is not a confirmed reboot or shutdown',
     });
     expect(await gateway.execute({ kind: 'host_shutdown' }, { confirmed: true })).toEqual({
       status: 'failed',
-      summary: 'Shut down Raspberry Pi',
-      message: 'Moonraker denied Raspberry Pi host control for this connection',
+      summary: 'Shut down printer host',
+      message: 'Moonraker denied printer host control for this connection',
       reason: 'unauthorized',
     });
   });

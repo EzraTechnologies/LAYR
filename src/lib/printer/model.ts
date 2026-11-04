@@ -268,7 +268,7 @@ export interface PrinterState {
   limits: PrinterLimits;
   /** `idle_timeout.state`: `Idle`, `Ready` or `Printing` (Klipper is busy executing G-code). */
   idleState: string | null;
-  /** Raspberry Pi host power via Moonraker `machine.reboot` / `machine.shutdown`. */
+  /** printer host power via Moonraker `machine.reboot` / `machine.shutdown`. */
   hostMachine: HostMachine;
   /** Requested Klipper objects that this printer does not provide. */
   missingObjects: string[];

@@ -40,7 +40,47 @@ confirm() {
 }
 
 require_not_root() {
-  [ "$(id -u)" != 0 ] || die "Run this as the printer user (for example 'pi'), not as root. It uses sudo where needed."
+  [ "$(id -u)" != 0 ] || die "Run this as the installation owner (the normal login user), not as root. It uses sudo where needed."
+  # A shell dry run has no privileged effects. The universal CLI also validates
+  # privileges for preflight/dry runs before invoking these scripts.
+  [ "$DRY_RUN" = 1 ] || require_sudo
+}
+
+sudo_setup_help() {
+  local user_name
+  user_name=$(id -un)
+  printf '\nMinimal Debian setup (administrator/root password required):\n' >&2
+  printf '  su -\n  apt-get update\n  apt-get install sudo\n' >&2
+  printf '  usermod -aG sudo %q\n  exit\n' "$user_name" >&2
+  printf 'Log out completely and log back in as %s, then run: sudo -v\n' "$user_name" >&2
+  printf 'Alternatively, an administrator can grant this account suitable sudoers access.\n' >&2
+  printf 'Do not run the installer as root: LAYR files and services belong to the normal user.\n' >&2
+}
+
+require_sudo() {
+  local root_uid
+  command -v sudo >/dev/null 2>&1 || {
+    sudo_setup_help
+    die "sudo is not installed. Privilege preflight failed; this check made no changes."
+  }
+  if { [ "${LAYR_PRIVILEGE_INTERACTIVE:-auto}" = 1 ] ||
+       { [ "${LAYR_PRIVILEGE_INTERACTIVE:-auto}" = auto ] && [ "$ASSUME_YES" != 1 ]; }; } && [ -t 0 ]; then
+    sudo -v || {
+      sudo_setup_help
+      die "sudo authentication or authorization failed; this privilege check made no changes."
+    }
+  else
+    sudo -n -v || {
+      sudo_setup_help
+      die "Non-interactive sudo authorization failed. Run sudo -v in a terminal first, or have an administrator grant access. This privilege check made no changes."
+    }
+  fi
+  # Check the effective target UID, not group membership or just a cached ticket.
+  root_uid=$(sudo -n -- id -u) || {
+    sudo_setup_help
+    die "sudo cannot execute commands as root; this privilege check made no changes."
+  }
+  [ "$root_uid" = 0 ] || die "sudo targets UID ${root_uid:-unknown}, not root (UID 0). Ask an administrator to correct sudoers. This privilege check made no changes."
 }
 
 unit_exists() {
@@ -116,6 +156,7 @@ reload_active_kiosk() {
     return 0
   fi
   info "Reloading layr-kiosk.service only. Klipper, Moonraker, and KlipperScreen are not restarted."
+  require_sudo
   run sudo systemctl restart "$KIOSK_UNIT"
 }
 
@@ -147,12 +188,17 @@ layr_web_port() {
 # Printed before a display switch and again if that switch is undone.
 print_recovery_instructions() {
   local deploy_dir="${1:-deploy}"
+  if unit_exists "$KS_UNIT"; then
+    printf "KlipperScreen fallback: %s/layr-display.sh to-klipperscreen --yes\n" "$deploy_dir"
+  fi
   cat <<EOF
 
-If the panel is blank or on the wrong screen, the Pi was not rebooted.
-Run these as the printer user, not as root. KlipperScreen stays installed:
+If the panel is blank or on the wrong screen, the device was not restarted.
+Run these as the installation owner, not as root. Existing display installations are preserved:
 
-  ${deploy_dir}/layr-display.sh to-klipperscreen --yes
+  layr recover
+  # Stop and disable only the LAYR kiosk; the web service remains available.
+
   ${deploy_dir}/rollback.sh --yes
   ${deploy_dir}/uninstall.sh
 

@@ -25,7 +25,7 @@ section "Hardware"
 if [ -r /proc/device-tree/model ]; then
   printf '  Model: %s\n' "$(tr -d '\0' </proc/device-tree/model)"
 else
-  echo "  Model: unknown (not a Raspberry Pi device tree)"
+  echo "  Model: unknown (no device-tree model reported)"
 fi
 printf '  Kernel: %s  Arch: %s\n' "$(uname -r)" "$(uname -m)"
 # shellcheck disable=SC1091
@@ -100,7 +100,7 @@ if [ -n "$conf" ]; then
   else
     warn "cors_domains does not list *://localhost:*. LAYR served on another port will be rejected until you add it yourself."
   fi
-  grep -Eq '^\s*127\.0\.0\.(0/8|1)' "$conf" || warn "trusted_clients may not include 127.0.0.1; LAYR on the Pi would need an API key."
+  grep -Eq '^\s*127\.0\.0\.(0/8|1)' "$conf" || warn "trusted_clients may not include 127.0.0.1; LAYR on the device would need an API key."
 else
   echo "  moonraker.conf not found in the usual locations"
 fi

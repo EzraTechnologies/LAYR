@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Switch the Pi's display between KlipperScreen and the LAYR kiosk.
+# Switch the device's display between KlipperScreen and the LAYR kiosk.
 #
 #   ./deploy/layr-display.sh status
 #   ./deploy/layr-display.sh to-layr [--yes]
@@ -16,10 +16,12 @@ require_complete_script "$PWD/layr-display.sh"
 require_complete_script "$PWD/lib.sh"
 DEPLOY_DIR=$PWD
 
+PREVIEW=0
 ACTION="${1:-status}"
 shift || true
 while [ $# -gt 0 ]; do
   case "$1" in
+    --preview) PREVIEW=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
@@ -43,6 +45,9 @@ show_status() {
 # Read-only. A failure here must happen before KlipperScreen is stopped.
 kiosk_prereqs() {
   local port
+  if systemctl is-active --quiet display-manager.service 2>/dev/null; then
+    die "A desktop display manager is active. Open LAYR in its browser instead of taking over the display."
+  fi
   unit_exists "$KIOSK_UNIT" || die "layr-kiosk.service is not installed. Run deploy/install.sh first. KlipperScreen was not stopped."
   unit_exists "$WEB_UNIT" || die "layr-web.service is not installed. Run deploy/install.sh first. KlipperScreen was not stopped."
   if ! unit_active "$WEB_UNIT"; then
@@ -80,14 +85,14 @@ wait_for_kiosk() {
 }
 
 restore_display() {
-  warn "The LAYR kiosk did not stay running. Turning KlipperScreen back on so the panel is not left blank."
+  warn "The LAYR kiosk process did not stay running. Disabling kiosk boot startup and restoring the previous display when recorded."
   if unit_exists "$KIOSK_UNIT"; then
     run sudo systemctl disable --now "$KIOSK_UNIT" || true
   fi
-  if unit_exists "$KS_UNIT"; then
+  if [ -f "$KS_MARKER" ] && unit_exists "$KS_UNIT"; then
     run sudo systemctl enable --now "$KS_UNIT" || true
   else
-    warn "KlipperScreen is not installed. A text console is: sudo chvt 1"
+    warn "KlipperScreen was not restored: it is absent or LAYR did not disable it. A text console is: sudo chvt 1"
   fi
   run rm -f "$KS_MARKER"
   print_recovery_instructions "$DEPLOY_DIR"
@@ -101,9 +106,13 @@ case "$ACTION" in
     require_not_root
     kiosk_prereqs
     echo "This stops KlipperScreen and starts the LAYR kiosk on tty7."
-    echo "The Pi is not rebooted. Klipper, Moonraker, AFC, Happy Hare, printer.cfg, and moonraker.conf are not changed."
-    echo "If the kiosk does not stay up, KlipperScreen is turned back on."
-    echo "KlipperScreen stays installed. Switch back with: ${DEPLOY_DIR}/layr-display.sh to-klipperscreen --yes"
+    echo "The device is not restarted. Klipper, Moonraker, AFC, Happy Hare, printer.cfg, and moonraker.conf are not changed."
+    echo "If the kiosk process fails, it is stopped and boot startup disabled. A previously disabled KlipperScreen is restored only when recorded."
+    if unit_exists "$KS_UNIT"; then
+      echo "KlipperScreen stays installed. Switch back with: ${DEPLOY_DIR}/layr-display.sh to-klipperscreen --yes"
+    else
+      echo "KlipperScreen is absent and is not required. SSH recovery: layr recover"
+    fi
     print_recovery_instructions "$DEPLOY_DIR"
     confirm "Switch the display to LAYR?" || die "Cancelled. KlipperScreen was not stopped."
     if unit_exists "$KS_UNIT" && { unit_active "$KS_UNIT" || unit_enabled "$KS_UNIT"; }; then
@@ -117,7 +126,13 @@ case "$ACTION" in
         die "Could not stop KlipperScreen. The kiosk was not started."
       fi
     fi
-    if ! run sudo systemctl enable --now "$KIOSK_UNIT"; then
+    if [ "$PREVIEW" = 1 ]; then
+      run sudo systemctl disable "$KIOSK_UNIT" || die "Could not disable kiosk boot startup. Preview was not started."
+      start_args=(start "$KIOSK_UNIT")
+    else
+      start_args=(enable --now "$KIOSK_UNIT")
+    fi
+    if ! run sudo systemctl "${start_args[@]}"; then
       if [ "$DRY_RUN" != 1 ]; then
         restore_display
       fi
@@ -131,10 +146,15 @@ case "$ACTION" in
       restore_display
       die "The LAYR kiosk did not stay active. KlipperScreen was turned back on when it is installed."
     fi
-    info "LAYR kiosk is active. Ctrl+Alt+F1 still reaches a text console."
+    info "LAYR kiosk process is active; visible rendering and touchscreen function are unverified."
+    if [ "$PREVIEW" = 1 ]; then
+      echo "Preview only: automatic kiosk startup is disabled. If the actual UI works, use layr enable-kiosk for physical confirmation."
+    fi
+    echo "Ctrl+Alt+F1 still reaches a text console. SSH recovery: layr recover"
     print_recovery_instructions "$DEPLOY_DIR"
     ;;
   to-klipperscreen)
+    unit_exists "$KS_UNIT" || die "KlipperScreen is not installed. The current display was left unchanged."
     require_not_root
     echo "This stops the LAYR kiosk and enables KlipperScreen."
     confirm "Switch the display back to KlipperScreen?" || die "Cancelled"

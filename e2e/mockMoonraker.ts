@@ -245,7 +245,7 @@ export interface MockOptions {
   /** Macro names that Klipper rejects. */
   failScripts?: string[];
   /**
-   * Raspberry Pi host power. `ok` implements `machine.reboot` and `machine.shutdown`.
+   * printer host power. `ok` implements `machine.reboot` and `machine.shutdown`.
    * `absent` / `failed` omit or fail the machine component. `denied` and `missing` answer the RPC.
    * `drop` closes the socket without a reply.
    */

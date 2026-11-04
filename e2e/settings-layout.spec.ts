@@ -6,7 +6,7 @@ import type { MockOptions } from './mockMoonraker';
 /**
  * Card edges in the settings scroller's content box, so a scroll position does not change the gaps.
  * The old grid put Connection and the tall right stack in one row, then stretched that row and left
- * a hole under Connection until the full-width Raspberry Pi card.
+ * a hole under Connection until the full-width Printer host card.
  */
 interface CardBox {
   x: number;
@@ -27,7 +27,7 @@ interface ColumnLayout {
   clientHeight: number;
 }
 
-const NAMES = ['Connection', 'Klipper', 'Raspberry Pi', 'Integrations', 'Display'] as const;
+const NAMES = ['Connection', 'Klipper', 'Printer host', 'Integrations', 'Display'] as const;
 
 async function measure(page: Page): Promise<ColumnLayout> {
   return page.evaluate((names) => {
@@ -141,9 +141,9 @@ for (const vp of VIEWPORTS) {
       const layout = await measure(page);
       expectBalancedColumns(layout);
       expect(layout.scrollHeight).toBeGreaterThan(layout.clientHeight + 40);
-      await expect(page.getByRole('heading', { name: 'Raspberry Pi' })).toContainText('Raspberry Pi');
+      await expect(page.getByRole('heading', { name: 'Printer host' })).toContainText('Printer host');
       await expect(page.locator('[aria-labelledby="set-pi"]')).toContainText('not a Klipper firmware restart');
-      await expect(page.locator('[aria-labelledby="set-printer"]')).toContainText('does not reboot the Raspberry Pi');
+      await expect(page.locator('[aria-labelledby="set-printer"]')).toContainText('does not reboot the printer host');
       await expect(page.locator('[aria-labelledby="set-display"] #printer-image-label')).toHaveText('Printer image');
       await expectCleanLayout(page);
 
@@ -152,8 +152,8 @@ for (const vp of VIEWPORTS) {
       expectBalancedColumns(await measure(page));
 
       await scrollSettings(page, 1);
-      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Shut down printer host', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Reboot printer host', exact: true })).toBeVisible();
       await expectCleanLayout(page);
       const scrolled = await page.locator('.settings').evaluate((el) => ({
         top: el.scrollTop,
@@ -172,8 +172,8 @@ for (const vp of VIEWPORTS) {
       const lockout = page.getByText('Not available during a print');
       await lockout.scrollIntoViewIfNeeded();
       await expect(lockout).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeDisabled();
-      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Reboot printer host', exact: true })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Shut down printer host', exact: true })).toBeDisabled();
       const useHost = page.getByRole('button', { name: 'Use host name' });
       await useHost.scrollIntoViewIfNeeded();
       await expect(useHost).toBeVisible();
@@ -193,7 +193,7 @@ for (const vp of VIEWPORTS) {
       expect(gap(layout.connection, layout.klipper)).toBeLessThan(20);
       await expect(page.locator('[aria-labelledby="set-display"] #printer-image-label')).toHaveText('Printer image');
       expect(layout.pi.y).toBeGreaterThan(layout.klipper.y);
-      const reboot = page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true });
+      const reboot = page.getByRole('button', { name: 'Reboot printer host', exact: true });
       await reboot.scrollIntoViewIfNeeded();
       await expect(reboot).toBeDisabled();
       await expect(page.getByText('Set up the printer connection in Settings')).toBeVisible();
@@ -206,22 +206,22 @@ for (const vp of VIEWPORTS) {
 
     test('keeps host confirmation on screen and keyboard reachable', async ({ page }) => {
       await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
-      const reboot = page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true });
+      const reboot = page.getByRole('button', { name: 'Reboot printer host', exact: true });
       await reboot.focus();
       await page.keyboard.press('Enter');
       const dialog = page.getByRole('alertdialog');
-      await expect(dialog.getByRole('heading', { name: 'Reboot this Raspberry Pi?' })).toBeVisible();
+      await expect(dialog.getByRole('heading', { name: 'Reboot the printer host?' })).toBeVisible();
       await expect(dialog.getByRole('button', { name: 'Go back' })).toBeFocused();
       await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Go back' }));
-      await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true }));
+      await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Reboot printer host', exact: true }));
       await expectCleanLayout(page);
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
 
-      await page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }).click();
-      await expect(dialog.getByRole('heading', { name: 'Shut down this Raspberry Pi?' })).toBeVisible();
+      await page.getByRole('button', { name: 'Shut down printer host', exact: true }).click();
+      await expect(dialog.getByRole('heading', { name: 'Shut down the printer host?' })).toBeVisible();
       await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Go back' }));
-      await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }));
+      await expectFullyInViewport(page, dialog.getByRole('button', { name: 'Shut down printer host', exact: true }));
       await expectCleanLayout(page);
       await dialog.getByRole('button', { name: 'Go back' }).click();
       await expect(dialog).toBeHidden();

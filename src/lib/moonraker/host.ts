@@ -1,7 +1,7 @@
 import type { HostMachine } from '../printer/model';
 
 /**
- * Raspberry Pi host power, as documented by Moonraker's machine API:
+ * printer host power, as documented by Moonraker's machine API:
  * JSON-RPC `machine.reboot` and `machine.shutdown` (HTTP POST `/machine/reboot`
  * and `/machine/shutdown`). Neither method takes parameters. The result is `"ok"`
  * when Moonraker accepts the request.
@@ -30,11 +30,11 @@ export function hostParamsAllowed(method: string, params?: Record<string, unknow
   return params === undefined;
 }
 
-export const HOST_UNKNOWN_MESSAGE = 'Moonraker has not reported Raspberry Pi host controls';
-export const HOST_UNSUPPORTED_MESSAGE = 'This Moonraker does not provide Raspberry Pi reboot or shutdown';
-export const HOST_UNAUTHORIZED_MESSAGE = 'Moonraker denied Raspberry Pi host control for this connection';
+export const HOST_UNKNOWN_MESSAGE = 'Moonraker has not reported printer host controls';
+export const HOST_UNSUPPORTED_MESSAGE = 'This Moonraker does not provide printer host reboot or shutdown';
+export const HOST_UNAUTHORIZED_MESSAGE = 'Moonraker denied printer host control for this connection';
 export const HOST_UNCONFIRMED_NOTE =
-  'The Raspberry Pi may still be running. This is not a confirmed reboot or shutdown';
+  'The printer host may still be running. This is not a confirmed reboot or shutdown';
 
 export type HostRefusal = 'unauthorized' | 'unsupported';
 

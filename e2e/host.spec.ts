@@ -3,11 +3,11 @@ import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
 import { MOONRAKER, type MockMoonraker } from './mockMoonraker';
 
 function reboot(page: Page) {
-  return page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true });
+  return page.getByRole('button', { name: 'Reboot printer host', exact: true });
 }
 
 function shutdown(page: Page) {
-  return page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true });
+  return page.getByRole('button', { name: 'Shut down printer host', exact: true });
 }
 
 function hostCalls(mock: MockMoonraker) {
@@ -16,7 +16,7 @@ function hostCalls(mock: MockMoonraker) {
 
 /** The host card is the last card in the left column, under Klipper. */
 async function revealHost(page: Page) {
-  await page.getByRole('heading', { name: 'Raspberry Pi' }).scrollIntoViewIfNeeded();
+  await page.getByRole('heading', { name: 'Printer host' }).scrollIntoViewIfNeeded();
 }
 
 async function confirm(page: Page, label: string) {
@@ -27,7 +27,7 @@ async function confirm(page: Page, label: string) {
 }
 
 for (const vp of VIEWPORTS) {
-  test.describe(`Raspberry Pi host controls ${vp.name}`, () => {
+  test.describe(`printer host controls ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     test('confirms reboot and shutdown, and does not send them on its own', async ({ page }) => {
@@ -37,14 +37,14 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: 'Restart Klipper' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Firmware restart' })).toBeVisible();
       await revealHost(page);
-      await expect(page.getByRole('heading', { name: 'Raspberry Pi' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Printer host' })).toBeVisible();
       expect(hostCalls(mock)).toEqual([]);
       await expectCleanLayout(page);
 
       await reboot(page).click();
       const dialog = page.getByRole('alertdialog');
-      await expect(dialog.getByRole('heading', { name: 'Reboot this Raspberry Pi?' })).toBeVisible();
-      await expect(dialog).toContainText('Raspberry Pi host trident');
+      await expect(dialog.getByRole('heading', { name: 'Reboot the printer host?' })).toBeVisible();
+      await expect(dialog).toContainText('printer host trident');
       await expect(dialog).toContainText('not a Klipper firmware restart');
       await expect(dialog).toContainText('lose its connection');
       await expect(dialog).toContainText('printer power supply');
@@ -61,15 +61,15 @@ for (const vp of VIEWPORTS) {
       expect(hostCalls(mock)).toEqual([]);
 
       await reboot(page).click();
-      await confirm(page, 'Reboot Raspberry Pi');
-      await expect(page.getByText('does not mean the Raspberry Pi has finished restarting')).toBeVisible();
+      await confirm(page, 'Reboot printer host');
+      await expect(page.getByText('does not mean the printer host has finished restarting')).toBeVisible();
       expect(hostCalls(mock)).toEqual([{ method: 'machine.reboot', params: undefined }]);
 
       await shutdown(page).click();
-      await expect(dialog.getByRole('heading', { name: 'Shut down this Raspberry Pi?' })).toBeVisible();
+      await expect(dialog.getByRole('heading', { name: 'Shut down the printer host?' })).toBeVisible();
       await expect(dialog).toContainText('does not necessarily remove power');
       await expect(dialog).toContainText('physical power cycle');
-      await confirm(page, 'Shut down Raspberry Pi');
+      await confirm(page, 'Shut down printer host');
       await expect(page.getByText('does not mean power was removed')).toBeVisible();
       expect(hostCalls(mock)).toEqual([
         { method: 'machine.reboot', params: undefined },
@@ -125,7 +125,7 @@ for (const vp of VIEWPORTS) {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', omitComponents: true });
       await revealHost(page);
       await expect(reboot(page)).toBeDisabled();
-      await expect(page.getByText('Moonraker has not reported Raspberry Pi host controls')).toBeVisible();
+      await expect(page.getByText('Moonraker has not reported printer host controls')).toBeVisible();
       expect(hostCalls(mock)).toEqual([]);
     });
 
@@ -133,7 +133,7 @@ for (const vp of VIEWPORTS) {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', host: 'failed' });
       await revealHost(page);
       await expect(shutdown(page)).toBeDisabled();
-      await expect(page.getByText('does not provide Raspberry Pi reboot or shutdown')).toBeVisible();
+      await expect(page.getByText('does not provide printer host reboot or shutdown')).toBeVisible();
       expect(hostCalls(mock)).toEqual([]);
     });
 
@@ -155,9 +155,9 @@ for (const vp of VIEWPORTS) {
     test('reports a denied host command without treating it as success', async ({ page }) => {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true, host: 'denied' });
       await shutdown(page).click();
-      await confirm(page, 'Shut down Raspberry Pi');
-      await expect(page.locator('#pi-block')).toHaveText('Moonraker denied Raspberry Pi host control for this connection');
-      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi failed' })).toBeVisible();
+      await confirm(page, 'Shut down printer host');
+      await expect(page.locator('#pi-block')).toHaveText('Moonraker denied printer host control for this connection');
+      await expect(page.getByRole('button', { name: 'Shut down printer host failed' })).toBeVisible();
       await expect(page.getByText('Moonraker accepted the request')).toHaveCount(0);
       await expect(shutdown(page)).toBeDisabled();
       await expect(reboot(page)).toBeDisabled();
@@ -167,9 +167,9 @@ for (const vp of VIEWPORTS) {
     test('reports a missing host method without treating it as success', async ({ page }) => {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true, host: 'missing' });
       await reboot(page).click();
-      await confirm(page, 'Reboot Raspberry Pi');
-      await expect(page.locator('#pi-block')).toHaveText('This Moonraker does not provide Raspberry Pi reboot or shutdown');
-      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi failed' })).toBeVisible();
+      await confirm(page, 'Reboot printer host');
+      await expect(page.locator('#pi-block')).toHaveText('This Moonraker does not provide printer host reboot or shutdown');
+      await expect(page.getByRole('button', { name: 'Reboot printer host failed' })).toBeVisible();
       await expect(page.getByText('Moonraker accepted the request')).toHaveCount(0);
       await expect(reboot(page)).toBeDisabled();
       expect(hostCalls(mock)).toEqual([{ method: 'machine.reboot', params: undefined }]);
@@ -178,7 +178,7 @@ for (const vp of VIEWPORTS) {
     test('does not treat a dropped connection as a finished reboot', async ({ page }) => {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true, host: 'drop' });
       await reboot(page).click();
-      await confirm(page, 'Reboot Raspberry Pi');
+      await confirm(page, 'Reboot printer host');
       await expect(page.getByText('result unknown')).toBeVisible();
       await expect(page.getByText('may still be running')).toBeVisible();
       await expect(page.getByText('Moonraker accepted the request')).toHaveCount(0);
@@ -188,13 +188,13 @@ for (const vp of VIEWPORTS) {
     test('ignores a second tap while the host request is in flight', async ({ page }) => {
       const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true, hostDelayMs: 1200 });
       await reboot(page).click();
-      await confirm(page, 'Reboot Raspberry Pi');
+      await confirm(page, 'Reboot printer host');
       await expect(reboot(page)).toHaveAttribute('aria-busy', 'true');
       await expect(shutdown(page)).toHaveAttribute('aria-busy', 'true');
       await shutdown(page).evaluate((button: HTMLButtonElement) => button.click());
       await expect(page.getByText('Still waiting for the previous command')).toBeVisible();
       expect(hostCalls(mock)).toEqual([{ method: 'machine.reboot', params: undefined }]);
-      await expect(page.getByText('does not mean the Raspberry Pi has finished restarting')).toBeVisible();
+      await expect(page.getByText('does not mean the printer host has finished restarting')).toBeVisible();
       expect(hostCalls(mock)).toEqual([{ method: 'machine.reboot', params: undefined }]);
     });
   });

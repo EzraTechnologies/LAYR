@@ -35,7 +35,7 @@ function textOf(result: RunResult): string {
   return `${result.stdout}\n${result.stderr}`;
 }
 
-const PRESENT = 'ca-certificates curl python3 git tar gzip coreutils cage chromium sha256sum';
+const PRESENT = 'ca-certificates curl python3 git tar gzip coreutils cage chromium sha256sum libpam-systemd dbus-user-session polkitd';
 
 function osFile(root: string, fields: Record<string, string>): string {
   const file = path.join(root, 'os-release');
@@ -145,7 +145,7 @@ printf '%s\\n' "$*" >> "$LAYR_APT_LOG"
 exit "\${LAYR_APT_RC:-0}"
 `,
   );
-  writeExe(path.join(bin, 'layr-sudo'), '#!/bin/bash\nexec "$@"\n');
+  writeExe(path.join(bin, 'layr-sudo'), "#!/bin/sh\ncase \"$*\" in\n  '-n -v' | '-v') exit 0 ;;\n  '-n -- id -u') printf '0\\n'; exit 0 ;;\nesac\nexec \"$@\"\n");
   writeExe(
     path.join(bin, 'systemctl'),
     `#!/bin/bash
@@ -775,7 +775,7 @@ describe('bootstrap source selection and install handoff', () => {
       expect(result.status).toBe(0);
       expect(output).toContain('groups-missing: video');
       expect(output).toContain('usermod -aG');
-      expect(output).toContain('does not restart the Pi');
+      expect(output).toContain('does not restart the device');
     } finally {
       cleanup(box);
     }
@@ -812,7 +812,7 @@ function displayStub(box: Sandbox) {
 
 function armRealDisplay(box: Sandbox) {
   const bin = path.join(box.root, 'bin');
-  writeExe(path.join(bin, 'sudo'), '#!/bin/bash\nexec "$@"\n');
+  writeExe(path.join(bin, 'sudo'), "#!/bin/sh\ncase \"$*\" in\n  '-n -v' | '-v') exit 0 ;;\n  '-n -- id -u') printf '0\\n'; exit 0 ;;\nesac\nexec \"$@\"\n");
   writeExe(path.join(bin, 'curl'), '#!/bin/bash\nif [ "${LAYR_CURL_FAIL:-0}" = 1 ]; then exit 1; fi\nexit 0\n');
   writeExe(path.join(bin, 'cage'), '#!/bin/bash\nexit 0\n');
   writeExe(path.join(bin, 'chromium'), '#!/bin/bash\nexit 0\n');
@@ -828,7 +828,7 @@ describe('display switcher', () => {
       expect(output).toContain('install-state: not-installed');
       expect(output).toContain('install-kind: first');
       expect(output).toContain('Dry run only');
-      expect(output).not.toContain('Same installer, already on this Pi');
+      expect(output).not.toContain('Same installer, already on this device');
       expect(output).not.toContain('automatic-toggle: refused');
     } finally {
       cleanup(box);
@@ -1355,14 +1355,16 @@ case "$verb" in
     esac
     exit 1
     ;;
-  enable)
-    if [ "$LAYR_KIOSK_START_FAIL" = 1 ] && [ "$*" = "--now layr-kiosk.service" ]; then exit 1; fi
+  enable | start)
+    if [ "$LAYR_KIOSK_START_FAIL" = 1 ]; then
+      case "$*" in *layr-kiosk.service) exit 1 ;; esac
+    fi
     ;;
 esac
 exit 0
 `,
     );
-    writeExe(path.join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n');
+    writeExe(path.join(bin, 'sudo'), "#!/bin/sh\ncase \"$*\" in\n  '-n -v' | '-v') exit 0 ;;\n  '-n -- id -u') printf '0\\n'; exit 0 ;;\nesac\nexec \"$@\"\n");
     if (options.withCurl !== false) writeExe(path.join(bin, 'curl'), `#!/bin/sh\nexit ${options.curlFail ? 1 : 0}\n`);
     if (options.withChromium !== false) writeExe(path.join(bin, 'chromium'), '#!/bin/sh\nexit 0\n');
     if (options.withCage !== false) writeExe(path.join(bin, 'cage'), '#!/bin/sh\nexit 0\n');
@@ -1437,13 +1439,67 @@ exit 0
           'disable --now layr-kiosk.service',
           'enable --now KlipperScreen.service',
         ]);
-        expect(textOf(result)).toContain('turned back on');
+        expect(textOf(result)).toContain('restoring the previous display when recorded');
         expect(textOf(result)).toContain(startFail ? 'layr-kiosk.service did not start' : 'The LAYR kiosk did not stay active');
         expect(existsSync(path.join(fx.env.LAYR_HOME!, 'state', 'klipperscreen-disabled-by-layr'))).toBe(false);
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('does not activate previously inactive KlipperScreen after a failed kiosk switch', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-display-inactive-'));
+    const fx = displayEnv(root, {
+      units: 'layr-kiosk.service layr-web.service KlipperScreen.service',
+      active: 'layr-web.service',
+      enabled: '',
+      startFail: true,
+    });
+    try {
+      const result = run('bash deploy/layr-display.sh to-layr --yes', fx.env);
+      expect(result.status).not.toBe(0);
+      const log = readFileSync(fx.log, 'utf8');
+      expect(log).not.toContain('enable --now KlipperScreen.service');
+      expect(log).not.toContain('disable --now KlipperScreen.service');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts an unverified preview without enabling boot, even when the process is active', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-preview-active-'));
+    const fx = displayEnv(root, {
+      units: 'layr-kiosk.service layr-web.service',
+      active: 'layr-web.service layr-kiosk.service', enabled: 'layr-kiosk.service',
+    });
+    try {
+      const result = run('bash deploy/layr-display.sh to-layr --preview --yes', fx.env);
+      expect(result.status, textOf(result)).toBe(0);
+      const log = readFileSync(fx.log, 'utf8');
+      expect(log).toContain('disable layr-kiosk.service');
+      expect(log).toContain('start layr-kiosk.service');
+      expect(log).not.toMatch(/^enable /m);
+      expect(log).not.toContain('KlipperScreen.service\nstart');
+      expect(textOf(result)).toContain('visible rendering and touchscreen function are unverified');
+      expect(textOf(result)).toContain('automatic kiosk startup is disabled');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('leaves boot disabled on preview startup failure without KlipperScreen', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-preview-fail-'));
+    const fx = displayEnv(root, {
+      units: 'layr-kiosk.service layr-web.service',
+      active: 'layr-web.service', enabled: '', startFail: true,
+    });
+    try {
+      const result = run('bash deploy/layr-display.sh to-layr --preview --yes', fx.env);
+      expect(result.status).not.toBe(0);
+      const log = readFileSync(fx.log, 'utf8');
+      expect(log).toContain('disable layr-kiosk.service');
+      expect(log).toContain('disable --now layr-kiosk.service');
+      expect(log).not.toMatch(/^enable /m);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it('leaves KlipperScreen stopped when the kiosk stays active', () => {

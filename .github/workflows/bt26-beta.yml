@@ -1,0 +1,109 @@
+name: BT26 Beta 2
+
+on:
+  push:
+    branches: ['release/bt26-0.2.0-20261104.2']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bt26-beta-0.2.0-20261104.2
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'EzraTechnologies/LAYR'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BT26_TAG: v0.2.0-20261104.2-bt26
+      BT26_ARCHIVE: layr-bt26-test-0.2.0-20261104.2.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Refuse an existing version before testing or publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-remote origin "refs/tags/$BT26_TAG")"
+          gh api --paginate --slurp repos/EzraTechnologies/LAYR/releases > /tmp/bt26-releases.json
+          python3 - <<'PY'
+          import json, os
+          releases = [release for page in json.load(open('/tmp/bt26-releases.json')) for release in page]
+          assert all(r['tag_name'] != os.environ['BT26_TAG'] for r in releases), 'Release already exists; refusing to overwrite'
+          PY
+      - run: npm ci
+      - name: Install validation tools (runner only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          npx playwright install --with-deps chromium
+      - name: Installer and privilege/recovery tests
+        run: npm run test:installer
+      - name: Application unit tests, including Pi regressions
+        run: npm test -- --maxWorkers=1 --testTimeout=60000
+      - name: Explicit Raspberry Pi/bootstrap/deploy regressions
+        run: npx vitest run tests/bootstrap.test.ts tests/deploy.test.ts --maxWorkers=1 --testTimeout=60000
+      - run: npm run check
+      - name: Shell, Python and generated service definitions
+        run: |
+          shellcheck -x -S warning deploy/*.sh
+          for script in deploy/*.sh; do bash -n "$script"; done
+          python3 -m py_compile deploy/layr deploy/layr-session.py deploy/layr-display-power.py tools/bt26_release.py
+          python3 tools/bt26_release.py units
+      - name: Complete browser suite
+        run: |
+          mkdir "$RUNNER_TEMP/bt26-browser"
+          cd "$RUNNER_TEMP/bt26-browser"
+          "$GITHUB_WORKSPACE/node_modules/.bin/playwright" test --config "$GITHUB_WORKSPACE/playwright.config.ts" --workers=1
+      - name: Complete authenticated browser suite
+        run: npx playwright test --config playwright.auth.config.ts --workers=1
+      - name: Build committed source, package and clean-extract verify
+        run: |
+          python3 tools/bt26_release.py build --output "$RUNNER_TEMP/bt26-release"
+          python3 tools/bt26_release.py verify "$RUNNER_TEMP/bt26-release/$BT26_ARCHIVE"
+          cd "$RUNNER_TEMP/bt26-release"
+          sha256sum -c "$BT26_ARCHIVE.sha256"
+      - name: Retain validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt26-0.2.0-20261104.2-validated
+          path: ${{ runner.temp }}/bt26-release/*
+          retention-days: 30
+      - name: Tag, stage release assets, verify download, publish beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-remote origin "refs/tags/$BT26_TAG")"
+          git tag "$BT26_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$BT26_TAG"
+          gh release create "$BT26_TAG" \
+            "$RUNNER_TEMP/bt26-release/$BT26_ARCHIVE" \
+            "$RUNNER_TEMP/bt26-release/$BT26_ARCHIVE.sha256" \
+            --repo EzraTechnologies/LAYR --verify-tag --draft --prerelease --latest=false \
+            --title 'LAYR 0.2.0 — Intel BT26 Beta 2' --notes-file docs/bt26-beta-2-release-notes.md
+          mkdir "$RUNNER_TEMP/bt26-download-check"
+          gh release download "$BT26_TAG" --repo EzraTechnologies/LAYR \
+            --dir "$RUNNER_TEMP/bt26-download-check" --pattern "$BT26_ARCHIVE" --pattern "$BT26_ARCHIVE.sha256"
+          cd "$RUNNER_TEMP/bt26-download-check"
+          sha256sum -c "$BT26_ARCHIVE.sha256"
+          cmp "$BT26_ARCHIVE" "$RUNNER_TEMP/bt26-release/$BT26_ARCHIVE"
+          gh release edit "$BT26_TAG" --repo EzraTechnologies/LAYR --draft=false --prerelease --latest=false
+          gh release view "$BT26_TAG" --repo EzraTechnologies/LAYR --json url,isPrerelease,isDraft,tagName,assets
+          cat "$BT26_ARCHIVE.sha256" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: bt26-beta-2-failure-evidence
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14

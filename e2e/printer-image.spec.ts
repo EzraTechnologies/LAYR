@@ -4,7 +4,7 @@ import { LIMITS } from '../src/lib/printerImage/policy';
 import { expectCleanLayout, openWithMock, VIEWPORTS } from './helpers';
 import { encodePng } from './png';
 import { MockMoonraker, MOONRAKER } from './mockMoonraker';
-import { choosePrinterPhoto, PRINTER_SCOPE, storedPrinterPhoto } from './printerImage';
+import { choosePrinterPhoto, PRINTER_SCOPE, samplePhoto, storedPrinterPhoto } from './printerImage';
 
 const FILE_THUMB = 'SB_main_body_ASA_0.2mm_3h41m';
 
@@ -43,6 +43,62 @@ async function expectOriginalIdle(page: Page) {
 for (const vp of VIEWPORTS) {
   test.describe(`printer image ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
+
+    test('touch selects bundled illustrations offline without opening a native picker', async ({ page }) => {
+      const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+      let pickers = 0;
+      page.on('filechooser', () => { pickers += 1; });
+      // The app is already loaded; image selection must not need a network fetch.
+      await page.context().setOffline(true);
+      for (const label of ['Enclosed', 'Open frame', 'Compact']) {
+        await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+        const options = page.getByRole('region', { name: 'Choose a printer image' });
+        await expect(options.getByRole('button', { name: 'Use illustration' })).toBeDisabled();
+        await options.getByRole('button', { name: `${label} printer illustration`, exact: true }).tap();
+        await expect(options.getByRole('button', { name: `${label} printer illustration`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+        await expectCleanLayout(page);
+        if (label === 'Enclosed') await page.screenshot({ path: test.info().outputPath('touch-printer-chooser.png') });
+        await options.getByRole('button', { name: 'Use illustration' }).tap();
+        await expect(options).toHaveCount(0);
+        await expect(page.getByRole('img', { name: 'Printer photo', exact: true })).toBeVisible();
+        const saved = await storedPrinterPhoto(page);
+        expect(saved?.mime).toBe('image/jpeg');
+        expect(saved?.size).toBeLessThanOrEqual(LIMITS.maxStoredBytes);
+        expect(saved?.width).toBe(480);
+        expect(saved?.height).toBe(360);
+      }
+      expect(pickers).toBe(0);
+      expect(mock.controlCalls).toEqual([]);
+      await page.context().setOffline(false);
+      await page.reload();
+      await expect(page.getByRole('img', { name: 'Printer photo', exact: true })).toBeVisible();
+      await page.getByRole('link', { name: 'Home', exact: true }).tap();
+      await expect(page.getByRole('img', { name: 'Printer photo', exact: true })).toBeVisible();
+    });
+
+    test('touch cancellation and Escape leave the saved photo untouched', async ({ page }) => {
+      await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+      await choosePrinterPhoto(page);
+      const before = await storedPrinterPhoto(page);
+      let pickers = 0;
+      page.on('filechooser', () => { pickers += 1; });
+      await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+      const options = page.getByRole('region', { name: 'Choose a printer image' });
+      await options.getByRole('button', { name: 'Enclosed printer illustration', exact: true }).tap();
+      await options.locator('summary').tap();
+      await expect(options.getByText(/may not respond to touch/)).toBeVisible();
+      await expect(options.getByRole('button', { name: 'Open system file picker' })).toBeVisible();
+      await expectCleanLayout(page);
+      await options.getByRole('button', { name: 'Cancel', exact: true }).tap();
+      await expect(options).toHaveCount(0);
+      expect(await storedPrinterPhoto(page)).toEqual(before);
+      await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+      await page.keyboard.press('Escape');
+      await expect(options).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Choose photo', exact: true })).toBeFocused();
+      expect(await storedPrinterPhoto(page)).toEqual(before);
+      expect(pickers).toBe(0);
+    });
 
     test('idle shows the photo with Ready to print and Browse files', async ({ page }) => {
       const mock = await openWithMock(page, 'home', { scenario: 'ready', homed: true });
@@ -247,6 +303,54 @@ for (const vp of VIEWPORTS) {
 
 test.describe('printer image storage', () => {
   test.use({ viewport: { width: 1024, height: 600 } });
+
+  test('native upload requires an explicit opt-in and retains file input cancellation', async ({ page }) => {
+    await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+    await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+    const options = page.getByRole('region', { name: 'Choose a printer image' });
+    await options.locator('summary').tap();
+    const [cancelled] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      options.getByRole('button', { name: 'Open system file picker' }).tap(),
+    ]);
+    await cancelled.setFiles([]);
+    await expect(options).toBeVisible();
+    await options.getByRole('button', { name: 'Cancel', exact: true }).tap();
+    expect(await storedPrinterPhoto(page)).toBeNull();
+
+    await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+    await options.locator('summary').tap();
+    const [upload] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      options.getByRole('button', { name: 'Open system file picker' }).tap(),
+    ]);
+    await upload.setFiles(samplePhoto());
+    await expect(options).toHaveCount(0);
+    await expect(page.getByRole('img', { name: 'Printer photo', exact: true })).toBeVisible();
+    expect((await storedPrinterPhoto(page))?.mime).toBe('image/jpeg');
+  });
+
+  test('illustration storage failure preserves the previous photo and leaves navigation usable', async ({ page }) => {
+    await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+    await choosePrinterPhoto(page);
+    const before = await storedPrinterPhoto(page);
+    await page.evaluate(() => {
+      const original = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (...args) {
+        if (this.name === 'images') throw new DOMException('test quota', 'QuotaExceededError');
+        return original.apply(this, args);
+      };
+    });
+    await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+    await page.getByRole('button', { name: 'Compact printer illustration', exact: true }).tap();
+    await page.getByRole('button', { name: 'Use illustration' }).tap();
+    await expect(page.getByRole('alert')).toContainText('no room left');
+    expect(await storedPrinterPhoto(page)).toEqual(before);
+    await page.getByRole('button', { name: 'Choose photo', exact: true }).tap();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).tap();
+    await page.getByRole('link', { name: 'Home', exact: true }).tap();
+    await expect(page.getByRole('img', { name: 'Printer photo', exact: true })).toBeVisible();
+  });
 
   test('persists a bounded jpeg for this printer and hides it from another address', async ({ page }) => {
     const mock = await openWithMock(page, 'settings', { scenario: 'ready', homed: true });

@@ -285,7 +285,7 @@ const SHOTS: Shot[] = [
       await page.locator('.settings').evaluate((el) => {
         el.scrollTop = el.scrollHeight;
       });
-      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Shut down printer host', exact: true })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Klipper' })).toBeAttached();
     },
   },
@@ -294,9 +294,9 @@ const SHOTS: Shot[] = [
     route: 'settings',
     options: { scenario: 'ready', homed: true },
     prepare: async (page) => {
-      await page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }).scrollIntoViewIfNeeded();
-      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true })).toBeEnabled();
+      await page.getByRole('button', { name: 'Shut down printer host', exact: true }).scrollIntoViewIfNeeded();
+      await expect(page.getByRole('button', { name: 'Reboot printer host', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Shut down printer host', exact: true })).toBeEnabled();
     },
   },
   {
@@ -304,8 +304,8 @@ const SHOTS: Shot[] = [
     route: 'settings',
     options: { scenario: 'ready', homed: true },
     prepare: async (page) => {
-      await page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Reboot this Raspberry Pi?' })).toBeVisible();
+      await page.getByRole('button', { name: 'Reboot printer host', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Reboot the printer host?' })).toBeVisible();
     },
   },
   {
@@ -313,8 +313,8 @@ const SHOTS: Shot[] = [
     route: 'settings',
     options: { scenario: 'ready', homed: true },
     prepare: async (page) => {
-      await page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Shut down this Raspberry Pi?' })).toBeVisible();
+      await page.getByRole('button', { name: 'Shut down printer host', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Shut down the printer host?' })).toBeVisible();
     },
   },
   {
@@ -322,9 +322,9 @@ const SHOTS: Shot[] = [
     route: 'settings',
     options: { scenario: 'printing', homed: true },
     prepare: async (page) => {
-      await page.getByRole('button', { name: 'Shut down Raspberry Pi', exact: true }).scrollIntoViewIfNeeded();
+      await page.getByRole('button', { name: 'Shut down printer host', exact: true }).scrollIntoViewIfNeeded();
       await expect(page.getByText('Not available during a print')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Reboot Raspberry Pi', exact: true })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Reboot printer host', exact: true })).toBeDisabled();
     },
   },
   {

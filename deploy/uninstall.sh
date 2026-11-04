@@ -38,10 +38,25 @@ else
 fi
 if [ -f "$HDMI_POINTER_RULE_PATH" ]; then
   echo "Leaves the udev rule at $HDMI_POINTER_RULE_PATH in place."
-  echo "Uninstall does not delete that file. A rule already on this Pi stays until you remove it yourself."
+  echo "Uninstall does not delete that file. A rule already on this device stays until you remove it yourself."
   echo "A LAYR-managed rule can be removed with ./deploy/layr-hdmi-input.sh remove"
 fi
 confirm "Uninstall LAYR?" || die "Cancelled"
+
+# Opt-in root controller restores its original backlight and releases the runtime
+# logind inhibitor BEFORE any kiosk files/units can be removed. No-op on a Pi.
+power_helper=/usr/local/lib/layr-display-power/controller.py
+if [ -f "$power_helper" ]; then
+  for power_path in "$power_helper" /usr/local/lib/layr-display-power /usr/local/lib /usr/local /usr; do
+    power_mode=$(stat -c %a "$power_path")
+    [ ! -L "$power_path" ] && [ "$(stat -c %u "$power_path")" = 0 ] && \
+      [ "$((8#$power_mode & 8#22))" = 0 ] || die "Untrusted display-power path; stop and repair it before uninstall."
+  done
+  grep -q '^# LAYR-managed display power controller v1\.' "$power_helper" || die "Untrusted display-power helper; stop and repair it before uninstall."
+  run sudo /usr/bin/python3 -I "$power_helper" uninstall
+elif unit_exists layr-display-power.service; then
+  die "Display-power helper is missing. Restore/wake the backlight and repair the controller before removing LAYR."
+fi
 
 if unit_exists "$KIOSK_UNIT"; then
   run sudo systemctl disable --now "$KIOSK_UNIT" || true
@@ -50,6 +65,9 @@ if unit_exists "$WEB_UNIT"; then
   run sudo systemctl disable --now "$WEB_UNIT" || true
 fi
 run sudo rm -f "$UNIT_DIR/$KIOSK_UNIT" "$UNIT_DIR/$WEB_UNIT"
+if [ -f /etc/pam.d/layr-kiosk ] && grep -q '^# LAYR-managed kiosk PAM session' /etc/pam.d/layr-kiosk; then
+  run sudo rm -f /etc/pam.d/layr-kiosk
+fi
 run sudo systemctl daemon-reload
 
 if [ -f "$KS_MARKER" ]; then
@@ -60,6 +78,10 @@ if [ -f "$KS_MARKER" ]; then
     warn "Marker says LAYR disabled KlipperScreen, but $KS_UNIT is not installed. Nothing was started."
   fi
   run rm -f "$KS_MARKER"
+fi
+
+if [ "$(readlink /usr/local/bin/layr 2>/dev/null || true)" = "$LAYR_HOME/management/layr" ]; then
+  run sudo rm -f /usr/local/bin/layr
 fi
 
 if [ "$PURGE" = 1 ]; then

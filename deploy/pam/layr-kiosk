@@ -1,0 +1,10 @@
+# LAYR-managed kiosk PAM session. Installed only for the dedicated kiosk unit.
+# systemd authenticates the configured User=; this stack opens a local session.
+# Keep the standard account/credential policy; no password bypass module.
+auth include common-auth
+account include common-account
+session required pam_loginuid.so
+session required pam_systemd.so type=wayland class=user
+session required pam_limits.so
+
+# LAYR_SCRIPT_END

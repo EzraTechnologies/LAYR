@@ -58,18 +58,18 @@ describe('Moonraker host capability', () => {
   });
 });
 
-describe('Raspberry Pi host commands', () => {
+describe('printer host commands', () => {
   it('selects machine.reboot or machine.shutdown and names the connected host', () => {
     const reboot = plan(idleHost(), 'host_reboot');
     expect(reboot.method).toBe('machine.reboot');
     expect(reboot.params).toBeUndefined();
     expect(reboot.group).toBe('pi-host');
     expect(reboot.confirm).toMatchObject({
-      title: 'Reboot this Raspberry Pi?',
-      confirmLabel: 'Reboot Raspberry Pi',
+      title: 'Reboot the printer host?',
+      confirmLabel: 'Reboot printer host',
       cancelLabel: 'Go back',
     });
-    expect(reboot.confirm?.body).toContain('Raspberry Pi host trident');
+    expect(reboot.confirm?.body).toContain('printer host trident');
     expect(reboot.confirm?.body).toContain('not a Klipper firmware restart');
     expect(reboot.confirm?.body).toContain('lose its connection');
     expect(reboot.confirm?.body).toContain('printer power supply');
@@ -79,7 +79,7 @@ describe('Raspberry Pi host commands', () => {
     const shutdown = plan(idleHost(), 'host_shutdown');
     expect(shutdown.method).toBe('machine.shutdown');
     expect(shutdown.params).toBeUndefined();
-    expect(shutdown.confirm?.title).toBe('Shut down this Raspberry Pi?');
+    expect(shutdown.confirm?.title).toBe('Shut down the printer host?');
     expect(shutdown.confirm?.body).toContain('does not necessarily remove power');
     expect(shutdown.confirm?.body).toContain('physical power cycle');
     expect(shutdown.note).toContain('physical power cycle');
@@ -87,7 +87,7 @@ describe('Raspberry Pi host commands', () => {
 
   it('does not invent a hostname when Klipper has not reported one', () => {
     const body = plan(idleHost({ hostname: null }), 'host_reboot').confirm?.body ?? '';
-    expect(body).toContain('the Raspberry Pi this screen is connected to');
+    expect(body).toContain('the printer host this screen is connected to');
     expect(body).not.toContain('trident');
     expect(body).not.toMatch(/host null|host undefined/i);
   });

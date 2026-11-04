@@ -330,3 +330,24 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - No license has been chosen yet.
+
+## Universal terminal installer (milestone)
+
+The new `python3 deploy/layr` menu supports explicit headless, desktop and dedicated
+kiosk profiles independently of architecture. See [installation and recovery](docs/universal-installer.md)
+and the [tested versus untested compatibility matrix](docs/compatibility.md).
+The original Raspberry Pi bootstrap remains available. New native OS and physical
+hardware validation is pending; do not treat fixture tests as tablet certification.
+
+Final review findings are in [installer-review.md](docs/installer-review.md).
+The [Mecer BT26 test guide](docs/mecer-bt26-test.md) contains reviewed-bundle transfer,
+preflight, installation, diagnostics and recovery commands. Hardware compatibility
+remains unverified; observe the validation holds in that guide.
+# BT26 Beta 2 testing
+
+For the combined `0.2.0-20261104.2` Intel tablet test build, use the
+[Beta 2 installation, backup and recovery guide](docs/bt26-beta-2.md) and its
+versioned prebuilt release archive. Service-based kiosk operation and the optional
+display-power controller still require physical BT26 validation. Raspberry Pi
+continues to use the same application with native Wayland defaults; Intel power
+management is disabled by default and unsupported on ARM.

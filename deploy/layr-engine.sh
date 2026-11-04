@@ -117,6 +117,10 @@ case "$ACTION" in
       echo "This saves Chromium as the kiosk engine."
       confirm "Save Chromium as the kiosk engine?" || { echo "Cancelled" >&2; exit 1; }
     fi
+    if [ "$RESTART_KIOSK" = 1 ]; then
+      # Installed launchers carry lib.sh alongside the engine helper.
+      ( requested_yes=$ASSUME_YES; . "$HERE/lib.sh"; ASSUME_YES=$requested_yes; require_not_root ) || exit 1
+    fi
     write_engine "$engine"
     echo "Saved LAYR_KIOSK_ENGINE=$engine in $LAYR_ENV"
     maybe_restart_kiosk

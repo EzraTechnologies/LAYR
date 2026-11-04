@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   dist:
+    # Dedicated tablet beta publication must never create/update a stable release.
+    if: ${{ !endsWith(github.ref_name, '-bt26') }}
     name: Pack and attach layr-dist.tar.gz
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -22,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:installer
       - run: npm test
       - run: npm run build
       - name: Pack dist and the deploy scripts

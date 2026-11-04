@@ -14,7 +14,7 @@
 # AFC, Happy Hare, printer.cfg, moonraker.conf, and mmu.cfg are not installed or edited.
 # AFC and Happy Hare are mutually exclusive in one LAYR printer profile. Test one at a
 # time, or use a different printer. This script never starts both controllers.
-# The Pi is not rebooted. HDMI modes are not written.
+# The device is not restarted. HDMI modes are not written.
 #
 # First run (LAYR not installed): install packages and LAYR in preview, then ask
 # before switching the display.
@@ -64,7 +64,7 @@ fail_preflight() {
 print_recovery_bootstrap() {
   cat <<EOF
 
-If the panel is blank or on the wrong screen, the Pi was not rebooted.
+If the panel is blank or on the wrong screen, the device was not restarted.
 Run these as the printer user, not as root. KlipperScreen stays installed:
 
   ${HOME}/layr/src/deploy/layr-display.sh to-klipperscreen --yes
@@ -95,7 +95,7 @@ print_offline_fallback() {
   script="${root}/src/deploy/layr-display.sh"
   printf 'offline-fallback: %s to-klipperscreen --yes\n' "$script"
   printf 'offline-fallback-needs-download: no\n'
-  printf 'That command is already on the Pi after a successful install. It does not download the installer, and it does not need GitHub or the LAYR page.\n'
+  printf 'That command is already on the device after a successful install. It does not download the installer, and it does not need GitHub or the LAYR page.\n'
   printf 'A text console is Ctrl+Alt+F1, or: sudo chvt 1\n'
 }
 
@@ -136,7 +136,7 @@ apt_has() {
   local name="$1"
   local list
   if [ -n "${LAYR_FAKE_PRESENT+x}" ] || [ -n "${LAYR_APT_HAS+x}" ]; then
-    list="${LAYR_APT_HAS-chromium cage git curl ca-certificates python3 tar gzip coreutils}"
+    list="${LAYR_APT_HAS-chromium cage git curl ca-certificates python3 tar gzip coreutils libpam-systemd dbus-user-session polkitd}"
     case " ${list} " in
       *" ${name} "*) return 0 ;;
       *) return 1 ;;
@@ -1112,6 +1112,9 @@ plan_packages() {
   if ! have_item sha256sum && [ "${SOURCE_MODE:-build}" != "dist" ]; then
     PACKAGES+=(coreutils)
   fi
+  have_item libpam-systemd || PACKAGES+=(libpam-systemd)
+  have_item dbus-user-session || PACKAGES+=(dbus-user-session)
+  have_item polkitd || PACKAGES+=(polkitd)
   have_item cage || PACKAGES+=(cage)
   if ! have_item chromium && ! have_item chromium-browser; then
     PACKAGES+=("$(chromium_package_name)")
@@ -1419,7 +1422,7 @@ switch_to_layr() {
 
 print_switch_menu() {
   cat <<'EOF'
-Same installer, already on this Pi. Packages are not downloaded unless you choose Update or Repair.
+Same installer, already on this device. Packages are not downloaded unless you choose Update or Repair.
 
   1) Switch to LAYR
   2) Switch to KlipperScreen
@@ -1573,7 +1576,7 @@ reinstall. It prints the active display and a menu:
 Exit changes nothing. --update and --repair are the actions that install again,
 and they leave the current display alone unless you also name a switch.
 --switch-klipperscreen does not need the LAYR page or a network connection.
-Switching calls layr-display.sh. The Pi is not rebooted.
+Switching calls layr-display.sh. The device is not restarted.
 EOF
 }
 
@@ -1773,7 +1776,7 @@ bootstrap_main() {
     fail_preflight "Not enough free disk (${disk} MB). Need ${disk_need} MB. Nothing was changed."
   fi
   if [ "$SOURCE_MODE" = "build" ] && [ "$memory" -lt 1024 ]; then
-    printf 'warning: memory is under 1024 MB. Building on the Pi may be slow.\n'
+    printf 'warning: memory is under 1024 MB. Building on the device may be slow.\n'
   fi
   if ! sudo_ok; then
     if [ "$DO_DIAGNOSE" = 1 ]; then
@@ -1870,7 +1873,7 @@ apply_groups() {
   printf 'groups-missing: %s\n' "${missing[*]}"
   joined=$(printf '%s,' "${missing[@]}")
   joined=${joined%,}
-  printf 'note: adding those groups does not restart the Pi and does not change udev rules.\n'
+  printf 'note: adding those groups does not restart the device and does not change udev rules.\n'
   run_root usermod -aG "$joined" "$(id -un)" || warn "Could not add groups ${joined}."
 }
 
