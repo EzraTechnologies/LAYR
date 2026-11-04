@@ -1,198 +1,140 @@
-# Install LAYR on a 5-inch touchscreen
+# Combined Mecer BT26 test build — 0.2.0-20261104.1
 
-This is for a friend who already runs Klipper and Moonraker on a Raspberry Pi, with a 5-inch touchscreen (often 800×480). The printer may also already run **AFC** (including a Box Turtle) or **Happy Hare**. LAYR does not install either of those, and it does not change printer configuration.
+This is the current combined test build, uploaded with the owner's permission.
+It includes the universal installer/X11/menu/session work **and** the touch-friendly
+printer-image chooser with three bundled illustrations. The tested archive is
+unchanged from the reviewed local artifact. Nothing is merged or deployed, and
+no GitHub release is created.
 
-Test one filament system at a time. AFC and Happy Hare are mutually exclusive in one LAYR printer profile: turning one on turns the other off. You can test the other later on the same printer, after the first switch is off, or on a different printer. Do not run both controllers at the same time. You do not uninstall LAYR to switch which one you are testing.
+## Download
 
-Use Raspberry Pi OS Bookworm or MainsailOS Bookworm, 64-bit or 32-bit armhf. Other systems stop with an error and change nothing.
+This repository is private. Sign into GitHub with an account that can access
+`EzraTechnologies/LAYR`, then download these files from their GitHub pages:
 
-## Install
+- [Combined archive](https://github.com/EzraTechnologies/LAYR/blob/bt26-installer-test/bt26-test/0.2.0-20261104.1/layr-bt26-test-0.2.0-20261104.1.tar.gz) — use **Download raw file**.
+- [Archive checksum](https://github.com/EzraTechnologies/LAYR/blob/bt26-installer-test/bt26-test/0.2.0-20261104.1/layr-bt26-test-0.2.0-20261104.1.tar.gz.sha256) — save with the same filename.
+- [Full backup, extraction, install, recovery and rollback instructions](https://github.com/EzraTechnologies/LAYR/blob/bt26-installer-test/bt26-test/0.2.0-20261104.1/INSTALL-BACKUP-ROLLBACK.md).
+- [Test results and compatibility limits](https://github.com/EzraTechnologies/LAYR/blob/bt26-installer-test/bt26-test/0.2.0-20261104.1/TEST-RESULTS.md).
 
-On the Pi, as the printer user (the same user you use for Mainsail, often `pi`), not as root:
+Anonymous raw URLs/curl can return 404 for this private repository. Do not paste
+access tokens into URLs or chat. Browser download followed by SCP is sufficient;
+GitHub CLI/Node/npm are not needed on the tablet.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/EzraTechnologies/LAYR/main/deploy/bootstrap.sh -o /tmp/layr-bootstrap.sh
-bash /tmp/layr-bootstrap.sh
-```
+**Use the versioned archive.** The branch's root `deploy/` and `src/` are older
+source and are not the source of this combined build. Do not run `git pull` or
+download main's bootstrap expecting these latest changes. The archive's manifests
+identify its frozen uncommitted source snapshot and paired installer/frontend.
+The older `layr-bt26-review.tar.gz` is historical and lacks these fixes.
 
-Do not pipe that download into `bash` or `sudo`. Read the preflight on screen, then answer the preview question. Preview mode leaves KlipperScreen where it is.
-
-The script tells you what it found: the panel mode, whether a touchscreen is listed, whether Moonraker answered, and whether an `AFC` object, `AFC_lane` lanes, or a Happy Hare `mmu` object is present. Those checks are read-only. Nothing moves.
-
-What this does not do:
-
-- It does not install AFC, Happy Hare, or a Box Turtle, and it does not edit their files.
-- It does not edit `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
-- It does not restart Klipper or Moonraker, and it does not reboot the Pi.
-- It does not force 800×480 or any other HDMI mode, and it does not change udev rules.
-- It does not install the optional WebKit browser. Chromium is the one LAYR uses.
-
-KlipperScreen stays on the panel until you confirm a second question, or until you later run the switch command below. If you want that second step in the same run, only after you have read the prompts:
-
-```bash
-bash /tmp/layr-bootstrap.sh --yes --switch-display
-```
-
-`--yes` alone installs the preview and still leaves KlipperScreen up.
-
-Check the same report again any time. This changes nothing:
-
-```bash
-bash /tmp/layr-bootstrap.sh diagnose
-```
-
-A five-second touch sample, still read-only, writes no input rule:
-
-```bash
-bash /tmp/layr-bootstrap.sh diagnose --sample-touch
-```
-
-## The same command again
-
-After LAYR is installed, run the same two lines again. That run does not download packages, build, or reinstall. It reads `~/layr/current` and the systemd units, prints which display is actually active, and shows a menu:
+SHA-256:
 
 ```text
-1) Switch to LAYR
-2) Switch to KlipperScreen
-3) Update
-4) Repair
-5) Diagnostics
-6) Exit
+a1d60df305df50bddae83512cf62c8d2fabfc288560514cbd46afebc545580ed
 ```
 
-Exit, or running it with no terminal and no choice, changes nothing. You can run it again later and choose Exit.
+## Transfer to the tablet
 
-Switch to LAYR and Switch to KlipperScreen call `layr-display.sh`. KlipperScreen stays installed. The menu does not remove it, and it does not install a KlipperScreen that is not already there.
-
-Update and Repair are the choices that download or install again. They leave the display on whatever is active now.
-
-If both displays are active, neither is active, or the units cannot be read, the script prints that status and does not switch by itself. You can still pick a switch from the menu when the status is both or neither. If the status cannot be read, it will not guess.
-
-If LAYR is broken, or the kiosk is not running, Switch to KlipperScreen still runs. It does not need the LAYR page, and it does not need a network connection.
-
-From a shell, the same choices are:
+From the computer holding the downloaded archive/checksum, use Bash:
 
 ```bash
-bash /tmp/layr-bootstrap.sh --switch-klipperscreen
-bash /tmp/layr-bootstrap.sh --switch-display
-bash /tmp/layr-bootstrap.sh --update
-bash /tmp/layr-bootstrap.sh --repair
+read -r -p 'BT26 tablet SSH IP/hostname (NOT the printer): ' bt26_host
+scp layr-bt26-test-0.2.0-20261104.1.tar.gz layr-bt26-test-0.2.0-20261104.1.tar.gz.sha256 "karel@${bt26_host}:~/"
+ssh -t "karel@${bt26_host}"
 ```
 
-## If the Pi has no network
+Use the tablet owner's actual username if it is not `karel`. Do not use the
+remote Moonraker printer's address as the SCP/SSH destination.
 
-The switch back to KlipperScreen does not need a new copy of the installer. After the first successful install, this file is already on the Pi. From SSH, as the printer user:
+## Verify, back up, then install
+
+On the tablet as the normal owner:
 
 ```bash
-~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
+(
+set -e
+cd "$HOME"
+sha256sum -c layr-bt26-test-0.2.0-20261104.1.tar.gz.sha256
+mkdir -p "$HOME/layr-test-builds"
+test ! -e "$HOME/layr-test-builds/layr-bt26-test-0.2.0-20261104.1"
+tar -xzf layr-bt26-test-0.2.0-20261104.1.tar.gz -C "$HOME/layr-test-builds"
+cd "$HOME/layr-test-builds/layr-bt26-test-0.2.0-20261104.1"
+sha256sum -c SHA256SUMS
+cmp deploy/bt26-build.json dist/bt26-build.json
+)
 ```
 
-That command does not use GitHub, curl, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when `bash /tmp/layr-bootstrap.sh` cannot be downloaded. A text console is Ctrl+Alt+F1, or `sudo chvt 1`.
+**Before installing:** open the extracted `README-BT26.md` and complete its
+**Stop the old kiosk and preserve configuration/data** section. Close manual
+Cage/Chromium first; retain the actual working Chromium profile. That section
+provides a bounded stop for the old hanging unit and saves the original tools,
+config, units, state, release pointer and closed browser profile. Do not skip it.
 
-If `~/layr/src/deploy/layr-display.sh` is not there, the installer will say so and will not stop the display by some other means. Repair needs a network. The text console does not.
-
-## Open LAYR before you move filament
-
-In Chromium on the Pi:
-
-```text
-http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home
-```
-
-A picture of the idle home screen at 800×480 is in [docs/screenshots/800x480-home-ready.png](docs/screenshots/800x480-home-ready.png). Your panel keeps whatever mode it already had. 800×480 is common on a 5-inch screen and is not forced.
-
-On the touchscreen, confirm:
-
-- [ ] You can reach Home, Move, and Settings with a finger. Nothing important is cut off.
-- [ ] Buttons are easy to hit. A mouse still works if one is plugged in.
-- [ ] The installer did not ask you to change HDMI settings. `diagnose` says `hdmi-mode: not set` and `udev: not modified`.
-
-Settings → Integrations is where AFC and Happy Hare are switched. Both start off. Spoolman, if you use it, can stay on with either one. Turning a switch does not move filament and does not edit Klipper.
-
-## AFC and Box Turtle
-
-Skip this section if this printer does not already run AFC. Leave Happy Hare off for the whole section.
-
-- [ ] `diagnose` says `afc-object: present` when Klipper lists `AFC`. Lane names are on the `afc-lanes:` line. A Box Turtle shows up as an `afc-unit:` line such as `AFC_BoxTurtle`.
-- [ ] `mmu-object:` is `absent` on this printer, or Happy Hare is switched off. `controllers:` is `afc`, not `both`.
-- [ ] The `afc-status:` and `afc-lane-status:` lines match what Mainsail or Fluidd shows for the loaded lane, state, and error. This was a read-only check.
-- [ ] In LAYR, Settings → Integrations → turn **AFC** on. Happy Hare stays off. The rail shows AFC. Units, lanes, the loaded lane, and any error match the printer.
-- [ ] Load, lane change, and unload each ask first. Cancel sends nothing. Do this only while the printer is idle and a wrong move is safe.
-- [ ] During a print those buttons stay off.
-- [ ] A printer without AFC, or with the switch off, has no AFC item. `#/afc` says it is not installed.
-
-| Home | AFC lanes | AFC off | Happy Hare | Settings |
-| --- | --- | --- | --- | --- |
-| ![Home, 800×480](docs/screenshots/800x480-home-ready.png) | ![AFC, 800×480](docs/screenshots/800x480-afc.png) | ![AFC not installed, 800×480](docs/screenshots/800x480-afc-absent.png) | ![Happy Hare, 800×480](docs/screenshots/800x480-mmu.png) | ![Settings, 800×480](docs/screenshots/800x480-settings.png) |
-
-These pictures are the 800×480 layout from a mocked printer, not a photo of your panel.
-
-## Happy Hare
-
-Skip this section if this printer does not already run Happy Hare. Leave AFC off for the whole section. If you just tested AFC on this same printer, turn AFC off first. You do not reinstall LAYR.
-
-- [ ] `diagnose` says `mmu-object: present`. `afc-object:` is `absent`, or AFC is switched off. `controllers:` is `happy-hare`, not `both`.
-- [ ] `mmu-status:` shows the tool, gate, filament, action, and pause reason. `mmu-gate:` lines show each gate’s status, material, and name when Happy Hare reported them. They match `MMU_STATUS` or Mainsail. Missing fields say `not-reported`.
-- [ ] In LAYR, Settings → Integrations → turn **Happy Hare** on. AFC stays off. The rail shows MMU. Home shows the same tool, gate, and filament.
-- [ ] Load, unload, and tool change each ask first. Confirming Load sends only `MMU_LOAD`. Cancel sends nothing. The same for Unload and a tool change.
-- [ ] If Happy Hare is paused on a real error, the pause reason matches. Recover, when it is shown, sends only `MMU_RECOVER` after you confirm.
-- [ ] During a print those buttons stay off.
-- [ ] With the switch off, or with no `mmu` object, the rail has no MMU item and nothing moves.
-
-Screenshots at 800×480: [docs/screenshots/800x480-mmu.png](docs/screenshots/800x480-mmu.png), [800x480-mmu-error.png](docs/screenshots/800x480-mmu-error.png), [800x480-mmu-printing.png](docs/screenshots/800x480-mmu-printing.png).
-
-## Both systems
-
-- [ ] If `diagnose` says `controllers: both`, both objects are already on this Klipper. LAYR still did not start them. Turn on only the one this printer should use. Leave the other switch off.
-- [ ] Do not enable both switches. The Settings screen keeps only one of AFC or Happy Hare on.
-- [ ] To test the other system, turn the first switch off and use a printer that actually runs that system, or come back later. Do not uninstall LAYR, and do not try to run both controllers together.
-
-More detail is in [docs/trident-checklist.md](docs/trident-checklist.md) and [docs/happy-hare.md](docs/happy-hare.md).
-
-## Put LAYR on the panel, and how to undo it
-
-Only after the preview looks right in Chromium, run the installer again and choose Switch to LAYR, or run:
+Then, after the backup succeeds:
 
 ```bash
-~/layr/src/deploy/layr-display.sh to-layr
+(
+set -e
+cd "$HOME/layr-test-builds/layr-bt26-test-0.2.0-20261104.1"
+sudo -v
+python3 deploy/layr preflight --profile kiosk --chromium-backend x11 --dist ./dist
+python3 deploy/layr install --profile kiosk --chromium-backend x11 --dist ./dist
+cmp "$HOME/layr/management/bt26-build.json" "$HOME/layr/current/bt26-build.json"
+layr status
+)
 ```
 
-That asks first, then stops KlipperScreen and starts LAYR. KlipperScreen stays installed. If the LAYR kiosk does not stay up, KlipperScreen is turned back on. The installer uses this same script. It does not keep a second copy of the stop and start steps.
+No `--moonraker` override is used: the saved endpoint and web port are retained.
+The browser profile, printer preferences and image storage are not reset. Existing
+releases remain. No printer configuration is edited, no KlipperScreen installed,
+and kiosk boot startup stays disabled. There is no Debian reinstallation.
 
-Switch back from the installer menu, or, with no network and no new download:
+## Physical preview and recovery
+
+Only with keyboard/SSH recovery ready, and the old manual compositor closed:
 
 ```bash
-~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
+layr switch layr
+layr status
+layr kiosk-diagnose
 ```
 
-Previous LAYR build:
+Verify a **service-launched** rendered UI, real ELAN touch, menu Back/return paths,
+remote connection, the in-page illustration chooser/Cancel, and SSH/console
+recovery. An active unit or earlier manual launch is insufficient. Test saving
+illustrations only after backing up any current photo that must be retained.
+
+On failure, leave boot startup disabled:
 
 ```bash
-~/layr/src/deploy/rollback.sh --yes
+layr recover
+sudo chvt 1
+layr kiosk-diagnose
 ```
 
-Remove LAYR. This does not remove apt packages that were already on the Pi, and it does not remove Klipper, Moonraker, AFC, or Happy Hare:
+Only after the service display/touch/recovery checks pass, use `layr enable-kiosk`
+and its explicit physical confirmation. Cold boot/Wi-Fi persistence is a later
+supervised test. No automatic enablement is part of these commands.
 
-```bash
-~/layr/src/deploy/uninstall.sh
-```
+## Rollback
 
-A text console is Ctrl+Alt+F1, or `sudo chvt 1`. None of these commands edit `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
+`layr recover` then `layr rollback --yes` restores the last recorded **web** release
+only. After repeat installs that may be another test release. Use the full
+backup-based rollback section in `INSTALL-BACKUP-ROLLBACK.md` / extracted
+`README-BT26.md` for the original installer, units, env and saved release pointer.
+Keep the old kiosk disabled. Browser data is retained, not automatically restored;
+APT packages are not purged or downgraded.
 
-## If something stops
+## Test evidence and limits
 
-| What you see | What to do |
-| --- | --- |
-| `incomplete copy` | Download `/tmp/layr-bootstrap.sh` again. A short file does not install anything. |
-| It says to run as the printer user, not root | Log in as `pi` (or your Mainsail user) and run the two lines again. Do not use `sudo bash`. |
-| The OS is not supported | Stay on Pi OS Bookworm or MainsailOS Bookworm. Nothing was changed. |
-| apt is locked or `apt-failed=yes` | Wait for the other installer to finish, then run the same command again. The display was not switched. |
-| Moonraker did not answer | Start Moonraker the way you usually do. LAYR did not edit `moonraker.conf`. If the browser blocks the page, add `*://localhost:*` to `cors_domains` yourself. |
-| The panel is blank, or the LAYR kiosk failed | From SSH, as the printer user: `~/layr/src/deploy/layr-display.sh to-klipperscreen --yes`. This does not download the installer and does not need the LAYR page. The Pi was not rebooted. |
-| The installer says both displays, neither display, or an unknown status | It prints that status and does not switch by itself. Pick a menu item only when you mean that display. If the status cannot be read, it will not switch. |
-| KlipperScreen is not installed | The menu will not stop LAYR in order to switch to it. LAYR does not install or remove KlipperScreen. |
-| You already installed LAYR and the command started apt or a build | Choose Exit on a later run. Update and Repair are the menu items that install again. |
-| No touchscreen is listed | `diagnose` prints `touch: none listed`. Cable and the screen’s own overlay are unchanged; LAYR did not write an input rule. |
-| Resolution looks wrong | LAYR did not write an HDMI mode. The panel keeps the mode the Pi already chose. |
-| AFC or Happy Hare is missing in LAYR | The switch for that system is still off, or Klipper did not list the object. LAYR does not install the controller. |
-| You need the other filament system | Turn the current one off in Settings, or open LAYR on the other printer. Do not enable both. |
+- 102 installer tests passed.
+- 397 unit tests passed, including 72 Raspberry Pi/bootstrap/deployment regressions.
+- 354 browser and 12 authenticated browser tests passed.
+- Build, Svelte checks, ShellCheck, syntax and extracted payload checks passed.
+- ARM's default browser backend remains Wayland; the live Pi was untouched.
+
+The owner's prior **manual Cage + Chromium X11/XWayland** rendering and ELAN touch
+pass is documented. This combined build, the systemd seat/VT path, new chooser
+flow and cold-boot/Wi-Fi persistence still require physical BT26 testing. Native
+Linux file-picker touch is not fixed: use bundled illustrations for touch-only
+operation; native upload requires a keyboard/mouse backup. Rotation/calibration
+and other hardware remain unverified. Qt is not required/tested.
