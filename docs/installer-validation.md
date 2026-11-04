@@ -3,6 +3,40 @@
 The original milestone results below are historical. See the final-review section
 for current outcomes and remaining gates.
 
+## BT26 Beta 2 publication gate — 0.2.0-20261104.2
+
+The dedicated `release/bt26-0.2.0-20261104.2` branch publishes only after the
+[BT26 Beta 2 workflow](https://github.com/EzraTechnologies/LAYR/actions/workflows/bt26-beta.yml)
+passes all installer, application, Pi, browser, authenticated-browser, check/build,
+shell and generated-unit gates on the tagged commit. Read the successful run
+associated with the published commit for definitive results; `BUILD.json` and
+the matching installer/frontend copies identify that revision. No live device
+deployment or merge to main is part of this gate.
+
+The first candidate passed locally (144 Python tests, 397 application tests,
+72 explicit Pi regressions, 354 browser tests and 12 authenticated cases), but
+[its hosted browser run](https://github.com/EzraTechnologies/LAYR/actions/runs/41889982785)
+failed eight photo-sizing cases: the generic image locator could select the
+still-mounted Settings preview immediately after clicking Home, or evaluate
+that image after its removal. That run stopped before tagging/publication.
+The corrected tests scope the image to Home's accessible Ready to print region;
+all size/cropping assertions remain intact. Two new viewport regressions hold
+the hashchange explicitly, demonstrate that URL/visibility can still identify
+the Settings image, then release navigation and measure the Home image. No
+frontend/renderer code was changed for these failures. The full browser gate now
+contains 356 cases; authentication remains a separate 12-case gate.
+
+The packager builds from committed clean source, rejects stale/authenticated
+frontend output and includes the optional controller with its generated-service
+definition. It verifies a clean extraction, exact file inventory, internal hashes,
+Git source-blob identities, executable modes and matching build metadata. An
+independent checkout reproduced the first candidate byte for byte; tampered,
+duplicate and unsafe-path archives were rejected. Published asset verification
+downloads/checks the staged files before making the pre-release visible. It never
+overwrites an existing tag/release/asset and explicitly avoids latest-stable
+publication. See [the Beta 2 guide](bt26-beta-2.md) for private download, backups,
+in-place upgrade, physical checks and rollback. Earlier sections are historical.
+
 ## Optional Intel display power — 2026-11-04
 
 Latest local validation for the opt-in display-power change:

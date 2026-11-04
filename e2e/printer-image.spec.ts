@@ -154,6 +154,33 @@ for (const vp of VIEWPORTS) {
       expect(mock.controlCalls).toEqual([]);
     });
 
+    test('idle photo assertions wait for Home to replace the Settings preview', async ({ page }) => {
+      // Hold the real hashchange before Svelte handles it. URL/visibility alone
+      // can still identify the old Settings photo, especially on fast CI runners.
+      await page.addInitScript(() => {
+        const hold = (event: HashChangeEvent) => {
+          if (location.hash !== '#/home') return;
+          window.removeEventListener('hashchange', hold);
+          event.stopImmediatePropagation();
+        };
+        window.addEventListener('hashchange', hold);
+      });
+      await openWithMock(page, 'settings', { scenario: 'ready', homed: true });
+      await choosePrinterPhoto(page);
+      await page.getByRole('link', { name: 'Home', exact: true }).click();
+      await expect(page).toHaveURL(/#\/home$/);
+      await expect(page.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByRole('img', { name: 'Printer photo' })).toBeVisible();
+      const idle = page.getByRole('region', { name: 'Ready to print', exact: true });
+      await expect(idle).toHaveCount(0);
+      // Release the queued navigation explicitly, without a sleep or a retry.
+      await page.evaluate(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+      const photo = idle.getByRole('img', { name: 'Printer photo' });
+      await expect(photo).toBeVisible();
+      await expect.poll(() => photo.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      expect(await photo.evaluate(img => img.getBoundingClientRect().width / img.parentElement!.getBoundingClientRect().width)).toBeLessThanOrEqual(0.60);
+    });
+
     for (const shape of [
       { name: 'portrait', width: 300, height: 900 },
       { name: 'square', width: 800, height: 800 },
@@ -175,7 +202,7 @@ for (const vp of VIEWPORTS) {
         const settingsFit = await page.getByRole('img', { name: 'Printer photo' }).evaluate(img => img.getBoundingClientRect().width / img.parentElement!.getBoundingClientRect().width);
         expect(settingsFit).toBeGreaterThan(0.9);
         await page.getByRole('link', { name: 'Home', exact: true }).click();
-        const photo = page.getByRole('img', { name: 'Printer photo' });
+        const photo = page.getByRole('region', { name: 'Ready to print', exact: true }).getByRole('img', { name: 'Printer photo' });
         await expect(photo).toBeVisible();
         await expect.poll(() => photo.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
         const fit = await photo.evaluate(el => {
