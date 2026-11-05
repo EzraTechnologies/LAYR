@@ -17,6 +17,14 @@ bash /tmp/layr-bootstrap.sh
 
 Do not pipe that download into `bash` or `sudo`. Read the preflight on screen, then answer the preview question. Preview mode leaves KlipperScreen where it is.
 
+That long command is only for the first install. When it finishes, it adds a `layr` command for your user. After you log in again, including after a reboot, type this from any directory:
+
+```bash
+layr
+```
+
+That opens the same manager. It does not download anything, and it does not use `/tmp`.
+
 The script tells you what it found: the panel mode, whether a touchscreen is listed, whether Moonraker answered, and whether an `AFC` object, `AFC_lane` lanes, or a Happy Hare `mmu` object is present. Those checks are read-only. Nothing moves.
 
 What this does not do:
@@ -47,9 +55,9 @@ A five-second touch sample, still read-only, writes no input rule:
 bash /tmp/layr-bootstrap.sh diagnose --sample-touch
 ```
 
-## The same command again
+## The same menu again
 
-After LAYR is installed, run the same two lines again. That run does not download packages, build, or reinstall. It reads `~/layr/current` and the systemd units, prints which display is actually active, and shows a menu:
+After LAYR is installed, type `layr` from any directory. That does not download packages, build, or reinstall. It reads `~/layr/current` and the systemd units, prints which display is actually active, and shows a menu:
 
 ```text
 1) Switch to LAYR
@@ -58,6 +66,7 @@ After LAYR is installed, run the same two lines again. That run does not downloa
 4) Repair
 5) Diagnostics
 6) Exit
+7) Uninstall LAYR
 ```
 
 Exit, or running it with no terminal and no choice, changes nothing. You can run it again later and choose Exit.
@@ -66,6 +75,8 @@ Switch to LAYR and Switch to KlipperScreen call `layr-display.sh`. KlipperScreen
 
 Update and Repair are the choices that download or install again. They leave the display on whatever is active now.
 
+Uninstall LAYR asks first and tells you what it removes. It turns KlipperScreen back on when that service is installed. It does not remove apt packages, Klipper, Moonraker, AFC, Happy Hare, or printer configuration. It asks a second question before it deletes personal LAYR settings and the idle-home printer photo.
+
 If both displays are active, neither is active, or the units cannot be read, the script prints that status and does not switch by itself. You can still pick a switch from the menu when the status is both or neither. If the status cannot be read, it will not guess.
 
 If LAYR is broken, or the kiosk is not running, Switch to KlipperScreen still runs. It does not need the LAYR page, and it does not need a network connection.
@@ -73,23 +84,33 @@ If LAYR is broken, or the kiosk is not running, Switch to KlipperScreen still ru
 From a shell, the same choices are:
 
 ```bash
-bash /tmp/layr-bootstrap.sh --switch-klipperscreen
-bash /tmp/layr-bootstrap.sh --switch-display
-bash /tmp/layr-bootstrap.sh --update
-bash /tmp/layr-bootstrap.sh --repair
+layr to-klipperscreen
+layr to-layr
+layr update
+layr repair
+layr status
+layr uninstall
 ```
+
+`layr status` only reads the local install. `layr to-klipperscreen` and `layr to-layr` do not download. `layr update` and `layr repair` are the ones that may use the network. `layr uninstall` asks before it removes anything. `--yes` skips that first question and still keeps settings and photos unless you also pass `--delete-browser`.
 
 ## If the Pi has no network
 
-The switch back to KlipperScreen does not need a new copy of the installer. After the first successful install, this file is already on the Pi. From SSH, as the printer user:
+The switch back to KlipperScreen does not need a new copy of the installer. After the first successful install, from SSH, as the printer user, from any directory:
+
+```bash
+layr to-klipperscreen --yes
+```
+
+That command does not use GitHub, curl, `/tmp`, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when the long install command cannot be downloaded. It still works when the LAYR page does not answer.
+
+If `layr` itself is missing, this file is also on the Pi after a successful install:
 
 ```bash
 ~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
 ```
 
-That command does not use GitHub, curl, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when `bash /tmp/layr-bootstrap.sh` cannot be downloaded. A text console is Ctrl+Alt+F1, or `sudo chvt 1`.
-
-If `~/layr/src/deploy/layr-display.sh` is not there, the installer will say so and will not stop the display by some other means. Repair needs a network. The text console does not.
+If that file is not there either, the installer will say so and will not stop the display by some other means. Repair needs a network. A text console is Ctrl+Alt+F1, or `sudo chvt 1`. The text console does not.
 
 ## Open LAYR before you move filament
 
@@ -151,31 +172,43 @@ More detail is in [docs/trident-checklist.md](docs/trident-checklist.md) and [do
 
 ## Put LAYR on the panel, and how to undo it
 
-Only after the preview looks right in Chromium, run the installer again and choose Switch to LAYR, or run:
+Only after the preview looks right in Chromium, run `layr` and choose Switch to LAYR, or run:
 
 ```bash
-~/layr/src/deploy/layr-display.sh to-layr
+layr to-layr
 ```
 
-That asks first, then stops KlipperScreen and starts LAYR. KlipperScreen stays installed. If the LAYR kiosk does not stay up, KlipperScreen is turned back on. The installer uses this same script. It does not keep a second copy of the stop and start steps.
+Choosing that menu item, or running `layr to-layr`, stops KlipperScreen and starts LAYR. KlipperScreen stays installed. If the LAYR kiosk does not stay up, KlipperScreen is turned back on. The command uses `layr-display.sh`. It does not keep a second copy of the stop and start steps.
 
-Switch back from the installer menu, or, with no network and no new download:
+Switch back from the `layr` menu, or, with no network and no new download:
 
 ```bash
-~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
+layr to-klipperscreen --yes
 ```
 
-Previous LAYR build:
+Previous LAYR build. This leaves the `layr` command in place:
 
 ```bash
 ~/layr/src/deploy/rollback.sh --yes
 ```
 
-Remove LAYR. This does not remove apt packages that were already on the Pi, and it does not remove Klipper, Moonraker, AFC, or Happy Hare:
+Remove LAYR from the menu: choose **Uninstall LAYR**. The same action from SSH is:
+
+```bash
+layr uninstall
+```
+
+Read the summary before you answer. It turns KlipperScreen back on first when that service is installed. If KlipperScreen is not installed and the LAYR kiosk is what is on the screen, uninstall stops and leaves the panel as it is. Uninstall removes LAYR services, the releases under `~/layr`, and the `layr` command. It does not remove apt packages that were already on the Pi, and it does not remove Klipper, Moonraker, AFC, Happy Hare, `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
+
+A second question asks before deleting personal settings and printer photos (`~/.config/layr-chromium`). The default is to keep them. `--yes` alone also keeps them. Add `--delete-browser` only when you want those deleted too.
+
+An older install that does not have `layr` yet can still run:
 
 ```bash
 ~/layr/src/deploy/uninstall.sh
 ```
+
+`--purge` on that script also removes `~/layr` and the `layr` command. It still keeps personal settings and printer photos.
 
 A text console is Ctrl+Alt+F1, or `sudo chvt 1`. None of these commands edit `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
 
@@ -188,10 +221,11 @@ A text console is Ctrl+Alt+F1, or `sudo chvt 1`. None of these commands edit `pr
 | The OS is not supported | Stay on Pi OS Bookworm or MainsailOS Bookworm. Nothing was changed. |
 | apt is locked or `apt-failed=yes` | Wait for the other installer to finish, then run the same command again. The display was not switched. |
 | Moonraker did not answer | Start Moonraker the way you usually do. LAYR did not edit `moonraker.conf`. If the browser blocks the page, add `*://localhost:*` to `cors_domains` yourself. |
-| The panel is blank, or the LAYR kiosk failed | From SSH, as the printer user: `~/layr/src/deploy/layr-display.sh to-klipperscreen --yes`. This does not download the installer and does not need the LAYR page. The Pi was not rebooted. |
+| The panel is blank, or the LAYR kiosk failed | From SSH, as the printer user: `layr to-klipperscreen --yes`. This does not download the installer and does not need the LAYR page. If `layr` is not found: `~/layr/src/deploy/layr-display.sh to-klipperscreen --yes`. The Pi was not rebooted. |
 | The installer says both displays, neither display, or an unknown status | It prints that status and does not switch by itself. Pick a menu item only when you mean that display. If the status cannot be read, it will not switch. |
 | KlipperScreen is not installed | The menu will not stop LAYR in order to switch to it. LAYR does not install or remove KlipperScreen. |
-| You already installed LAYR and the command started apt or a build | Choose Exit on a later run. Update and Repair are the menu items that install again. |
+| You already installed LAYR and `layr` started apt or a build | Choose Exit. Update and Repair are the menu items that install again. A plain `layr` or `layr status` does not. |
+| `layr: command not found` after the first install | Log in again, or open a new terminal. The command is `~/.local/bin/layr`. An install from before this command existed needs the long install command one more time; choose Exit and the command is added without a reinstall. |
 | No touchscreen is listed | `diagnose` prints `touch: none listed`. Cable and the screen’s own overlay are unchanged; LAYR did not write an input rule. |
 | Resolution looks wrong | LAYR did not write an HDMI mode. The panel keeps the mode the Pi already chose. |
 | AFC or Happy Hare is missing in LAYR | The switch for that system is still off, or Klipper did not list the object. LAYR does not install the controller. |

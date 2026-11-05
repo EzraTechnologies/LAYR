@@ -136,15 +136,19 @@ case "$ACTION" in
     ;;
   to-klipperscreen)
     require_not_root
-    echo "This stops the LAYR kiosk and enables KlipperScreen."
+    echo "This turns KlipperScreen on first, then stops the LAYR kiosk."
     confirm "Switch the display back to KlipperScreen?" || die "Cancelled"
-    if unit_exists "$KIOSK_UNIT"; then
-      run sudo systemctl disable --now "$KIOSK_UNIT"
-    fi
     if unit_exists "$KS_UNIT"; then
-      run sudo systemctl enable --now "$KS_UNIT"
+      if ! run sudo systemctl enable --now "$KS_UNIT"; then
+        die "KlipperScreen did not start. The LAYR kiosk was not stopped."
+      fi
+    elif unit_active "$KIOSK_UNIT"; then
+      die "KlipperScreen is not installed, and the LAYR kiosk is active. The kiosk was not stopped, so the panel is not left blank."
     else
       warn "$KS_UNIT is not installed, so nothing was started on the display."
+    fi
+    if unit_exists "$KIOSK_UNIT"; then
+      run sudo systemctl disable --now "$KIOSK_UNIT"
     fi
     run rm -f "$KS_MARKER"
     info "Display switched. The LAYR web server is still available in a browser."

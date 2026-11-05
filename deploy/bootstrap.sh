@@ -19,14 +19,17 @@
 # First run (LAYR not installed): install packages and LAYR in preview, then ask
 # before switching the display.
 # Later runs: do not apt, download, build, or reinstall. Print the active display
-# and a menu: Switch to LAYR, Switch to KlipperScreen, Update, Repair, Diagnostics, Exit.
-# Exit, and a non-interactive run with no choice, change nothing.
+# and a menu: Switch to LAYR, Switch to KlipperScreen, Update, Repair, Diagnostics,
+# Exit, Uninstall LAYR. Exit, and a non-interactive run with no choice, change nothing.
+# A successful install also adds a layr command on the printer user's PATH.
+# After that, `layr` opens this same menu. It does not use /tmp or the network.
 # Switching calls layr-display.sh. This file does not start or stop units itself.
 # If both displays are active, neither is active, or systemd cannot be read, the
 # status is printed and the display is not switched by itself.
 # Switch to KlipperScreen still runs when LAYR is broken or the kiosk is down.
 # It does not need the LAYR page or a network connection.
 # Offline, from SSH, without downloading this file again:
+#   layr to-klipperscreen --yes
 #   ~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
 #
 #   bash deploy/bootstrap.sh diagnose
@@ -37,6 +40,8 @@
 #   bash deploy/bootstrap.sh --switch-klipperscreen
 #   bash deploy/bootstrap.sh --update
 #   bash deploy/bootstrap.sh --repair
+#   bash deploy/bootstrap.sh --status
+#   bash deploy/bootstrap.sh --uninstall
 #   LAYR_REF=<commit> bash deploy/bootstrap.sh
 set -euo pipefail
 
@@ -67,6 +72,7 @@ print_recovery_bootstrap() {
 If the panel is blank or on the wrong screen, the Pi was not rebooted.
 Run these as the printer user, not as root. KlipperScreen stays installed:
 
+  ${HOME}/.local/bin/layr to-klipperscreen --yes
   ${HOME}/layr/src/deploy/layr-display.sh to-klipperscreen --yes
   ${HOME}/layr/src/deploy/rollback.sh --yes
   ${HOME}/layr/src/deploy/uninstall.sh
@@ -93,9 +99,12 @@ print_offline_fallback() {
   local root script
   root=$(layr_root)
   script="${root}/src/deploy/layr-display.sh"
-  printf 'offline-fallback: %s to-klipperscreen --yes\n' "$script"
+  printf 'offline-fallback: %s to-klipperscreen --yes\n' "$(layr_command_path)"
+  printf 'offline-fallback-script: %s to-klipperscreen --yes\n' "$script"
   printf 'offline-fallback-needs-download: no\n'
-  printf 'That command is already on the Pi after a successful install. It does not download the installer, and it does not need GitHub or the LAYR page.\n'
+  printf 'After the layr command is installed, run: layr to-klipperscreen --yes\n'
+  printf 'That command does not download the installer, and it does not need GitHub or the LAYR page.\n'
+  printf 'The same switch is also on disk as: %s to-klipperscreen --yes\n' "$script"
   printf 'A text console is Ctrl+Alt+F1, or: sudo chvt 1\n'
 }
 
@@ -1287,6 +1296,650 @@ script_is_complete() {
   [ "$last" = "# LAYR_SCRIPT_END" ]
 }
 
+# --- persistent layr command (kept in this file so one download can install it) ---
+
+LAYR_PATH_BEGIN="# BEGIN LAYR command path"
+LAYR_PATH_END="# END LAYR command path"
+
+layr_command_path() {
+  printf '%s\n' "${HOME}/.local/bin/layr"
+}
+
+layr_path_block() {
+  cat <<'EOF'
+
+# BEGIN LAYR command path
+if [ -d "$HOME/.local/bin" ]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+  esac
+fi
+# END LAYR command path
+EOF
+}
+
+ensure_layr_path_snippet() {
+  local file="$1" mode="${2:-always}"
+  [ -n "${HOME:-}" ] || return 0
+  [ -L "$file" ] && return 0
+  if [ -f "$file" ] && grep -q "$LAYR_PATH_BEGIN" "$file"; then
+    return 0
+  fi
+  if [ "$mode" = "if-missing" ] && [ -f "$file" ] && grep -q '\.local/bin' "$file"; then
+    return 0
+  fi
+  if [ ! -e "$file" ]; then
+    : >"$file"
+    chmod 644 "$file"
+  fi
+  layr_path_block >>"$file"
+}
+
+remove_layr_path_block() {
+  local file="$1" tmp
+  [ -f "$file" ] || return 0
+  [ -L "$file" ] && return 0
+  grep -q "$LAYR_PATH_BEGIN" "$file" || return 0
+  tmp="${file}.layr-tmp"
+  awk -v begin="$LAYR_PATH_BEGIN" -v end="$LAYR_PATH_END" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    skip != 1 { print }
+  ' "$file" >"$tmp"
+  mv -f "$tmp" "$file"
+}
+
+remove_layr_command_files() {
+  local cmd
+  cmd=$(layr_command_path)
+  remove_layr_path_block "${HOME}/.bashrc"
+  remove_layr_path_block "${HOME}/.profile"
+  if [ -L "$cmd" ] || [ -e "$cmd" ]; then
+    rm -f "$cmd" || return 1
+  fi
+  printf 'layr-command: removed\n'
+}
+
+write_embedded_wrapper() {
+  local dest="$1"
+  cat >"$dest" <<'LAYR_WRAPPER' || return 1
+#!/usr/bin/env bash
+# Persistent LAYR command. Installed for the printer user.
+# It runs the manager already stored under the LAYR home directory.
+# It does not download files, install packages, or read a script from /tmp.
+set -euo pipefail
+
+if [ "$(id -u)" = 0 ]; then
+  printf 'ERROR: Run layr as the printer user, not as root. Nothing was changed.\n' >&2
+  exit 1
+fi
+if [ -z "${HOME:-}" ]; then
+  printf 'ERROR: HOME is not set. Nothing was changed.\n' >&2
+  exit 1
+fi
+
+LAYR_HOME="${LAYR_HOME:-$HOME/layr}"
+MANAGER="${LAYR_BOOTSTRAP:-$LAYR_HOME/bin/bootstrap.sh}"
+
+complete_script() {
+  local file="$1" last
+  [ -f "$file" ] || return 1
+  [ -L "$file" ] && return 1
+  last=$(awk 'NF { line = $0 } END { print line }' "$file")
+  [ "$last" = "# LAYR_SCRIPT_END" ]
+}
+
+mode_safe() {
+  local file="$1" mode group other
+  mode=$(stat -c '%a' "$file" 2>/dev/null) || return 1
+  group=$(((10#$mode / 10) % 10))
+  other=$((10#$mode % 10))
+  [ $((group & 2)) -eq 0 ] && [ $((other & 2)) -eq 0 ]
+}
+
+local_manager() {
+  local parent
+  [ -n "$MANAGER" ] || return 1
+  case "$MANAGER" in
+    "$LAYR_HOME"/*) ;;
+    *) return 1 ;;
+  esac
+  parent=$(dirname "$MANAGER")
+  [ "$parent" != "/tmp" ] || return 1
+  [ -x "$MANAGER" ] || return 1
+  mode_safe "$MANAGER" || return 1
+  complete_script "$MANAGER"
+}
+
+display_script() {
+  local candidate
+  if [ -n "${LAYR_DISPLAY_SH:-}" ] && [ -f "$LAYR_DISPLAY_SH" ] && [ ! -L "$LAYR_DISPLAY_SH" ]; then
+    case "$(dirname "$LAYR_DISPLAY_SH")" in
+      /tmp) return 1 ;;
+    esac
+    printf '%s\n' "$LAYR_DISPLAY_SH"
+    return 0
+  fi
+  for candidate in "$LAYR_HOME/src/deploy/layr-display.sh" "$LAYR_HOME/bin/layr-display.sh"; do
+    if complete_script "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: layr [status | to-layr | to-klipperscreen | update | repair | diagnose | uninstall | help]
+
+  layr                    Open the LAYR manager menu.
+  layr status             Show which display is active. No network and no package install.
+  layr to-layr            Switch the panel to LAYR.
+  layr to-klipperscreen   Switch the panel to KlipperScreen. This works offline.
+  layr update             Update LAYR. This is the action that may download.
+  layr repair             Repair LAYR. This is the action that may download.
+  layr diagnose           Read-only report.
+  layr uninstall          Remove LAYR after confirmation.
+
+--yes skips the uninstall confirmation. Settings and printer photos are kept
+unless you also pass --delete-browser. Klipper, Moonraker, AFC, Happy Hare,
+and printer configuration are not removed.
+EOF
+}
+
+run_display() {
+  local script action="$1"
+  shift
+  if ! script=$(display_script); then
+    printf 'ERROR: layr-display.sh is not installed on this computer. Nothing was changed.\n' >&2
+    printf 'offline-fallback-needs-download: no\n'
+    exit 1
+  fi
+  exec bash "$script" "$action" "$@"
+}
+
+main() {
+  local cmd="${1:-}" script=""
+  if [ "$#" -gt 0 ]; then
+    shift
+  fi
+  case "$cmd" in
+    help | -h | --help)
+      usage
+      exit 0
+      ;;
+    "" | menu)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed in %s.\n' "$LAYR_HOME/bin" >&2
+        printf 'The first install uses the long command in INSTALL-FOR-TESTERS.md. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" "$@"
+      ;;
+    status | --status)
+      if local_manager; then
+        exec bash "$MANAGER" --status "$@"
+      fi
+      if script=$(display_script); then
+        exec bash "$script" status
+      fi
+      printf 'install-state: not-installed\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      printf 'offline-fallback-needs-download: no\n'
+      exit 0
+      ;;
+    to-klipperscreen | switch-klipperscreen | --switch-klipperscreen)
+      if local_manager; then
+        exec bash "$MANAGER" --switch-klipperscreen "$@"
+      fi
+      run_display to-klipperscreen "$@"
+      ;;
+    to-layr | switch-layr | --switch-display)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. The display was not changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --switch-display "$@"
+      ;;
+    update | --update)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was updated.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --update "$@"
+      ;;
+    repair | --repair)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was repaired.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --repair "$@"
+      ;;
+    diagnose | diagnostics)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" diagnose "$@"
+      ;;
+    uninstall | --uninstall)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was removed.\n' >&2
+        printf 'The layr command was left in place.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" --uninstall "$@"
+      ;;
+    *)
+      if ! local_manager; then
+        printf 'ERROR: The LAYR manager is not installed. Nothing was changed.\n' >&2
+        exit 1
+      fi
+      exec bash "$MANAGER" "$cmd" "$@"
+      ;;
+  esac
+}
+
+main "$@"
+# LAYR_SCRIPT_END
+LAYR_WRAPPER
+  script_is_complete "$dest" || die "The layr command text was incomplete. Nothing else was changed."
+}
+
+refuse_layr_symlinks() {
+  local path root
+  root=$(layr_root)
+  for path in "$HOME/.local" "$HOME/.local/bin" "$HOME/.local/bin/layr" "$root" "$root/bin"; do
+    if [ -L "$path" ]; then
+      die "Refusing to install the layr command through a symlink ($path). Nothing else was changed."
+    fi
+  done
+}
+
+prepare_owned_dir() {
+  local dir="$1" owner
+  mkdir -p "$dir" || return 1
+  if [ -L "$dir" ]; then
+    die "Refusing to install the layr command through a symlink ($dir). Nothing else was changed."
+  fi
+  owner=$(stat -c '%u' "$dir") || return 1
+  if [ "$owner" != "$(id -u)" ]; then
+    die "Refusing $dir because another user owns it. Nothing else was changed."
+  fi
+  chmod u+rwx,go-w "$dir" || return 1
+}
+
+install_private_copy() {
+  local src="$1" dest="$2" mode="$3" dir tmp
+  [ -f "$src" ] || return 1
+  dir=$(dirname "$dest")
+  prepare_owned_dir "$dir" || return 1
+  if [ -e "$dest" ] && [ ! -L "$dest" ] && [ "$src" -ef "$dest" ]; then
+    chmod "$mode" "$dest" || return 1
+    return 0
+  fi
+  tmp=$(mktemp -p "$dir" ".layr-copy.XXXXXX") || return 1
+  cp "$src" "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  chmod "$mode" "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && command -v cmp >/dev/null 2>&1 && cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    chmod "$mode" "$dest" || return 1
+    return 0
+  fi
+  if [ -L "$dest" ]; then
+    rm -f "$dest" || return 1
+  fi
+  mv -f "$tmp" "$dest" || return 1
+  chmod "$mode" "$dest" || return 1
+}
+
+deploy_source_dir() {
+  local dir
+  dir=$SCRIPT_DIR
+  if script_is_complete "$dir/layr-display.sh" && script_is_complete "$dir/lib.sh" && script_is_complete "$dir/uninstall.sh"; then
+    printf '%s\n' "$dir"
+    return 0
+  fi
+  dir="$(layr_root)/src/deploy"
+  if script_is_complete "$dir/layr-display.sh" && script_is_complete "$dir/lib.sh" && script_is_complete "$dir/uninstall.sh"; then
+    printf '%s\n' "$dir"
+    return 0
+  fi
+  return 1
+}
+
+copy_support_scripts() {
+  local src name dest root
+  src=$(deploy_source_dir) || {
+    printf 'layr-scripts: not-copied\n'
+    return 0
+  }
+  root=$(layr_root)
+  prepare_owned_dir "$root/bin" || return 1
+  for name in layr-display.sh lib.sh uninstall.sh rollback.sh; do
+    dest="$root/bin/$name"
+    if [ -f "$src/$name" ]; then
+      install_private_copy "$src/$name" "$dest" 755 || return 1
+    fi
+  done
+}
+
+install_manager_copy() {
+  local source dest newer
+  source=$SCRIPT_PATH
+  if [ "${LAYR_MANAGER_FROM_CHECKOUT:-0}" = 1 ]; then
+    newer="$(layr_root)/src/deploy/bootstrap.sh"
+    if script_is_complete "$newer" && grep -q 'layr-command:' "$newer"; then
+      source=$newer
+    fi
+  fi
+  dest="$(layr_root)/bin/bootstrap.sh"
+  install_private_copy "$source" "$dest" 755 || return 1
+  script_is_complete "$dest" || die "The installed LAYR manager is incomplete. The display was not changed."
+}
+
+install_wrapper_command() {
+  local dest dir tmp installed=0
+  dir="${HOME}/.local/bin"
+  dest=$(layr_command_path)
+  case "$dir" in
+    "$HOME"/.local/bin) ;;
+    *) die "Refusing to install the layr command outside the printer user's home." ;;
+  esac
+  prepare_owned_dir "$dir" || return 1
+  tmp=$(mktemp -p "$dir" ".layr-command.XXXXXX") || return 1
+  if [ -f "${SCRIPT_DIR}/layr" ] && script_is_complete "${SCRIPT_DIR}/layr"; then
+    cp "${SCRIPT_DIR}/layr" "$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    write_embedded_wrapper "$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+  fi
+  chmod 755 "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && command -v cmp >/dev/null 2>&1 && cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    chmod 755 "$dest"
+    installed=0
+  else
+    if [ -L "$dest" ]; then
+      rm -f "$dest"
+    fi
+    mv -f "$tmp" "$dest" || return 1
+    chmod 755 "$dest" || return 1
+    installed=1
+  fi
+  if ! script_is_complete "$dest"; then
+    rm -f "$dest"
+    die "The layr command was incomplete and was not left in place."
+  fi
+  printf 'layr-command-path: %s\n' "$dest"
+  if [ "$installed" = 1 ]; then
+    printf 'layr-command: installed\n'
+    printf 'Next time, from any directory: layr\n'
+    printf 'Offline recovery: layr to-klipperscreen --yes\n'
+  else
+    printf 'layr-command: ready\n'
+  fi
+  ensure_layr_path_snippet "${HOME}/.bashrc" always
+  ensure_layr_path_snippet "${HOME}/.profile" if-missing
+}
+
+ensure_layr_command() {
+  LAYR_COMMAND_ENSURED=1
+  if [ -z "${HOME:-}" ]; then
+    die "HOME is not set. The layr command was not installed."
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    printf 'layr-command: would-install\n'
+    printf 'layr-command-path: %s\n' "$(layr_command_path)"
+    return 0
+  fi
+  refuse_layr_symlinks
+  install_manager_copy || return 1
+  copy_support_scripts || return 1
+  install_wrapper_command || return 1
+}
+
+resolve_uninstall_script() {
+  local root candidate
+  if [ -n "${LAYR_UNINSTALL_SH:-}" ] && [ -f "$LAYR_UNINSTALL_SH" ]; then
+    printf '%s\n' "$LAYR_UNINSTALL_SH"
+    return 0
+  fi
+  root=$(layr_root)
+  for candidate in "${SCRIPT_DIR}/uninstall.sh" "${root}/bin/uninstall.sh" "${root}/src/deploy/uninstall.sh"; do
+    if script_is_complete "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+confirm_uninstall() {
+  local reply
+  if [ "${ASSUME_YES:-0}" = 1 ] || [ "${LAYR_UNINSTALL_YES:-0}" = 1 ]; then
+    return 0
+  fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    printf 'No terminal for the uninstall question. Re-run with --yes. Nothing was removed.\n'
+    return 1
+  fi
+  read -r -p "Uninstall LAYR now? [y/N] " reply || return 1
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+confirm_delete_browser() {
+  local reply
+  if [ "${DELETE_BROWSER:-0}" = 1 ] || [ "${LAYR_DELETE_BROWSER:-}" = "yes" ]; then
+    return 0
+  fi
+  if [ "${LAYR_DELETE_BROWSER:-}" = "no" ]; then
+    return 1
+  fi
+  if [ "${ASSUME_YES:-0}" = 1 ] || [ "${DRY_RUN:-0}" = 1 ] || [ ! -t 0 ]; then
+    return 1
+  fi
+  cat <<EOF
+Delete personal LAYR settings and printer photos?
+This removes only:
+  ${HOME}/.config/layr-chromium
+  ${HOME}/.cache/layr-wpe
+  ${HOME}/.local/share/layr-wpe
+Those hold this screen's LAYR settings and the idle-home printer photo.
+Klipper, Moonraker, AFC, Happy Hare, printer.cfg, moonraker.conf, and mmu.cfg are not in those folders.
+EOF
+  read -r -p "Delete personal settings and printer photos? [y/N] " reply || return 1
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+remove_browser_data() {
+  local path
+  [ -n "${HOME:-}" ] || return 1
+  for path in "${HOME}/.config/layr-chromium" "${HOME}/.cache/layr-wpe" "${HOME}/.local/share/layr-wpe"; do
+    case "$path" in
+      "${HOME}/.config/layr-chromium" | "${HOME}/.cache/layr-wpe" | "${HOME}/.local/share/layr-wpe") ;;
+      *) return 1 ;;
+    esac
+    if [ -L "$path" ]; then
+      rm -f "$path" || return 1
+      continue
+    fi
+    if [ ! -e "$path" ]; then
+      continue
+    fi
+    if [ -n "${LAYR_RM:-}" ]; then
+      "$LAYR_RM" -rf "$path" || return 1
+    else
+      rm -rf "$path" || return 1
+    fi
+  done
+  printf 'browser-data: removed\n'
+}
+
+remove_layr_home_tree() {
+  local root
+  root=$(layr_root)
+  [ -n "$root" ] || return 1
+  [ "$root" != "/" ] || return 1
+  [ "$root" != "$HOME" ] || return 1
+  case "$root" in
+    "$HOME"/*) ;;
+    *)
+      printf 'uninstall-refused: home\n'
+      return 1
+      ;;
+  esac
+  if [ "$(basename "$root")" != "layr" ]; then
+    printf 'uninstall-refused: home\n'
+    return 1
+  fi
+  if [ ! -e "$root" ] && [ ! -L "$root" ]; then
+    printf 'layr-home: absent\n'
+    return 0
+  fi
+  if [ -L "$root" ]; then
+    rm -f "$root" || return 1
+    printf 'layr-home: removed-link\n'
+    return 0
+  fi
+  if [ -n "${LAYR_RM:-}" ]; then
+    "$LAYR_RM" -rf "$root" || return 1
+  else
+    rm -rf "$root" || return 1
+  fi
+  printf 'layr-home: removed\n'
+}
+
+print_uninstall_plan() {
+  cat <<EOF
+Uninstall LAYR?
+
+This will:
+  - turn KlipperScreen back on first, when that service is installed
+  - stop and remove layr-web and layr-kiosk
+  - delete LAYR releases, scripts, and the layr command
+
+This will not:
+  - remove apt packages such as Chromium or cage
+  - remove Klipper, Moonraker, AFC, Happy Hare, or a Box Turtle
+  - edit printer.cfg, moonraker.conf, or mmu.cfg
+  - delete personal settings or printer photos unless you say yes to that separate question
+
+EOF
+}
+
+# Restore KlipperScreen first when it is installed. Refuse when the kiosk is the
+# only display. Remove the layr command only after the files are gone.
+uninstall_layr() {
+  local script want_browser=0
+  printf 'action: uninstall\n'
+  print_uninstall_plan
+  if [ "$ACTIVE_DISPLAY" = "uncertain" ] || [ "$INSTALL_STATE" = "uncertain" ]; then
+    printf 'uninstall-refused: uncertain\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  fi
+  if [ "$KS_STATE" = "missing" ] && [ "$KIOSK_STATE" = "active" ]; then
+    printf 'uninstall-refused: no-alternative-display\n'
+    printf 'KlipperScreen is not installed, and the LAYR kiosk is on the screen. Uninstall was not started.\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  fi
+  if ! confirm_uninstall; then
+    printf 'Cancelled. Nothing was removed.\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  fi
+  if confirm_delete_browser; then
+    want_browser=1
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+      printf 'browser-data: would-remove\n'
+    fi
+  else
+    printf 'browser-data: kept\n'
+  fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    printf 'uninstall: dry-run\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    return 0
+  fi
+  if [ "$KS_STATE" != "missing" ]; then
+    if ! switch_to_klipperscreen; then
+      printf 'uninstall-aborted: display\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      printf 'The layr command was left in place.\n'
+      return 1
+    fi
+  else
+    printf 'klipperscreen: absent\n'
+    printf 'kiosk-active: no\n'
+  fi
+  if [ "$WEB_STATE" = "missing" ] && [ "$KIOSK_STATE" = "missing" ]; then
+    printf 'units: absent\n'
+  elif ! script=$(resolve_uninstall_script); then
+    printf 'uninstall-aborted: uninstall.sh missing\n'
+    printf 'changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  elif ! bash "$script" --yes; then
+    printf 'uninstall-aborted: units\n'
+    printf 'changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  fi
+  if ! remove_layr_home_tree; then
+    printf 'uninstall-aborted: files\n'
+    printf 'changed=no\n'
+    printf 'The layr command was left in place.\n'
+    return 1
+  fi
+  if [ "$want_browser" = 1 ]; then
+    if ! remove_browser_data; then
+      printf 'uninstall-aborted: browser-data\n'
+      printf 'The layr command was left in place.\n'
+      return 1
+    fi
+  fi
+  if ! remove_layr_command_files; then
+    printf 'uninstall-aborted: command\n'
+    return 1
+  fi
+  printf 'uninstall: complete\n'
+  printf 'changed=yes\n'
+  printf 'apt-removed: no\n'
+  printf 'printer-config: kept\n'
+}
+
+# --- end persistent layr command ---
+
 resolve_display_script() {
   local root candidate
   if [ -n "${LAYR_DISPLAY_SH:-}" ] && [ -f "$LAYR_DISPLAY_SH" ]; then
@@ -1295,6 +1948,11 @@ resolve_display_script() {
   fi
   root=$(layr_root)
   candidate="${root}/src/deploy/layr-display.sh"
+  if script_is_complete "$candidate"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate="${root}/bin/layr-display.sh"
   if script_is_complete "$candidate"; then
     printf '%s\n' "$candidate"
     return 0
@@ -1420,6 +2078,7 @@ switch_to_layr() {
 print_switch_menu() {
   cat <<'EOF'
 Same installer, already on this Pi. Packages are not downloaded unless you choose Update or Repair.
+Uninstall asks first. It does not remove apt packages or printer configuration.
 
   1) Switch to LAYR
   2) Switch to KlipperScreen
@@ -1427,6 +2086,7 @@ Same installer, already on this Pi. Packages are not downloaded unless you choos
   4) Repair
   5) Diagnostics
   6) Exit
+  7) Uninstall LAYR
 EOF
   printf 'Choosing Exit changes nothing. KlipperScreen stays installed either way.\n'
   if [ "$ACTIVE_DISPLAY" = "both" ] || [ "$ACTIVE_DISPLAY" = "neither" ] || [ "$ACTIVE_DISPLAY" = "uncertain" ]; then
@@ -1437,17 +2097,16 @@ EOF
 read_menu_choice() {
   local reply
   if [ -n "${LAYR_MENU_CHOICE:-}" ]; then
-    printf '%s\n' "$LAYR_MENU_CHOICE"
-    return 0
-  fi
-  if [ ! -t 0 ]; then
+    reply=$LAYR_MENU_CHOICE
+  elif [ ! -t 0 ]; then
     printf 'exit\n'
     return 0
+  else
+    read -r -p "Choice [1-7]: " reply || {
+      printf 'exit\n'
+      return 0
+    }
   fi
-  read -r -p "Choice [1-6]: " reply || {
-    printf 'exit\n'
-    return 0
-  }
   case "$reply" in
     1 | switch-layr) printf 'switch-layr\n' ;;
     2 | switch-klipperscreen | klipperscreen) printf 'switch-klipperscreen\n' ;;
@@ -1455,6 +2114,7 @@ read_menu_choice() {
     4 | repair) printf 'repair\n' ;;
     5 | diagnostics | diagnose) printf 'diagnostics\n' ;;
     6 | exit | '') printf 'exit\n' ;;
+    7 | uninstall) printf 'uninstall\n' ;;
     *) printf 'invalid\n' ;;
   esac
 }
@@ -1539,6 +2199,10 @@ installed_menu() {
       printf 'action: repair\n'
       return 0
       ;;
+    uninstall)
+      uninstall_layr || exit 1
+      exit 0
+      ;;
     *)
       printf 'menu: invalid\n'
       printf 'reinstall: no\n'
@@ -1553,15 +2217,17 @@ usage() {
   cat <<'EOF'
 Usage: bash deploy/bootstrap.sh [diagnose] [--preflight] [--dry-run] [--yes]
                                 [--switch-display] [--switch-klipperscreen]
-                                [--update] [--repair]
+                                [--update] [--repair] [--status] [--uninstall]
+                                [--delete-browser] [--install-command]
                                 [--moonraker URL] [--port N]
                                 [--dist DIR] [--ref NAME] [--sample-touch]
 
-The first run installs LAYR in preview mode. KlipperScreen stays as it is until
-you confirm a display switch (or pass both --yes and --switch-display).
+The first run installs LAYR in preview mode and adds a layr command.
+KlipperScreen stays as it is until you confirm a display switch
+(or pass both --yes and --switch-display).
 
-When LAYR is already installed, the same command does not download, build, or
-reinstall. It prints the active display and a menu:
+When LAYR is already installed, layr (or this command) does not download,
+build, or reinstall. It prints the active display and a menu:
 
   1) Switch to LAYR
   2) Switch to KlipperScreen
@@ -1569,10 +2235,15 @@ reinstall. It prints the active display and a menu:
   4) Repair
   5) Diagnostics
   6) Exit
+  7) Uninstall LAYR
 
 Exit changes nothing. --update and --repair are the actions that install again,
 and they leave the current display alone unless you also name a switch.
+--status and a plain menu do not use the network.
 --switch-klipperscreen does not need the LAYR page or a network connection.
+--uninstall asks first, restores KlipperScreen when it is installed, and does
+not remove apt packages or printer configuration. --yes does not delete
+personal settings; add --delete-browser for that separate choice.
 Switching calls layr-display.sh. The Pi is not rebooted.
 EOF
 }
@@ -1588,6 +2259,11 @@ bootstrap_main() {
   SWITCH_KS=0
   WANT_UPDATE=0
   WANT_REPAIR=0
+  WANT_UNINSTALL=0
+  DELETE_BROWSER=0
+  STATUS_ONLY=0
+  INSTALL_COMMAND_ONLY=0
+  LAYR_COMMAND_ENSURED=0
   HOLD_DISPLAY=0
   INSTALLED_REPORT=0
   PREFLIGHT_ONLY=0
@@ -1613,6 +2289,10 @@ bootstrap_main() {
       --switch-klipperscreen) SWITCH_KS=1; shift ;;
       --update) WANT_UPDATE=1; shift ;;
       --repair) WANT_REPAIR=1; shift ;;
+      --status) STATUS_ONLY=1; shift ;;
+      --uninstall) WANT_UNINSTALL=1; shift ;;
+      --delete-browser) DELETE_BROWSER=1; shift ;;
+      --install-command) INSTALL_COMMAND_ONLY=1; shift ;;
       --reload-kiosk) RELOAD_KIOSK=1; shift ;;
       --sample-touch) SAMPLE_TOUCH=1; shift ;;
       --moonraker) MOONRAKER="$2"; shift 2 ;;
@@ -1626,6 +2306,13 @@ bootstrap_main() {
 
   if [ "$(id -u)" = 0 ]; then
     fail_preflight "Run this as the printer user (for example pi), not as root. Nothing was changed."
+  fi
+  if [ "$INSTALL_COMMAND_ONLY" = 1 ]; then
+    if [ "$WANT_UNINSTALL" = 1 ] || [ "$SWITCH" = 1 ] || [ "$SWITCH_KS" = 1 ] || [ "$WANT_UPDATE" = 1 ] || [ "$WANT_REPAIR" = 1 ] || [ "$STATUS_ONLY" = 1 ]; then
+      fail_preflight "Installing the layr command does not switch, update, or uninstall. Nothing was changed."
+    fi
+    ensure_layr_command
+    exit 0
   fi
   case "$PORT" in
     '' | *[!0-9]*) fail_preflight "Port must be a number." ;;
@@ -1659,12 +2346,36 @@ bootstrap_main() {
   if [ "$SWITCH" = 1 ] && [ "$SWITCH_KS" = 1 ]; then
     fail_preflight "Choose one display, not both. Nothing was changed."
   fi
+  if [ "$DELETE_BROWSER" = 1 ] && [ "$WANT_UNINSTALL" != 1 ]; then
+    fail_preflight "--delete-browser is only valid with uninstall. Nothing was changed."
+  fi
+  if [ "$STATUS_ONLY" = 1 ] && { [ "$WANT_UNINSTALL" = 1 ] || [ "$WANT_UPDATE" = 1 ] || [ "$WANT_REPAIR" = 1 ] || [ "$SWITCH" = 1 ] || [ "$SWITCH_KS" = 1 ]; }; then
+    fail_preflight "Status does not install, update, or switch. Nothing was changed."
+  fi
+  if [ "$STATUS_ONLY" = 1 ]; then
+    if [ "$INSTALL_STATE" != "not-installed" ]; then
+      ensure_layr_command
+    fi
+    printf 'reinstall: no\n'
+    printf 'changed=no\n'
+    printf 'display-changed=no\n'
+    print_offline_fallback
+    exit 0
+  fi
+  if [ "$WANT_UNINSTALL" = 1 ]; then
+    if [ "$WANT_UPDATE" = 1 ] || [ "$WANT_REPAIR" = 1 ] || [ "$SWITCH" = 1 ] || [ "$SWITCH_KS" = 1 ]; then
+      fail_preflight "Uninstall does not update or switch in the same run. Nothing was changed."
+    fi
+    uninstall_layr || exit 1
+    exit 0
+  fi
   if [ "$INSTALL_STATE" = "not-installed" ] && [ "$SWITCH_KS" = 1 ] && [ "$WANT_UPDATE" != 1 ] && [ "$WANT_REPAIR" != 1 ] && [ "$SWITCH" != 1 ]; then
     printf 'reinstall: no\n'
     switch_to_klipperscreen || exit 1
     exit 0
   fi
   if [ "$INSTALL_STATE" != "not-installed" ]; then
+    ensure_layr_command
     if [ "$WANT_UPDATE" = 1 ] || [ "$WANT_REPAIR" = 1 ]; then
       if [ "$SWITCH" != 1 ] && [ "$SWITCH_KS" != 1 ]; then
         HOLD_DISPLAY=1
@@ -1845,6 +2556,16 @@ bootstrap_main() {
     printf 'install: skipped in dry run until the build finishes\n'
   else
     install_layr "$DIST_PATH"
+    if [ "$DRY_RUN" = 1 ]; then
+      if [ "${LAYR_COMMAND_ENSURED:-0}" != 1 ]; then
+        printf 'layr-command: would-install\n'
+        printf 'layr-command-path: %s\n' "$(layr_command_path)"
+      fi
+    else
+      if ! LAYR_MANAGER_FROM_CHECKOUT=1 ensure_layr_command; then
+        warn "LAYR is installed, but the layr command was not added."
+      fi
+    fi
   fi
 
   printf 'preview: http://127.0.0.1:%s/?moonraker=%s#/home\n' "$PORT" "$MOONRAKER"

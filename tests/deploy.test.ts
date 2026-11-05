@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -897,6 +897,132 @@ describe('install and uninstall leave Pi input rules alone', () => {
   });
 });
 
+describe('persistent layr command survives install, rollback, and purge', () => {
+  it('writes the command from install.sh and does not write it in a dry run', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-install-command-'));
+    const home = path.join(root, 'home');
+    const dist = path.join(root, 'dist');
+    const bin = path.join(root, 'bin');
+    const unitDir = path.join(root, 'systemd');
+    const config = path.join(home, 'printer_data', 'config');
+    mkdirSync(dist, { recursive: true });
+    mkdirSync(unitDir, { recursive: true });
+    mkdirSync(config, { recursive: true });
+    writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>LAYR</title>');
+    writeFileSync(path.join(config, 'printer.cfg'), '# printer\n');
+    fakeSystemctl(bin, 'inactive');
+    const env = {
+      HOME: home,
+      LAYR_HOME: path.join(home, 'layr'),
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      LAYR_SYSTEMCTL_LOG: path.join(root, 'systemctl.log'),
+      LAYR_UNIT_DIR: unitDir,
+    };
+    try {
+      const dry = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/install.sh'))} --dist ${JSON.stringify(dist)} --dry-run --yes`, {
+        cwd: root,
+        env,
+      });
+      expect(dry.status, `${dry.stdout}\n${dry.stderr}`).toBe(0);
+      expect(dry.stdout).toContain('not written during a dry run');
+      expect(existsSync(path.join(home, '.local', 'bin', 'layr'))).toBe(false);
+
+      const installed = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/install.sh'))} --dist ${JSON.stringify(dist)} --yes`, {
+        cwd: root,
+        env,
+      });
+      expect(installed.status, `${installed.stdout}\n${installed.stderr}`).toBe(0);
+      expect(installed.stdout).toContain('layr-command: installed');
+      expect(existsSync(path.join(home, '.local', 'bin', 'layr'))).toBe(true);
+      expect(readFileSync(path.join(config, 'printer.cfg'), 'utf8')).toBe('# printer\n');
+      expect(readFileSync(path.join(home, '.bashrc'), 'utf8')).toContain('# BEGIN LAYR command path');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rollback leaves the layr command in place', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-rollback-command-'));
+    const home = path.join(root, 'home');
+    const older = path.join(home, 'layr', 'releases', 'old');
+    const newer = path.join(home, 'layr', 'releases', 'new');
+    const bin = path.join(root, 'bin');
+    mkdirSync(older, { recursive: true });
+    mkdirSync(newer, { recursive: true });
+    mkdirSync(path.join(home, 'layr', 'state'), { recursive: true });
+    writeFileSync(path.join(older, 'index.html'), 'old');
+    writeFileSync(path.join(newer, 'index.html'), 'new');
+    symlinkSync(newer, path.join(home, 'layr', 'current'));
+    writeFileSync(path.join(home, 'layr', 'state', 'previous'), `${older}\n`);
+    fakeSystemctl(bin, 'inactive');
+    const env = {
+      HOME: home,
+      LAYR_HOME: path.join(home, 'layr'),
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      LAYR_SYSTEMCTL_LOG: path.join(root, 'systemctl.log'),
+    };
+    try {
+      const commandInstall = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/bootstrap.sh'))} --install-command`, { env });
+      expect(commandInstall.status, `${commandInstall.stdout}\n${commandInstall.stderr}`).toBe(0);
+      const rolled = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/rollback.sh'))} --yes`, { env });
+      expect(rolled.status, `${rolled.stdout}\n${rolled.stderr}`).toBe(0);
+      expect(readlinkSync(path.join(home, 'layr', 'current'))).toBe(older);
+      expect(existsSync(path.join(home, '.local', 'bin', 'layr'))).toBe(true);
+      expect(readFileSync(path.join(home, '.bashrc'), 'utf8')).toContain('# BEGIN LAYR command path');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('purge removes the layr command and keeps personal settings and printer files', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'layr-purge-command-'));
+    const home = path.join(root, 'home');
+    const bin = path.join(root, 'bin');
+    const unitDir = path.join(home, 'systemd-units');
+    const config = path.join(home, 'printer_data', 'config');
+    const profile = path.join(home, '.config', 'layr-chromium', 'Default');
+    mkdirSync(path.join(home, 'layr', 'releases'), { recursive: true });
+    mkdirSync(unitDir, { recursive: true });
+    mkdirSync(config, { recursive: true });
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(path.join(config, 'printer.cfg'), '# printer\n');
+    writeFileSync(path.join(config, 'mmu.cfg'), '# mmu\n');
+    writeFileSync(path.join(profile, 'Preferences'), '{"photo":true}\n');
+    writeFileSync(path.join(unitDir, 'layr-web.service'), 'web\n');
+    writeFileSync(path.join(unitDir, 'KlipperScreen.service'), 'ks\n');
+    fakeSystemctl(bin, 'inactive');
+    const env = {
+      HOME: home,
+      LAYR_HOME: path.join(home, 'layr'),
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      LAYR_SYSTEMCTL_LOG: path.join(root, 'systemctl.log'),
+      LAYR_UNIT_DIR: unitDir,
+    };
+    try {
+      const commandInstall = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/bootstrap.sh'))} --install-command`, { env });
+      expect(commandInstall.status, `${commandInstall.stdout}\n${commandInstall.stderr}`).toBe(0);
+      const kept = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/uninstall.sh'))} --yes`, { env });
+      expect(kept.status, `${kept.stdout}\n${kept.stderr}`).toBe(0);
+      expect(existsSync(path.join(home, '.local', 'bin', 'layr'))).toBe(true);
+      expect(existsSync(path.join(home, 'layr'))).toBe(true);
+
+      const purged = runAllowFail(`bash ${JSON.stringify(path.join(repo, 'deploy/uninstall.sh'))} --purge --yes`, { env });
+      expect(purged.status, `${purged.stdout}\n${purged.stderr}`).toBe(0);
+      expect(purged.stdout).toContain('layr-command: removed');
+      expect(existsSync(path.join(home, '.local', 'bin', 'layr'))).toBe(false);
+      expect(existsSync(path.join(home, 'layr'))).toBe(false);
+      expect(readFileSync(path.join(home, '.bashrc'), 'utf8')).not.toContain('# BEGIN LAYR command path');
+      expect(readFileSync(path.join(profile, 'Preferences'), 'utf8')).toContain('photo');
+      expect(readFileSync(path.join(config, 'printer.cfg'), 'utf8')).toBe('# printer\n');
+      expect(readFileSync(path.join(config, 'mmu.cfg'), 'utf8')).toBe('# mmu\n');
+      expect(readFileSync(path.join(unitDir, 'KlipperScreen.service'), 'utf8')).toBe('ks\n');
+      expect(existsSync(path.join(unitDir, 'layr-web.service'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('deploy script syntax', () => {
   it('passes bash -n', () => {
     for (const script of [
@@ -910,6 +1036,7 @@ describe('deploy script syntax', () => {
       'deploy/check-device.sh',
       'deploy/bootstrap.sh',
       'deploy/layr-display.sh',
+      'deploy/layr',
     ]) {
       run(`bash -n ${script}`);
     }
