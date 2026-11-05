@@ -1,25 +1,25 @@
-# Raspberry Pi checks for this change
+# Raspberry Pi hardware validation checklist
 
-These steps are for a person at the printer, after the pull request is reviewed and approved.
-Nothing in this file was executed on a Raspberry Pi, a BTT HDMI7, or a Voron Trident by the
-change that added sections 7 and 8. Do not treat a green CI run as a hardware pass.
-Sections 7 and 8 are the hardware checks for the release-specific kiosk URL and the opt-in
-`vc4-hdmi` pointer rule.
+This is a repeatable hardware-validation guide for LAYR on Raspberry Pi touchscreens.
+Some checks have been exercised on a Raspberry Pi 4, BTT HDMI7 and Voron Trident, but not all
+scenarios or supported hardware have been verified. Passing CI alone is not a hardware pass.
+Sections 7 and 8 cover the release-specific kiosk URL and the optional `vc4-hdmi` pointer rule.
 
 None of the commands below restart Klipper or Moonraker. `systemctl restart layr-kiosk`
 and `layr-engine.sh --restart-kiosk` restart only the LAYR display process.
 `layr-display.sh to-klipperscreen` stops the LAYR kiosk and starts KlipperScreen.
 It does not restart Klipper.
 
-A friend with a 5-inch panel who already runs Klipper and Moonraker, and who may also
-already run AFC (including a Box Turtle) or Happy Hare, should start with
+Users with a Raspberry Pi touchscreen who already run Klipper and Moonraker, including optional
+AFC (Box Turtle) or Happy Hare setups, should start with
 [INSTALL-FOR-TESTERS.md](../INSTALL-FOR-TESTERS.md). That one-command installer does not
 install either filament controller and does not edit printer configuration. Test one
 controller at a time, or use a different printer. Do not enable both in one LAYR profile.
 
-## 1. Get the reviewed build
+## 1. Get a development build for review
 
-Wait until the pull request is approved. Then, on the Pi, as the printer user (not root):
+For reviewing a specific pull request (not the recommended beta install path), wait until it is
+approved. Then, on the Pi, as the printer user (not root):
 
 ```bash
 cd ~/LAYR
@@ -29,7 +29,9 @@ npm ci
 npm run build
 ```
 
-Replace `<PR>` with the pull request number. Keep the existing `~/layr` directory.
+Replace `<PR>` with the pull request number. For normal beta installs, follow
+[the Raspberry Pi installation guide](../INSTALL-FOR-TESTERS.md) instead.
+Keep the existing `~/layr` directory.
 That is where the installed release, `layr.env`, and the Chromium profile live.
 
 ## 2. Install without switching the panel
