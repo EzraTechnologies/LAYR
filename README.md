@@ -5,10 +5,17 @@ LAYR is an open-source, touch-first Klipper interface for Raspberry Pi displays.
 BTT HDMI7 (often 1024×600) and common 800×480 panels. The layout follows the display's real size;
 it does not assume a resolution.
 
-**Status: v0.2 (Trident pilot).** LAYR can jog, heat, start and stop prints, run macros, and send
-console commands. It has not been run on a Voron Trident or any other physical printer. Do not
-deploy it over KlipperScreen until you have checked it in a browser. See
-[docs/trident-checklist.md](docs/trident-checklist.md).
+**Status: beta / active development.** LAYR can jog, heat, start and stop prints, run macros, and send
+console commands. It has been tested on a Raspberry Pi 4 with a BTT 7-inch HDMI touchscreen on a
+Voron Trident; other hardware and installer paths still require validation. Preview in a browser
+before switching away from KlipperScreen. See [docs/trident-checklist.md](docs/trident-checklist.md).
+
+**License:** [GNU General Public License v3.0](LICENSE). Contributions are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md) and report security concerns using [SECURITY.md](SECURITY.md).
+
+**Install on Raspberry Pi:** Follow the [Raspberry Pi installation guide](INSTALL-FOR-TESTERS.md).
+The installer retains KlipperScreen until you explicitly confirm a display switch. For a closed
+source repository, anonymous GitHub download commands will not work until the project is made public.
 
 Spoolman in the Chromium UI is optional and stays off until Settings → Spoolman is turned on for this printer. When that switch is on and Moonraker reports the `spoolman` component, Extrude
 shows the active spool (material, colour, and remaining weight or length when Spoolman sent them),
@@ -207,8 +214,8 @@ copy of LAYR. Do not put LAYR on a LAN-wide port without an API key: the console
 
 ## Raspberry Pi install
 
-A friend who already has Klipper, Moonraker, and a 5-inch touchscreen can use the one-command
-installer in [INSTALL-FOR-TESTERS.md](INSTALL-FOR-TESTERS.md). It installs LAYR only. It does not
+For a Raspberry Pi already running Klipper and Moonraker, follow the
+[Raspberry Pi installation guide](INSTALL-FOR-TESTERS.md) for the one-command installer. It installs LAYR only. It does not
 install AFC, Happy Hare, or a Box Turtle, and it does not edit `printer.cfg` or `moonraker.conf`.
 KlipperScreen stays up until a separate confirmation. The same command, run again after
 LAYR is installed, shows which display is active and a switch menu. That later run does not
@@ -297,15 +304,17 @@ transitions.
 
 ## Testing on real hardware
 
-Automated tests use a fake Moonraker and a mocked WebSocket. Before relying on LAYR, use the
-[Trident checklist](docs/trident-checklist.md). In particular: trusted clients and CORS, homing and
-jog limits against Mainsail or Fluidd, a real pause/resume/cancel, thumbnails for nested files,
-firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are unverified.
+Automated tests use a fake Moonraker and a mocked WebSocket. LAYR has also been used on a
+Raspberry Pi 4 with a BTT HDMI7 and a Voron Trident, but this is not a blanket hardware
+compatibility certification. Before relying on a new installation, use the
+[Trident checklist](docs/trident-checklist.md), including printer command safety, thumbnails,
+recovery, display touch accuracy and resource use.
 
 ## Known limitations
 
-- Not yet run on a Voron Trident. A Pi 4 with a BTT HDMI7 has shown the Chromium UI. Live speed
-  and flow are Klipper's reported `motion_report` values (interpolated by Klipper), not a separate sensor.
+- Tested on a Voron Trident with a Pi 4 and BTT HDMI7; other printers, displays and fresh installations
+  still need field testing. Live speed and flow are Klipper's reported `motion_report` values,
+  not separate sensors.
 - The blank cursor theme does not remove the Pi `vc4-hdmi` ghost pointer under Cage 0.2.0. The
   opt-in udev rule in `deploy/layr-hdmi-input.sh` matches the rule that did, on a Pi 4 with a BTT
   HDMI7. Run the checks in [docs/pi-test.md](docs/pi-test.md) before relying on it. CSS hiding still
@@ -329,4 +338,4 @@ firmware restart, and a Wi-Fi drop. Touch accuracy, CPU and memory on the Pi are
   another's. The native Qt Filament screen is unchanged and still has not been tested on a Pi.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
-- No license has been chosen yet.
+- The project is licensed under [GNU GPL v3](LICENSE).

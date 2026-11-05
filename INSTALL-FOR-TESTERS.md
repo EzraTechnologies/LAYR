@@ -1,6 +1,6 @@
-# Install LAYR on a 5-inch touchscreen
+# Install LAYR on Raspberry Pi
 
-This is for a friend who already runs Klipper and Moonraker on a Raspberry Pi, with a 5-inch touchscreen (often 800×480). The printer may also already run **AFC** (including a Box Turtle) or **Happy Hare**. LAYR does not install either of those, and it does not change printer configuration.
+This guide covers installing LAYR on a Raspberry Pi already running Klipper and Moonraker, with an HDMI touchscreen such as a 5-inch (often 800×480) or 7-inch (often 1024×600) display. Optional **AFC** (including Box Turtle) and **Happy Hare** integrations are supported, but LAYR does not install either controller or change your printer configuration.
 
 Test one filament system at a time. AFC and Happy Hare are mutually exclusive in one LAYR printer profile: turning one on turns the other off. You can test the other later on the same printer, after the first switch is off, or on a different printer. Do not run both controllers at the same time. You do not uninstall LAYR to switch which one you are testing.
 
