@@ -122,6 +122,28 @@ for (const vp of VIEWPORTS) {
         const photo = page.getByRole('img', { name: 'Printer photo' });
         await expect(photo).toBeVisible();
         await expect.poll(() => photo.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+        // Navigation to Home and the image blob becoming visible do not guarantee that
+        // the destination route's scoped CSS has been applied. Wait for the final
+        // styles and geometry before taking the one-shot measurements below.
+        // A real styling regression still fails after the bounded Playwright wait.
+        await expect(photo).toHaveCSS('object-fit', 'contain');
+        await expect(photo).toHaveCSS('object-position', '50% 50%');
+        await expect.poll(
+          () => photo.evaluate(img => {
+            const rect = img.getBoundingClientRect();
+            const frame = img.parentElement!.getBoundingClientRect();
+            return frame.width > 0 ? rect.width / frame.width : Infinity;
+          }),
+          { message: 'Idle Home printer photo should settle at 58% of its frame width' },
+        ).toBeLessThanOrEqual(0.60);
+        await expect.poll(
+          () => photo.evaluate(img => {
+            const rect = img.getBoundingClientRect();
+            const frame = img.parentElement!.getBoundingClientRect();
+            return frame.height > 0 ? rect.height / frame.height : Infinity;
+          }),
+          { message: 'Idle Home printer photo should settle at 58% of its frame height' },
+        ).toBeLessThanOrEqual(0.60);
         const fit = await photo.evaluate(el => {
           const img = el as HTMLImageElement;
           const box = img.getBoundingClientRect();
