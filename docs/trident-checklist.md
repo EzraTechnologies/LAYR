@@ -1,8 +1,9 @@
 # Trident smoke-test checklist
 
-Use this on the Voron Trident after LAYR is installed with `deploy/install.sh` and opened in a normal
-browser. Nothing in this repository has been run on that printer. Do not switch off KlipperScreen until
-the browser checks below pass.
+Use this checklist to validate LAYR on a Voron Trident (or adapt the relevant checks to another
+Klipper printer). LAYR has been used on a Voron Trident with a Raspberry Pi 4 and BTT HDMI7;
+that does not mean every check or hardware combination is verified. Test in a normal browser
+before switching away from KlipperScreen.
 
 Moonraker on the Pi should trust `127.0.0.1` (`trusted_clients`). If the page origin is not the Moonraker
 origin, add it to `cors_domains` yourself. LAYR does not edit `moonraker.conf`.
