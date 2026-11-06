@@ -221,7 +221,6 @@
           {/each}
         </ul>
       {/if}
-      <p class="about">LAYR v{__LAYR_VERSION__}</p>
     </section>
 
     <section class="card panel" aria-labelledby="set-about">
