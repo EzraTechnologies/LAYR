@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import PrinterImageChooser from '../components/PrinterImageChooser.svelte';
+  import SponsorDialog from '../components/SponsorDialog.svelte';
   import { isValidMoonrakerUrl, type AppConfig } from '../lib/config';
   import { app } from '../lib/context';
   import { discoverIntegrations } from '../lib/integrations/discover';
@@ -21,6 +22,7 @@
   }
 
   let { onSaveUrl }: Props = $props();
+  let showSponsors = $state(false);
   const { store, ui, config, printer, settings } = app();
   const printerState = store.state;
 
@@ -222,6 +224,15 @@
       <p class="about">LAYR v{__LAYR_VERSION__}</p>
     </section>
 
+    <section class="card panel" aria-labelledby="set-about">
+      <h2 id="set-about" class="eyebrow">About LAYR</h2>
+      <p class="hint">LAYR v{__LAYR_VERSION__} · GNU GPLv3 · Developed by Ezra Technologies.</p>
+      <p class="hint">Free and open-source, supported by the community. Sponsorship is entirely voluntary.</p>
+      <button type="button" class="btn ghost" onclick={() => (showSponsors = true)}>
+        Support LAYR Development
+      </button>
+    </section>
+
     <section class="card panel" aria-labelledby="set-pi">
       <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
       <p class="hint">
@@ -366,6 +377,10 @@
     </section>
   </div>
 </div>
+
+{#if showSponsors}
+  <SponsorDialog onClose={() => (showSponsors = false)} />
+{/if}
 
 <style>
   /* Independent stacks. One shared grid row would grow to the taller side and leave a hole under Connection. */
