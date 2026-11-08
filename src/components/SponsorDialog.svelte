@@ -21,7 +21,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="backdrop" role="presentation" onpointerdown={(event) => event.target === event.currentTarget && onClose()}>
-  <section class="dialog card" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-desc">
+  <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-desc">
     <h2 id="support-title">Support LAYR Development</h2>
     <p id="support-desc">LAYR is free and open-source. If it helps your printing, please consider supporting ongoing development.</p>
     <div class="qr-frame"><img src="/sponsors-qr.svg" alt="Scan to open EzraTechnologies on GitHub Sponsors" width="220" height="220" /></div>
@@ -29,7 +29,7 @@
     <p class="url">github.com/sponsors/EzraTechnologies</p>
     <p class="note">Completely optional. All LAYR features remain free.</p>
     <button type="button" class="btn primary close" bind:this={closeButton} onclick={onClose}>Close</button>
-  </section>
+  </div>
 </div>
 
 <style>
