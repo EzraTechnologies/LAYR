@@ -109,7 +109,7 @@ case "$url" in
     cat "$LAYR_QUERY_JSON" > "$dest"
     ;;
   */releases/latest)
-    if [ "${LAYR_RELEASE_404:-0}" = 1 ]; then
+    if [ "\${LAYR_RELEASE_404:-0}" = 1 ]; then
       # Simulate curl --fail on HTTP 404: no saved response body.
       : > "$dest"
       exit 22
