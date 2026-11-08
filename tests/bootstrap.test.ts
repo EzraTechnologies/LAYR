@@ -109,6 +109,11 @@ case "$url" in
     cat "$LAYR_QUERY_JSON" > "$dest"
     ;;
   */releases/latest)
+    if [ "${LAYR_RELEASE_404:-0}" = 1 ]; then
+      # Simulate curl --fail on HTTP 404: no saved response body.
+      : > "$dest"
+      exit 22
+    fi
     if [ ! -s "$LAYR_RELEASE_JSON" ]; then
       printf '%s' 'Not Found' > "$dest"
       exit 0
@@ -597,6 +602,24 @@ describe('bootstrap source selection and install handoff', () => {
       expect(output).not.toContain('node-v22');
       expect(output).toContain('display-changed=no');
       expect(existsSync(path.join(box.home, 'layr', 'src', 'deploy', 'install.sh'))).toBe(true);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('falls back to a pinned source build when GitHub releases/latest is HTTP 404', () => {
+    const box = makeSandbox();
+    writeFileSync(box.env.LAYR_COMMIT_JSON as string, `${JSON.stringify({ sha: 'b'.repeat(40) })}\n`);
+    try {
+      const result = invoke(box, ['--dry-run', '--yes'], { LAYR_RELEASE_404: '1' });
+      const output = textOf(result);
+      expect(result.status, output).toBe(0);
+      expect(output).toContain(`source: build ${'b'.repeat(40)}`);
+      const urls = readFileSync(box.httpLog, 'utf8');
+      expect(urls).toContain('/releases/latest');
+      expect(urls).toContain('/commits/main');
+      expect(output).toContain('preflight=ok');
+      expect(output).toContain('changed=no');
     } finally {
       cleanup(box);
     }
