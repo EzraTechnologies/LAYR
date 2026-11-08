@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bootstrap = path.join(repo, 'deploy/bootstrap.sh');
+const bootstrap = path.join(repo, 'deploy/layr-installer.sh');
 
 type RunResult = { status: number; stdout: string; stderr: string };
 
@@ -1181,7 +1181,7 @@ describe('display switcher', () => {
   it('refuses a switch when layr-display.sh is not on disk', () => {
     const box = makeSandbox();
     writeRelease(box);
-    const copy = path.join(box.root, 'layr-bootstrap.sh');
+    const copy = path.join(box.root, 'layr-installer.sh');
     writeFileSync(copy, readFileSync(bootstrap, 'utf8'));
     chmodSync(copy, 0o755);
     try {
@@ -1217,12 +1217,12 @@ describe('bootstrap safety helpers', () => {
     const home = path.join(root, 'home');
     mkdirSync(home);
     try {
-      for (const name of ['bootstrap.sh', 'install.sh', 'layr-display.sh', 'rollback.sh']) {
+      for (const name of ['layr-installer.sh', 'install.sh', 'layr-display.sh', 'rollback.sh']) {
         const dir = path.join(root, name.replace('.sh', ''));
         mkdirSync(dir);
         const source = readFileSync(path.join(repo, 'deploy', name), 'utf8').replace(/\n# LAYR_SCRIPT_END\n?$/, '\n');
         writeFileSync(path.join(dir, name), source);
-        if (name !== 'bootstrap.sh') writeFileSync(path.join(dir, 'lib.sh'), readFileSync(path.join(repo, 'deploy/lib.sh'), 'utf8'));
+        if (name !== 'layr-installer.sh') writeFileSync(path.join(dir, 'lib.sh'), readFileSync(path.join(repo, 'deploy/lib.sh'), 'utf8'));
         const result = run(`bash ${JSON.stringify(path.join(dir, name))} --help`, { HOME: home, PATH: process.env.PATH });
         expect(result.status, name).not.toBe(0);
         expect(textOf(result)).toContain('incomplete');
@@ -1296,7 +1296,7 @@ describe('bootstrap safety helpers', () => {
   });
 
   it('does not install controllers, force HDMI, reboot, or select the WebKit port', () => {
-    const files = ['bootstrap.sh', 'install.sh', 'layr-display.sh', 'rollback.sh', 'uninstall.sh', 'lib.sh'].map((name) =>
+    const files = ['layr-installer.sh', 'install.sh', 'layr-display.sh', 'rollback.sh', 'uninstall.sh', 'lib.sh'].map((name) =>
       readFileSync(path.join(repo, 'deploy', name), 'utf8'),
     );
     const combined = files.join('\n');
