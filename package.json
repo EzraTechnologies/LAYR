@@ -1,7 +1,7 @@
 {
   "name": "layr",
   "private": true,
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Touch-first Klipper interface for Raspberry Pi displays, powered by Moonraker.",
   "type": "module",
   "engines": {
