@@ -223,15 +223,6 @@
       {/if}
     </section>
 
-    <section class="card panel" aria-labelledby="set-about">
-      <h2 id="set-about" class="eyebrow">About LAYR</h2>
-      <p class="hint">LAYR v{__LAYR_VERSION__} · GNU GPLv3 · Developed by Ezra Technologies.</p>
-      <p class="hint">Free and open-source, supported by the community. Sponsorship is entirely voluntary.</p>
-      <button type="button" class="btn ghost" onclick={() => (showSponsors = true)}>
-        Support LAYR Development
-      </button>
-    </section>
-
     <section class="card panel" aria-labelledby="set-pi">
       <h2 id="set-pi" class="eyebrow">Raspberry Pi</h2>
       <p class="hint">
@@ -374,6 +365,15 @@
       <p class="hint">Dimming darkens the screen; it does not switch the backlight off. The first tap only wakes it.</p>
       <p class="hint">Hide pointer clears the arrow in this browser immediately. On the Cage kiosk it also applies the next time the display starts, without restarting Klipper. A mouse still clicks.</p>
     </section>
+    <section class="card panel" aria-labelledby="set-about">
+      <h2 id="set-about" class="eyebrow">About LAYR</h2>
+      <p class="hint">LAYR v{__LAYR_VERSION__} · GNU GPLv3 · Developed by Ezra Technologies.</p>
+      <p class="hint">Free and open-source, supported by the community. Sponsorship is entirely voluntary.</p>
+      <button type="button" class="btn ghost" onclick={() => (showSponsors = true)}>
+        Support LAYR Development
+      </button>
+    </section>
+
   </div>
 </div>
 
@@ -578,9 +578,4 @@
     color: var(--text-2);
   }
 
-  .about {
-    margin: 0;
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-  }
 </style>
