@@ -11,8 +11,8 @@ Use Raspberry Pi OS Bookworm or MainsailOS Bookworm, 64-bit or 32-bit armhf. Oth
 On the Pi, as the printer user (the same user you use for Mainsail, often `pi`), not as root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/EzraTechnologies/LAYR/main/deploy/bootstrap.sh -o /tmp/layr-bootstrap.sh
-bash /tmp/layr-bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/EzraTechnologies/LAYR/main/deploy/layr-installer.sh -o /tmp/layr-installer.sh
+bash /tmp/layr-installer.sh
 ```
 
 Do not pipe that download into `bash` or `sudo`. Read the preflight on screen, then answer the preview question. Preview mode leaves KlipperScreen where it is.
@@ -30,7 +30,7 @@ What this does not do:
 KlipperScreen stays on the panel until you confirm a second question, or until you later run the switch command below. If you want that second step in the same run, only after you have read the prompts:
 
 ```bash
-bash /tmp/layr-bootstrap.sh --yes --switch-display
+bash /tmp/layr-installer.sh --yes --switch-display
 ```
 
 `--yes` alone installs the preview and still leaves KlipperScreen up.
@@ -38,13 +38,13 @@ bash /tmp/layr-bootstrap.sh --yes --switch-display
 Check the same report again any time. This changes nothing:
 
 ```bash
-bash /tmp/layr-bootstrap.sh diagnose
+bash /tmp/layr-installer.sh diagnose
 ```
 
 A five-second touch sample, still read-only, writes no input rule:
 
 ```bash
-bash /tmp/layr-bootstrap.sh diagnose --sample-touch
+bash /tmp/layr-installer.sh diagnose --sample-touch
 ```
 
 ## The same command again
@@ -73,10 +73,10 @@ If LAYR is broken, or the kiosk is not running, Switch to KlipperScreen still ru
 From a shell, the same choices are:
 
 ```bash
-bash /tmp/layr-bootstrap.sh --switch-klipperscreen
-bash /tmp/layr-bootstrap.sh --switch-display
-bash /tmp/layr-bootstrap.sh --update
-bash /tmp/layr-bootstrap.sh --repair
+bash /tmp/layr-installer.sh --switch-klipperscreen
+bash /tmp/layr-installer.sh --switch-display
+bash /tmp/layr-installer.sh --update
+bash /tmp/layr-installer.sh --repair
 ```
 
 ## If the Pi has no network
@@ -87,7 +87,7 @@ The switch back to KlipperScreen does not need a new copy of the installer. Afte
 ~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
 ```
 
-That command does not use GitHub, curl, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when `bash /tmp/layr-bootstrap.sh` cannot be downloaded. A text console is Ctrl+Alt+F1, or `sudo chvt 1`.
+That command does not use GitHub, curl, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when `bash /tmp/layr-installer.sh` cannot be downloaded. A text console is Ctrl+Alt+F1, or `sudo chvt 1`.
 
 If `~/layr/src/deploy/layr-display.sh` is not there, the installer will say so and will not stop the display by some other means. Repair needs a network. The text console does not.
 
@@ -183,7 +183,7 @@ A text console is Ctrl+Alt+F1, or `sudo chvt 1`. None of these commands edit `pr
 
 | What you see | What to do |
 | --- | --- |
-| `incomplete copy` | Download `/tmp/layr-bootstrap.sh` again. A short file does not install anything. |
+| `incomplete copy` | Download `/tmp/layr-installer.sh` again. A short file does not install anything. |
 | It says to run as the printer user, not root | Log in as `pi` (or your Mainsail user) and run the two lines again. Do not use `sudo bash`. |
 | The OS is not supported | Stay on Pi OS Bookworm or MainsailOS Bookworm. Nothing was changed. |
 | apt is locked or `apt-failed=yes` | Wait for the other installer to finish, then run the same command again. The display was not switched. |
