@@ -68,8 +68,9 @@ jobs:
           tar -czf layr-dist.tar.gz -C "$stage" .
           sha256sum layr-dist.tar.gz > layr-dist.tar.gz.sha256
           sha256sum -c layr-dist.tar.gz.sha256
-          tar -tzf layr-dist.tar.gz | grep -q '^./deploy/layr-display.sh$'
-          tar -tzf layr-dist.tar.gz | grep -q '^./index.html$'
+          tar -tzf layr-dist.tar.gz > release-contents.txt
+          grep -Fxq './deploy/layr-display.sh' release-contents.txt
+          grep -Fxq './index.html' release-contents.txt
       - name: Publish GitHub Release and attach verified assets
         env:
           GH_TOKEN: ${{ github.token }}
