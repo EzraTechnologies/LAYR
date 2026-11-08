@@ -1,0 +1,87 @@
+name: Publish LAYR release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type PUBLISH_v1.0.0 to publish the release'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: layr-release-v1.0.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify, package and publish v1.0.0
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'PUBLISH_v1.0.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Check release version
+        run: |
+          test "$(node -p "require('./package.json').version")" = "1.0.0"
+          test "$(node -p "require('./package-lock.json').version")" = "1.0.0"
+          test "$(node -p "require('./package-lock.json').packages[''].version")" = "1.0.0"
+          test -f deploy/layr-installer.sh
+          test -f deploy/layr-display.sh
+          test -f deploy/install.sh
+          test -f deploy/lib.sh
+      - name: Shellcheck deploy scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck -x -S warning deploy/*.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - name: Playwright Chromium dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Browser integration tests
+        run: |
+          npm run test:e2e
+          npx playwright test --config playwright.auth.config.ts
+      - name: Build distributable with matching deployment scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          cp -a dist/. "$stage/"
+          cp -a deploy "$stage/deploy"
+          cp LICENSE "$stage/LICENSE"
+          test -s "$stage/index.html"
+          test -f "$stage/deploy/install.sh"
+          test -f "$stage/deploy/layr-display.sh"
+          test -f "$stage/deploy/lib.sh"
+          test "$(tail -n 1 "$stage/deploy/install.sh")" = "# LAYR_SCRIPT_END"
+          test "$(tail -n 1 "$stage/deploy/layr-display.sh")" = "# LAYR_SCRIPT_END"
+          tar -czf layr-dist.tar.gz -C "$stage" .
+          sha256sum layr-dist.tar.gz > layr-dist.tar.gz.sha256
+          sha256sum -c layr-dist.tar.gz.sha256
+          tar -tzf layr-dist.tar.gz | grep -q '^./deploy/layr-display.sh$'
+          tar -tzf layr-dist.tar.gz | grep -q '^./index.html$'
+      - name: Publish GitHub Release and attach verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            echo "::error::Release v1.0.0 already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create v1.0.0 \
+            layr-dist.tar.gz layr-dist.tar.gz.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "LAYR v1.0.0" \
+            --notes-file RELEASE-NOTES-v1.0.0.md \
+            --latest
