@@ -979,12 +979,11 @@ lookup_release() {
   RELEASE_URL=""
   RELEASE_SHA_URL=""
   if ! http_get "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" "$body" 2000000; then
-    if [ -s "$body" ] && grep -q 'Not Found' "$body"; then
-      rm -f "$body"
-      return 1
-    fi
+    # curl --fail returns 22 for HTTP 404 without saving a response body.
+    # No published release is normal; resolve the pinned source commit next.
+    # If GitHub is offline, resolve_ref will fail safely without changing LAYR.
     rm -f "$body"
-    return 2
+    return 1
   fi
   if ! have_item python3; then
     rm -f "$body"
