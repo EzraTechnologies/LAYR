@@ -5,7 +5,7 @@ LAYR is an open-source, touch-first Klipper interface for Raspberry Pi displays.
 BTT HDMI7 (often 1024×600) and common 800×480 panels. The layout follows the display's real size;
 it does not assume a resolution.
 
-**Status: beta / active development.** LAYR can jog, heat, start and stop prints, run macros, and send
+**Status: v1.0.0 release candidate / active development.** LAYR can jog, heat, start and stop prints, run macros, and send
 console commands. It has been tested on a Raspberry Pi 4 with a BTT 7-inch HDMI touchscreen on a
 Voron Trident; other hardware and installer paths still require validation. Preview in a browser
 before switching away from KlipperScreen. See [docs/trident-checklist.md](docs/trident-checklist.md).
@@ -13,9 +13,8 @@ before switching away from KlipperScreen. See [docs/trident-checklist.md](docs/t
 **License:** [GNU General Public License v3.0](LICENSE). Contributions are welcome; see
 [CONTRIBUTING.md](CONTRIBUTING.md) and report security concerns using [SECURITY.md](SECURITY.md).
 
-**Install on Raspberry Pi:** Follow the [Raspberry Pi installation guide](INSTALL-FOR-TESTERS.md).
-The installer retains KlipperScreen until you explicitly confirm a display switch. For a closed
-source repository, anonymous GitHub download commands will not work until the project is made public.
+**Install on Raspberry Pi:** Follow the [Raspberry Pi installation guide](INSTALL-FOR-TESTERS.md). See [v1.0.0 release notes](RELEASE-NOTES-v1.0.0.md).
+The installer retains KlipperScreen until you explicitly confirm a display switch. The public repository provides the standalone installer; official release bundles include the deployment scripts.
 
 Spoolman in the Chromium UI is optional and stays off until Settings → Spoolman is turned on for this printer. When that switch is on and Moonraker reports the `spoolman` component, Extrude
 shows the active spool (material, colour, and remaining weight or length when Spoolman sent them),
@@ -55,7 +54,7 @@ They are not a Box Turtle or any other physical unit.
 | ![AFC error, 1024×600](docs/screenshots/1024x600-afc-error.png) | ![AFC error, 800×480](docs/screenshots/800x480-afc-error.png) |
 | ![AFC not installed, 1024×600](docs/screenshots/1024x600-afc-absent.png) | ![AFC not installed, 800×480](docs/screenshots/800x480-afc-absent.png) |
 
-## What v0.2 does
+## What LAYR v1.0.0 provides
 
 - **Home**: printer display name, connection and print state, progress, filename, the active
   G-code thumbnail, layer, elapsed and remaining time, live toolhead speed (mm/s) and live
