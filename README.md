@@ -19,8 +19,7 @@ The installer retains KlipperScreen until you explicitly confirm a display switc
 Spoolman in the Chromium UI is optional and stays off until Settings → Spoolman is turned on for this printer. When that switch is on and Moonraker reports the `spoolman` component, Extrude
 shows the active spool (material, colour, and remaining weight or length when Spoolman sent them),
 and a confirmed choice can change it. The active spool is cleared only after an unload Klipper has
-accepted. Printers without Spoolman keep the previous Extrude screen. The native Qt controller has
-its own Filament screen for the same rules. Neither UI has been tested on a Pi.
+accepted. Printers without Spoolman keep the previous Extrude screen.
 
 When starting a file with Spoolman enabled and a verified empty active-spool selection, Files offers
 Select spool, Print without tracking, or Cancel. Selecting a spool only updates tracking and returns
@@ -270,11 +269,6 @@ It does not match the touchscreen or a USB mouse. Install does not write that ru
 [docs/pi-test.md](docs/pi-test.md). Restarting `layr-kiosk.service` applies the theme;
 that does not restart Klipper.
 
-## Native Qt prototype
-
-`native-qt/` is an opt-in Qt Quick / PyQt6 touchscreen controller for the same Moonraker safety rules. The Svelte app remains the UI served by the Chromium kiosk. `native-qt/scripts/install.sh` only copies files. `kiosk-install.sh` writes `layr-qt.service` and does not enable it. The panel changes only if you run `native-qt/scripts/kiosk-switch.sh`. That does not stop `layr-web`, does not edit `printer.cfg` or `moonraker.conf`, and does not restart Klipper or Moonraker. See [native-qt/README.md](native-qt/README.md) and [native-qt/docs/pi-smoke.md](native-qt/docs/pi-smoke.md). The Qt Filament screen talks to Moonraker's Spoolman API. The Chromium Extrude screen does too, when
-that component is enabled and Settings → Spoolman is on for this printer. An MMU stays unwired.
-
 ## Architecture
 
 ```
@@ -334,7 +328,7 @@ recovery, display touch accuracy and resource use.
   edit `moonraker.conf`. Add `[spoolman]` there yourself if you want the feature. Colour is a swatch
   from `color_hex`. Picture bytes inside the spool JSON are not shown. The catalogue is dropped when
   that Moonraker disconnects or the printer URL changes, so one printer's spools are not shown as
-  another's. The native Qt Filament screen is unchanged and still has not been tested on a Pi.
+  another's.
 - `VITE_LAYR_API_KEY` is visible to anyone who can load the page.
 - Pinch zoom is disabled for kiosk use.
 - The project is licensed under [GNU GPL v3](LICENSE).
