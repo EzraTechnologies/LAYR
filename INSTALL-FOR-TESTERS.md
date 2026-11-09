@@ -74,7 +74,7 @@ LAYR automatically starts on your printer's connected HDMI touchscreen. **Klippe
 
 > **Test while your printer is idle.** Check that the touchscreen responds, buttons fit the screen and the status matches Mainsail or Fluidd. You do not need to jog axes, heat the hotend or load filament just to check the layout.
 
-**Menu note:** The current installer exits to the SSH prompt after each choice. Run `bash /tmp/layr-installer.sh` again to make another selection. Uninstall is currently a separate command in Step 6.
+**Menu note:** The current installer exits to the SSH prompt after each choice. Run `bash /tmp/layr-installer.sh` again to make another selection. Uninstall is currently a separate command in Step 7.
 
 ## 5. Optional preview for advanced testers
 
