@@ -1,55 +1,77 @@
-# Install LAYR on Raspberry Pi
+# Install LAYR — Tester Quick Start
 
-This guide covers installing LAYR on a Raspberry Pi already running Klipper and Moonraker, with an HDMI touchscreen such as a 5-inch (often 800×480) or 7-inch (often 1024×600) display. Optional **AFC** (including Box Turtle) and **Happy Hare** integrations are supported, but LAYR does not install either controller or change your printer configuration.
+**LAYR v1.0.0** is a free, open-source touchscreen interface for **Klipper + Moonraker**. You can install it alongside **KlipperScreen** and switch back if you prefer. This guide is for testers, so follow the steps in order.
 
-Test one filament system at a time. AFC and Happy Hare are mutually exclusive in one LAYR printer profile: turning one on turns the other off. You can test the other later on the same printer, after the first switch is off, or on a different printer. Do not run both controllers at the same time. You do not uninstall LAYR to switch which one you are testing.
+> **Beta testing:** LAYR has been tested on a Raspberry Pi 4 with a 7-inch BTT HDMI touchscreen. Other combinations still need testing. Please only switch displays while your printer is **idle**, and keep SSH access available in case the touchscreen is blank.
 
-Use Raspberry Pi OS Bookworm or MainsailOS Bookworm, 64-bit or 32-bit armhf. Other systems stop with an error and change nothing.
+## 1. Before you begin
 
-## Install
+You need:
 
-On the Pi, as the printer user (the same user you use for Mainsail, often `pi`), not as root:
+- A Raspberry Pi already running **Klipper and Moonraker** (for example, MainsailOS).
+- **Raspberry Pi OS Bookworm or MainsailOS Bookworm**, 32-bit armhf or 64-bit ARM.
+- An HDMI touchscreen connected to the Pi. Typical resolutions are **1024×600** (7-inch) or **800×480** (5-inch); the installer does not force either resolution.
+- Working Internet access on the Pi for the first installation.
+- **SSH access** to the Pi (a terminal on your PC or Mac is fine). Log in as your normal printer user, often `pi`. **Do not log in as root or run the installer with `sudo`.**
+
+**Important:** LAYR does not install Klipper, Moonraker or KlipperScreen. If you want to switch back to KlipperScreen, it must already be installed.
+
+## 2. Connect to your Pi
+
+Open your usual SSH program and connect to the same Raspberry Pi that runs your printer.
+
+For example, from a terminal on your computer (replace the address/user with your own):
+
+```bash
+ssh pi@YOUR_PI_IP_ADDRESS
+```
+
+You should see a prompt similar to `pi@mainsailos:~ $`. Type the following commands **on the Pi**, not in the Mainsail/Fluidd G-code console.
+
+## 3. Download and start the installer
+
+Copy and paste these **two commands** into your SSH terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/EzraTechnologies/LAYR/main/deploy/layr-installer.sh -o /tmp/layr-installer.sh
 bash /tmp/layr-installer.sh
 ```
 
-Do not pipe that download into `bash` or `sudo`. Read the preflight on screen, then answer the preview question. Preview mode leaves KlipperScreen where it is.
+**You do not need `chmod`** when starting the file with `bash`.
 
-The script tells you what it found: the panel mode, whether a touchscreen is listed, whether Moonraker answered, and whether an `AFC` object, `AFC_lane` lanes, or a Happy Hare `mmu` object is present. Those checks are read-only. Nothing moves.
+On the **first run**, the installer checks your Pi, OS, screen and Moonraker, then offers to install LAYR in **preview mode**. Read the messages, confirm the installation when asked, and allow it to finish.
 
-What this does not do:
+- If an official release package is available, the installer downloads and verifies it.
+- It **does not replace KlipperScreen during preview installation**.
+- It does not reboot the Pi or change `printer.cfg`, `moonraker.conf` or `mmu.cfg`.
 
-- It does not install AFC, Happy Hare, or a Box Turtle, and it does not edit their files.
-- It does not edit `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
-- It does not restart Klipper or Moonraker, and it does not reboot the Pi.
-- It does not force 800×480 or any other HDMI mode, and it does not change udev rules.
-- It does not install the optional WebKit browser. Chromium is the one LAYR uses.
+If the installer reports an unsupported OS or another error, **stop and send us the output** rather than trying to force it.
 
-KlipperScreen stays on the panel until you confirm a second question, or until you later run the switch command below. If you want that second step in the same run, only after you have read the prompts:
+## 4. Preview LAYR before switching the touchscreen
 
-```bash
-bash /tmp/layr-installer.sh --yes --switch-display
+After installation, LAYR serves a local web interface on port **7180**.
+
+On a browser **running on the Pi**, open:
+
+```text
+http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home
 ```
 
-`--yes` alone installs the preview and still leaves KlipperScreen up.
+The installer also prints a preview URL. Use that if your Moonraker address or LAYR port differs.
 
-Check the same report again any time. This changes nothing:
+Check that LAYR connects to Moonraker, shows your printer's actual status, and that the Home, Move and Settings screens fit your display. **Do not jog axes, heat or load filament just to test the layout.**
+
+If you're happy with the preview, continue.
+
+## 5. Switch the touchscreen to LAYR
+
+Run the installer **again**:
 
 ```bash
-bash /tmp/layr-installer.sh diagnose
+bash /tmp/layr-installer.sh
 ```
 
-A five-second touch sample, still read-only, writes no input rule:
-
-```bash
-bash /tmp/layr-installer.sh diagnose --sample-touch
-```
-
-## The same command again
-
-After LAYR is installed, run the same two lines again. That run does not download packages, build, or reinstall. It reads `~/layr/current` and the systemd units, prints which display is actually active, and shows a menu:
+With LAYR already installed, you'll see a menu similar to:
 
 ```text
 1) Switch to LAYR
@@ -60,139 +82,79 @@ After LAYR is installed, run the same two lines again. That run does not downloa
 6) Exit
 ```
 
-Exit, or running it with no terminal and no choice, changes nothing. You can run it again later and choose Exit.
+Choose **1 — Switch to LAYR**. The touchscreen should then show LAYR. KlipperScreen remains installed.
 
-Switch to LAYR and Switch to KlipperScreen call `layr-display.sh`. KlipperScreen stays installed. The menu does not remove it, and it does not install a KlipperScreen that is not already there.
+**Current menu behaviour:** After an action the script exits to your SSH prompt. To choose another action, run `bash /tmp/layr-installer.sh` again. The menu does **not** currently include Uninstall.
 
-Update and Repair are the choices that download or install again. They leave the display on whatever is active now.
+Check that the touchscreen responds properly, that buttons fit the screen, and that the printer status matches Mainsail or Fluidd.
 
-If both displays are active, neither is active, or the units cannot be read, the script prints that status and does not switch by itself. You can still pick a switch from the menu when the status is both or neither. If the status cannot be read, it will not guess.
+## 6. Switch back to KlipperScreen any time
 
-If LAYR is broken, or the kiosk is not running, Switch to KlipperScreen still runs. It does not need the LAYR page, and it does not need a network connection.
-
-From a shell, the same choices are:
+From SSH, run the installer again and choose **2 — Switch to KlipperScreen**:
 
 ```bash
-bash /tmp/layr-installer.sh --switch-klipperscreen
-bash /tmp/layr-installer.sh --switch-display
+bash /tmp/layr-installer.sh
+```
+
+If the installer isn't available or there's no Internet, use the **offline recovery command** already installed on the Pi:
+
+```bash
+~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
+```
+
+**Save that recovery command before testing.** It does not need GitHub or the LAYR web interface. If the display is blank, use SSH to run it; a text console is also available with Ctrl+Alt+F1 (or `sudo chvt 1`).
+
+If the recovery script is missing, don't delete or disable any systemd services manually—report the issue.
+
+## 7. Update, diagnostics, rollback or uninstall
+
+Use the same installer menu for **Update (3)**, **Repair (4)** or **Diagnostics (5)**. An update keeps whichever display was already active; it does not switch automatically.
+
+These commands are also available from SSH:
+
+```bash
 bash /tmp/layr-installer.sh --update
-bash /tmp/layr-installer.sh --repair
+bash /tmp/layr-installer.sh diagnose
 ```
 
-## If the Pi has no network
-
-The switch back to KlipperScreen does not need a new copy of the installer. After the first successful install, this file is already on the Pi. From SSH, as the printer user:
-
-```bash
-~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
-```
-
-That command does not use GitHub, curl, or the LAYR page. Use it when the panel is blank, when the kiosk has failed, or when `bash /tmp/layr-installer.sh` cannot be downloaded. A text console is Ctrl+Alt+F1, or `sudo chvt 1`.
-
-If `~/layr/src/deploy/layr-display.sh` is not there, the installer will say so and will not stop the display by some other means. Repair needs a network. The text console does not.
-
-## Open LAYR before you move filament
-
-In Chromium on the Pi:
-
-```text
-http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home
-```
-
-A picture of the idle home screen at 800×480 is in [docs/screenshots/800x480-home-ready.png](docs/screenshots/800x480-home-ready.png). Your panel keeps whatever mode it already had. 800×480 is common on a 5-inch screen and is not forced.
-
-On the touchscreen, confirm:
-
-- [ ] You can reach Home, Move, and Settings with a finger. Nothing important is cut off.
-- [ ] Buttons are easy to hit. A mouse still works if one is plugged in.
-- [ ] The installer did not ask you to change HDMI settings. `diagnose` says `hdmi-mode: not set` and `udev: not modified`.
-
-Settings → Integrations is where AFC and Happy Hare are switched. Both start off. Spoolman, if you use it, can stay on with either one. Turning a switch does not move filament and does not edit Klipper.
-
-## AFC and Box Turtle
-
-Skip this section if this printer does not already run AFC. Leave Happy Hare off for the whole section.
-
-- [ ] `diagnose` says `afc-object: present` when Klipper lists `AFC`. Lane names are on the `afc-lanes:` line. A Box Turtle shows up as an `afc-unit:` line such as `AFC_BoxTurtle`.
-- [ ] `mmu-object:` is `absent` on this printer, or Happy Hare is switched off. `controllers:` is `afc`, not `both`.
-- [ ] The `afc-status:` and `afc-lane-status:` lines match what Mainsail or Fluidd shows for the loaded lane, state, and error. This was a read-only check.
-- [ ] In LAYR, Settings → Integrations → turn **AFC** on. Happy Hare stays off. The rail shows AFC. Units, lanes, the loaded lane, and any error match the printer.
-- [ ] Load, lane change, and unload each ask first. Cancel sends nothing. Do this only while the printer is idle and a wrong move is safe.
-- [ ] During a print those buttons stay off.
-- [ ] A printer without AFC, or with the switch off, has no AFC item. `#/afc` says it is not installed.
-
-| Home | AFC lanes | AFC off | Happy Hare | Settings |
-| --- | --- | --- | --- | --- |
-| ![Home, 800×480](docs/screenshots/800x480-home-ready.png) | ![AFC, 800×480](docs/screenshots/800x480-afc.png) | ![AFC not installed, 800×480](docs/screenshots/800x480-afc-absent.png) | ![Happy Hare, 800×480](docs/screenshots/800x480-mmu.png) | ![Settings, 800×480](docs/screenshots/800x480-settings.png) |
-
-These pictures are the 800×480 layout from a mocked printer, not a photo of your panel.
-
-## Happy Hare
-
-Skip this section if this printer does not already run Happy Hare. Leave AFC off for the whole section. If you just tested AFC on this same printer, turn AFC off first. You do not reinstall LAYR.
-
-- [ ] `diagnose` says `mmu-object: present`. `afc-object:` is `absent`, or AFC is switched off. `controllers:` is `happy-hare`, not `both`.
-- [ ] `mmu-status:` shows the tool, gate, filament, action, and pause reason. `mmu-gate:` lines show each gate’s status, material, and name when Happy Hare reported them. They match `MMU_STATUS` or Mainsail. Missing fields say `not-reported`.
-- [ ] In LAYR, Settings → Integrations → turn **Happy Hare** on. AFC stays off. The rail shows MMU. Home shows the same tool, gate, and filament.
-- [ ] Load, unload, and tool change each ask first. Confirming Load sends only `MMU_LOAD`. Cancel sends nothing. The same for Unload and a tool change.
-- [ ] If Happy Hare is paused on a real error, the pause reason matches. Recover, when it is shown, sends only `MMU_RECOVER` after you confirm.
-- [ ] During a print those buttons stay off.
-- [ ] With the switch off, or with no `mmu` object, the rail has no MMU item and nothing moves.
-
-Screenshots at 800×480: [docs/screenshots/800x480-mmu.png](docs/screenshots/800x480-mmu.png), [800x480-mmu-error.png](docs/screenshots/800x480-mmu-error.png), [800x480-mmu-printing.png](docs/screenshots/800x480-mmu-printing.png).
-
-## Both systems
-
-- [ ] If `diagnose` says `controllers: both`, both objects are already on this Klipper. LAYR still did not start them. Turn on only the one this printer should use. Leave the other switch off.
-- [ ] Do not enable both switches. The Settings screen keeps only one of AFC or Happy Hare on.
-- [ ] To test the other system, turn the first switch off and use a printer that actually runs that system, or come back later. Do not uninstall LAYR, and do not try to run both controllers together.
-
-More detail is in [docs/trident-checklist.md](docs/trident-checklist.md) and [docs/happy-hare.md](docs/happy-hare.md).
-
-## Put LAYR on the panel, and how to undo it
-
-Only after the preview looks right in Chromium, run the installer again and choose Switch to LAYR, or run:
-
-```bash
-~/layr/src/deploy/layr-display.sh to-layr
-```
-
-That asks first, then stops KlipperScreen and starts LAYR. KlipperScreen stays installed. If the LAYR kiosk does not stay up, KlipperScreen is turned back on. The installer uses this same script. It does not keep a second copy of the stop and start steps.
-
-Switch back from the installer menu, or, with no network and no new download:
-
-```bash
-~/layr/src/deploy/layr-display.sh to-klipperscreen --yes
-```
-
-Previous LAYR build:
+To return to the **previous installed LAYR build** (not KlipperScreen):
 
 ```bash
 ~/layr/src/deploy/rollback.sh --yes
 ```
 
-Remove LAYR. This does not remove apt packages that were already on the Pi, and it does not remove Klipper, Moonraker, AFC, or Happy Hare:
+To **uninstall LAYR**, run the separate removal script. It asks for confirmation and normally **keeps** the `~/layr` files:
 
 ```bash
 ~/layr/src/deploy/uninstall.sh
 ```
 
-A text console is Ctrl+Alt+F1, or `sudo chvt 1`. None of these commands edit `printer.cfg`, `moonraker.conf`, or `mmu.cfg`.
+To remove LAYR's files as well, use `--purge` only after you're sure you no longer need them. The uninstall script does not remove Klipper or Moonraker.
 
-## If something stops
+## 8. Tell us how the test went
 
-| What you see | What to do |
-| --- | --- |
-| `incomplete copy` | Download `/tmp/layr-installer.sh` again. A short file does not install anything. |
-| It says to run as the printer user, not root | Log in as `pi` (or your Mainsail user) and run the two lines again. Do not use `sudo bash`. |
-| The OS is not supported | Stay on Pi OS Bookworm or MainsailOS Bookworm. Nothing was changed. |
-| apt is locked or `apt-failed=yes` | Wait for the other installer to finish, then run the same command again. The display was not switched. |
-| Moonraker did not answer | Start Moonraker the way you usually do. LAYR did not edit `moonraker.conf`. If the browser blocks the page, add `*://localhost:*` to `cors_domains` yourself. |
-| The panel is blank, or the LAYR kiosk failed | From SSH, as the printer user: `~/layr/src/deploy/layr-display.sh to-klipperscreen --yes`. This does not download the installer and does not need the LAYR page. The Pi was not rebooted. |
-| The installer says both displays, neither display, or an unknown status | It prints that status and does not switch by itself. Pick a menu item only when you mean that display. If the status cannot be read, it will not switch. |
-| KlipperScreen is not installed | The menu will not stop LAYR in order to switch to it. LAYR does not install or remove KlipperScreen. |
-| You already installed LAYR and the command started apt or a build | Choose Exit on a later run. Update and Repair are the menu items that install again. |
-| No touchscreen is listed | `diagnose` prints `touch: none listed`. Cable and the screen’s own overlay are unchanged; LAYR did not write an input rule. |
-| Resolution looks wrong | LAYR did not write an HDMI mode. The panel keeps the mode the Pi already chose. |
-| AFC or Happy Hare is missing in LAYR | The switch for that system is still off, or Klipper did not list the object. LAYR does not install the controller. |
-| You need the other filament system | Turn the current one off in Settings, or open LAYR on the other printer. Do not enable both. |
+Please include the following with a GitHub issue:
+
+- Printer and Raspberry Pi model (for example, Voron 2.4 + Pi 4).
+- Operating system (MainsailOS / Pi OS, and version).
+- Touchscreen make, size and resolution.
+- Whether **installation, touch, LAYR ↔ KlipperScreen switching, thumbnails and normal printing** worked.
+- Any warnings or errors (copy the SSH output or attach a screenshot).
+- Whether you have **Spoolman**, **AFC / Box Turtle**, or **Happy Hare** installed.
+
+**Report bugs:** [Open a LAYR GitHub Issue](https://github.com/EzraTechnologies/LAYR/issues)
+
+Please **remove Wi-Fi passwords, API keys, access tokens or other private details** from logs/screenshots before posting them publicly.
+
+## Optional tests — Spoolman, AFC and Happy Hare
+
+These integrations are optional and are **not installed by LAYR**. If your printer already has one, enable it in LAYR's **Settings → Integrations** and follow the integration-specific checks:
+
+- [Trident and integration test checklist](docs/trident-checklist.md)
+- [Happy Hare test guidance](docs/happy-hare.md)
+
+**Use only one filament controller per printer profile:** AFC and Happy Hare are mutually exclusive in LAYR Settings. Never test filament moves during an active print, and only confirm a move when you know it is safe.
+
+---
+
+**Need help?** Open a GitHub Issue with the exact step where you got stuck. You can always switch back to KlipperScreen using the offline command in **Step 6**, provided KlipperScreen was already installed.
