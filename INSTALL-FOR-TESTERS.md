@@ -47,31 +47,17 @@ On the **first run**, the installer checks your Pi, OS, screen and Moonraker, th
 
 If the installer reports an unsupported OS or another error, **stop and send us the output** rather than trying to force it.
 
-## 4. Preview LAYR before switching the touchscreen
+## 4. Show LAYR on your printer's touchscreen
 
-After installation, LAYR serves a local web interface on port **7180**.
+**You do not need a keyboard, mouse, desktop or browser on the Raspberry Pi.** Keep using SSH from your normal computer.
 
-On a browser **running on the Pi**, open:
-
-```text
-http://127.0.0.1:7180/?moonraker=http://localhost:7125#/home
-```
-
-The installer also prints a preview URL. Use that if your Moonraker address or LAYR port differs.
-
-Check that LAYR connects to Moonraker, shows your printer's actual status, and that the Home, Move and Settings screens fit your display. **Do not jog axes, heat or load filament just to test the layout.**
-
-If you're happy with the preview, continue.
-
-## 5. Switch the touchscreen to LAYR
-
-Run the installer **again**:
+Once installation finishes, run the installer again:
 
 ```bash
 bash /tmp/layr-installer.sh
 ```
 
-With LAYR already installed, you'll see a menu similar to:
+If LAYR is installed, the installer shows this menu:
 
 ```text
 1) Switch to LAYR
@@ -82,11 +68,21 @@ With LAYR already installed, you'll see a menu similar to:
 6) Exit
 ```
 
-Choose **1 — Switch to LAYR**. The touchscreen should then show LAYR. KlipperScreen remains installed.
+Choose **1 — Switch to LAYR**.
 
-**Current menu behaviour:** After an action the script exits to your SSH prompt. To choose another action, run `bash /tmp/layr-installer.sh` again. The menu does **not** currently include Uninstall.
+LAYR automatically starts on your printer's connected HDMI touchscreen. **KlipperScreen stays installed** and can be switched back on whenever you want.
 
-Check that the touchscreen responds properly, that buttons fit the screen, and that the printer status matches Mainsail or Fluidd.
+> **Test while your printer is idle.** Check that the touchscreen responds, buttons fit the screen and the status matches Mainsail or Fluidd. You do not need to jog axes, heat the hotend or load filament just to check the layout.
+
+**Menu note:** The current installer exits to the SSH prompt after each choice. Run `bash /tmp/layr-installer.sh` again to make another selection. Uninstall is currently a separate command in Step 7.
+
+## 5. Optional preview for advanced testers
+
+A browser preview is **not required** for installation or testing.
+
+LAYR's web service listens on the Pi's local loopback address (`127.0.0.1:7180`), so entering `http://127.0.0.1:7180` on your laptop will **not** open the Pi's LAYR page. Direct access via the Pi's IP address is not enabled by the standard installer.
+
+If you're comfortable with SSH port forwarding, you can optionally open the Pi's LAYR page through a tunnel from your own computer. Otherwise, simply test it on the connected touchscreen as described in Step 4.
 
 ## 6. Switch back to KlipperScreen any time
 
