@@ -217,7 +217,7 @@ detect_platform() {
   local model_file="${LAYR_DEVICE_TREE-/proc/device-tree/model}"
   local rpi_file="${LAYR_RPI_ISSUE-/etc/rpi-issue}"
   local id="" codename="" version_id="" pretty="" name="" id_like=""
-  local looks_pi=0 debian_family=0 bookworm=0 arch_ok=0
+  local looks_pi=0 debian_family=0 supported_release=0 arch_ok=0
   local mainsail_files kind="" model=""
   PLATFORM_SUPPORT=no
   PLATFORM_KIND=""
@@ -242,8 +242,10 @@ detect_platform() {
   case "$id_like" in
     *debian*) debian_family=1 ;;
   esac
-  if [ "$codename" = "bookworm" ] || [ "$version_id" = "12" ]; then
-    bookworm=1
+  # Only explicitly vetted major releases. Do not silently accept future versions.
+  if { [ "$codename" = "bookworm" ] && [ "$version_id" = "12" ]; } ||
+     { [ "$codename" = "trixie" ] && [ "$version_id" = "13" ]; }; then
+    supported_release=1
   fi
   case "$arch" in
     aarch64 | arm64)
@@ -306,14 +308,26 @@ detect_platform() {
       break
     fi
   done
+  # The BIGTREETECH CB2 uses an ARM64 Rockchip SBC, not Raspberry Pi hardware.
+  # Its official Armbian/Debian Trixie image can report no device-tree model.
+  # Match explicit board branding only; never treat generic Debian as supported.
+  case "$pretty_lc" in
+    *bigtreetech*cb2* | *bigtreetech*cb-2*)
+      if [ "$arch" = "aarch64" ]; then
+        looks_pi=1
+        debian_family=1
+        kind="bigtreetech-cb2-experimental"
+      fi
+      ;;
+  esac
   PLATFORM_KIND=$kind
   PLATFORM_MODEL=$model
   if [ "$debian_family" != 1 ]; then
-    PLATFORM_REASON="This OS (${pretty:-unknown}) is not supported. Use Raspberry Pi OS Bookworm or MainsailOS Bookworm. Nothing was changed."
+    PLATFORM_REASON="This OS (${pretty:-unknown}) is not supported. Use a supported Raspberry Pi OS/MainsailOS Bookworm or Trixie image, or the explicitly recognized BIGTREETECH CB2 Trixie image. Nothing was changed."
     return 0
   fi
-  if [ "$bookworm" != 1 ]; then
-    PLATFORM_REASON="This release (${codename:-unknown}) is not supported. Bookworm (Debian 12) is the supported release. Nothing was changed."
+  if [ "$supported_release" != 1 ]; then
+    PLATFORM_REASON="This release (${codename:-unknown}) is not supported. Bookworm (Debian 12) and Trixie (Debian 13) are recognized releases. Nothing was changed."
     return 0
   fi
   if [ "$arch_ok" != 1 ]; then
@@ -321,11 +335,11 @@ detect_platform() {
     return 0
   fi
   if [ "$looks_pi" != 1 ]; then
-    PLATFORM_REASON="This looks like Debian Bookworm but not Raspberry Pi OS or MainsailOS. Nothing was changed."
+    PLATFORM_REASON="This does not appear to be a recognized Raspberry Pi OS, MainsailOS or BIGTREETECH CB2 image. Nothing was changed."
     return 0
   fi
   PLATFORM_SUPPORT=yes
-  PLATFORM_REASON="Supported ${kind} ${arch}."
+  PLATFORM_REASON="Recognized ${kind} ${codename} ${arch}. Actual display compatibility must be verified before switching."
 }
 
 url_allowed() {
@@ -1119,7 +1133,7 @@ plan_packages() {
 
 print_scope() {
   cat <<'EOF'
-supported: Raspberry Pi OS Bookworm and MainsailOS Bookworm, arm64 or armhf, Chromium, with Klipper and Moonraker already installed.
+supported: Raspberry Pi OS/MainsailOS Bookworm (12) or Trixie (13), ARM; BIGTREETECH CB2 Trixie ARM64 experimental, Chromium, with Klipper and Moonraker already installed.
 not-supported: Ubuntu and other Debian releases, armv6, installing AFC, Happy Hare, or Box Turtle, running both filament controllers at once, the optional WebKit port, forced HDMI modes, reboots, and edits to printer.cfg, moonraker.conf, or mmu.cfg.
 EOF
 }
