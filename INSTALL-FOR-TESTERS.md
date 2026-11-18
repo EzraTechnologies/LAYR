@@ -9,12 +9,14 @@
 You need:
 
 - A Raspberry Pi already running **Klipper and Moonraker** (for example, MainsailOS).
-- **Raspberry Pi OS Bookworm or MainsailOS Bookworm**, 32-bit armhf or 64-bit ARM.
+- **Raspberry Pi OS or MainsailOS Bookworm (Debian 12) or Trixie (Debian 13)** on supported ARM hardware. **BIGTREETECH CB2 ARM64 with its Trixie image is experimental** until real touchscreen validation; it is not a Raspberry Pi. Pi 3 and Bullseye remain outside the supported hardware/OS baseline.
 - An HDMI touchscreen connected to the Pi. Typical resolutions are **1024×600** (7-inch) or **800×480** (5-inch); the installer does not force either resolution.
 - Working Internet access on the Pi for the first installation.
 - **SSH access** to the Pi (a terminal on your PC or Mac is fine). Log in as your normal printer user, often `pi`. **Do not log in as root or run the installer with `sudo`.**
 
 **Important:** LAYR does not install Klipper, Moonraker or KlipperScreen. If you want to switch back to KlipperScreen, it must already be installed.
+
+**Newer OS releases:** The installer recognizes explicitly tested major versions; it does not automatically accept future Debian releases. If your image is rejected, please report the OS name, version, board model, and preflight output rather than editing the installer to bypass checks.
 
 ## 2. Connect to your Pi
 
