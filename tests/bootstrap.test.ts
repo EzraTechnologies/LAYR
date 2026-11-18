@@ -328,9 +328,47 @@ describe('bootstrap platform preflight', () => {
   });
 
   it.each([
+    ['Raspberry Pi OS Trixie', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'Raspbian GNU/Linux 13 (trixie)' }, 'aarch64', 'raspberry-pi-os'],
+    ['BIGTREETECH CB2 Trixie', { ID: 'armbian', ID_LIKE: 'debian', NAME: 'Armbian', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'BIGTREETECH-CB2 3.1.0-26.08.0-trunk trixie' }, 'aarch64', 'bigtreetech-cb2-experimental'],
+  ])('recognizes %s without changing the display', (_name, os, arch, kind) => {
+    const box = makeSandbox({ os, arch });
+    try {
+      const result = invoke(box, ['diagnose', '--dist', box.dist]);
+      const output = textOf(result);
+      expect(result.status).toBe(0);
+      expect(output).toContain('support=yes');
+      expect(output).toContain(`kind=${kind}`);
+      expect(output).toContain('preflight=ok');
+      expect(output).toContain('changed=no');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it.each([
+    ['BIGTREETECH CB2 on 32-bit ARM', { ID: 'armbian', ID_LIKE: 'debian', NAME: 'Armbian', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'BIGTREETECH-CB2 trixie' }, 'armv7l'],
+    ['Unrecognized BTT board', { ID: 'armbian', ID_LIKE: 'debian', NAME: 'Armbian', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'BIGTREETECH-CB1 trixie' }, 'aarch64'],
+  ])('rejects %s without installing', (_name, os, arch) => {
+    const box = makeSandbox({ os, arch });
+    try {
+      const result = invoke(box, ['diagnose', '--dist', box.dist]);
+      expect(result.status).not.toBe(0);
+      expect(textOf(result)).toContain('support=no');
+      expect(textOf(result)).toContain('changed=no');
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it.each([
     ['Ubuntu', { ID: 'ubuntu', ID_LIKE: 'debian', NAME: 'Ubuntu', VERSION_ID: '24.04', VERSION_CODENAME: 'noble', PRETTY_NAME: 'Ubuntu 24.04' }, 'x86_64'],
     ['generic Debian Bookworm', { ID: 'debian', ID_LIKE: 'debian', NAME: 'Debian GNU/Linux', VERSION_ID: '12', VERSION_CODENAME: 'bookworm', PRETTY_NAME: 'Debian GNU/Linux 12 (bookworm)' }, 'aarch64'],
-    ['trixie', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'Raspbian 13' }, 'aarch64'],
+    ['future Debian release', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '14', VERSION_CODENAME: 'forky', PRETTY_NAME: 'Raspbian 14' }, 'aarch64'],
+    ['mismatched release', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '12', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'Raspbian mismatched' }, 'aarch64'],
+    ['generic Debian Trixie', { ID: 'debian', ID_LIKE: 'debian', NAME: 'Debian GNU/Linux', VERSION_ID: '13', VERSION_CODENAME: 'trixie', PRETTY_NAME: 'Debian GNU/Linux 13 (trixie)' }, 'aarch64'],
     ['bullseye', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '11', VERSION_CODENAME: 'bullseye', PRETTY_NAME: 'Raspbian 11' }, 'aarch64'],
     ['armv6', { ID: 'raspbian', ID_LIKE: 'debian', NAME: 'Raspbian', VERSION_ID: '12', VERSION_CODENAME: 'bookworm', PRETTY_NAME: 'Raspbian GNU/Linux 12 (bookworm)' }, 'armv6l'],
   ])('rejects %s without apt', (_name, os, arch) => {
