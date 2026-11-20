@@ -12,7 +12,7 @@ You need:
 - **Raspberry Pi OS or MainsailOS Bookworm (Debian 12) or Trixie (Debian 13)** on supported ARM hardware. **BIGTREETECH CB2 and BTT Pi2 ARM64 with explicitly identified Bookworm/Trixie images are experimental** pending real touchscreen and performance testing; neither is a Raspberry Pi. Pi 3 and Bullseye remain outside the supported hardware/OS baseline.
 - An HDMI touchscreen connected to the Pi. Typical resolutions are **1024×600** (7-inch) or **800×480** (5-inch); the installer does not force either resolution.
 - Working Internet access on the Pi for the first installation.
-- **SSH access** to the Pi (a terminal on your PC or Mac is fine). Log in as your normal printer user, often `pi`. **Do not log in as root or run the installer with `sudo`.**
+- **SSH access** to the Pi (a terminal on your PC or Mac is fine). Log in as your normal printer user, often `pi`. **Do not log in as root or run the installer with `sudo`.** The installer asks for your normal user's sudo password if needed, after you agree to install; it never asks you to paste a password into a command or stores it.
 
 **Important:** LAYR does not install Klipper, Moonraker or KlipperScreen. If you want to switch back to KlipperScreen, it must already be installed.
 
@@ -41,7 +41,7 @@ bash /tmp/layr-installer.sh
 
 **You do not need `chmod`** when starting the file with `bash`.
 
-On the **first run**, the installer checks your Pi, OS, screen and Moonraker, then offers to install LAYR in **preview mode**. Read the messages, confirm the installation when asked, and allow it to finish.
+On the **first run**, the installer automatically checks your Pi, OS, screen and Moonraker, then offers to install LAYR in **preview mode**. Read the messages and confirm the installation when asked. If sudo needs a password, enter your normal Linux user password at the terminal prompt. You do **not** need to run a separate preflight command. Declining the installation exits cleanly without changing anything.
 
 - If an official release package is available, the installer downloads and verifies it.
 - It **does not replace KlipperScreen during preview installation**.
