@@ -155,12 +155,32 @@ chromium_package_name() {
   fi
 }
 
+sudo_can_prompt() {
+  # Test-only override for simulated TTYs; normal installs require a real
+  # terminal for both stdin and stderr so sudo can ask for a password.
+  if [ "${LAYR_SUDO_TTY:-}" = 1 ]; then
+    return 0
+  fi
+  [ -t 0 ] && [ -t 2 ]
+}
+
 sudo_ok() {
   case "${LAYR_SUDO_OK:-auto}" in
     1 | yes | true) return 0 ;;
     0 | no | false) return 1 ;;
   esac
-  sudo -n true 2>/dev/null
+  command -v sudo >/dev/null 2>&1 || return 1
+  # First try cached / passwordless sudo. Never prompt in diagnostics, dry-run,
+  # or non-interactive mode. The install confirmation occurs before this call.
+  if sudo -n -v 2>/dev/null; then
+    return 0
+  fi
+  if [ "${DO_DIAGNOSE:-0}" = 1 ] || [ "${PREFLIGHT_ONLY:-0}" = 1 ] ||
+     [ "${DRY_RUN:-0}" = 1 ] || ! sudo_can_prompt; then
+    return 1
+  fi
+  printf 'sudo authentication is needed to install packages and LAYR services.\n'
+  sudo -v
 }
 
 run_root() {
@@ -1795,25 +1815,29 @@ bootstrap_main() {
   if [ "$SOURCE_MODE" = "build" ] && [ "$memory" -lt 1024 ]; then
     printf 'warning: memory is under 1024 MB. Building on the Pi may be slow.\n'
   fi
-  if ! sudo_ok; then
-    if [ "$DO_DIAGNOSE" = 1 ]; then
-      printf 'sudo: missing\n'
-      printf 'preflight=fail\n'
-      printf 'changed=no\n'
-      exit 1
-    fi
-    fail_preflight "sudo is required to install packages and the LAYR services. Run as the printer user, not root. Nothing was changed."
-  fi
-  printf 'preflight=ok\n'
+  # Diagnostics/preflight are read-only and never demand sudo credentials.
+  # A dry run also stays read-only and can succeed without sudo access.
   if [ "$DO_DIAGNOSE" = 1 ] || [ "$PREFLIGHT_ONLY" = 1 ]; then
+    printf 'preflight=ok\n'
     printf 'changed=no\n'
     printf 'startup-check: bash %s diagnose\n' "$SCRIPT_PATH"
     exit 0
   fi
 
   if [ "$DRY_RUN" != 1 ] && [ "$ASSUME_YES" != 1 ]; then
-    confirm_answer "Install LAYR in preview mode? KlipperScreen stays as it is." || fail_preflight "Cancelled. Nothing was changed."
+    if ! confirm_answer "Install LAYR in preview mode? KlipperScreen stays as it is."; then
+      printf 'installation=cancelled\n'
+      printf 'changed=no\n'
+      printf 'display-changed=no\n'
+      printf 'Cancelled by user. Nothing was changed.\n'
+      exit 0
+    fi
   fi
+
+  if [ "$DRY_RUN" != 1 ] && ! sudo_ok; then
+    fail_preflight "sudo access is required to install packages and LAYR services. Run as your normal printer user (not root). If a password is required, use an interactive SSH terminal; for automation, configure passwordless sudo. Nothing was changed."
+  fi
+  printf 'preflight=ok\n'
 
   if [ "${#PACKAGES[@]}" -gt 0 ]; then
     local apt_bin try apt_ok

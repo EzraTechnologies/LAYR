@@ -398,8 +398,89 @@ describe('bootstrap platform preflight', () => {
       const result = invoke(box, ['--yes', '--dist', box.dist], { LAYR_SUDO_OK: '0' });
       expect(result.status).not.toBe(0);
       expect(textOf(result)).toContain('changed=no');
-      expect(textOf(result)).toContain('sudo is required');
+      expect(textOf(result)).toContain('sudo access is required');
       expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it.each([
+    ['cached sudo', 'cached', 0, 1],
+    ['interactive password sudo', 'prompt', 0, 1],
+    ['rejected sudo password', 'denied', 1, 0],
+    ['non-interactive password sudo', 'noninteractive', 1, 0],
+  ])('handles %s safely', (_name, mode, expectedStatus, expectInstall) => {
+    const box = makeSandbox();
+    const sudoLog = path.join(box.root, 'sudo.log');
+    const installLog = path.join(box.root, 'install.log');
+    writeExe(path.join(box.root, 'sudo'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${sudoLog}"
+if [ "$1" = "-n" ] && [ "$2" = "-v" ]; then
+  [ "${mode}" = cached ] && exit 0
+  exit 1
+fi
+if [ "$1" = "-v" ]; then
+  [ "${mode}" = prompt ] && exit 0
+  exit 1
+fi
+exec "$@"
+`);
+    writeExe(path.join(box.root, 'install.sh'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${installLog}"
+`);
+    try {
+      const result = invoke(box, ['--yes', '--dist', box.dist], {
+        LAYR_SUDO_OK: 'auto',
+        LAYR_SUDO_TTY: mode === 'noninteractive' ? '0' : '1',
+        PATH: `${box.root}:${box.env.PATH}`,
+        LAYR_INSTALL_SH: path.join(box.root, 'install.sh'),
+      });
+      const output = textOf(result);
+      expect(result.status === 0 ? 0 : 1).toBe(expectedStatus);
+      expect(output).toContain(expectInstall ? 'preflight=ok' : 'changed=no');
+      expect(existsSync(installLog)).toBe(Boolean(expectInstall));
+      const sudoCalls = readFileSync(sudoLog, 'utf8');
+      expect(sudoCalls).toContain('-n -v');
+      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls.split('\n')).toContain('-v');
+      if (mode === 'noninteractive') expect(sudoCalls.split('\n')).not.toContain('-v');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('keeps diagnostics read-only even when sudo would require a password', () => {
+    const box = makeSandbox();
+    const sudoLog = path.join(box.root, 'sudo.log');
+    writeExe(path.join(box.root, 'sudo'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${sudoLog}"
+exit 1
+`);
+    try {
+      const env = { LAYR_SUDO_OK: 'auto', LAYR_SUDO_TTY: '1', PATH: `${box.root}:${box.env.PATH}` };
+      for (const flag of ['diagnose', '--preflight']) {
+        const result = invoke(box, [flag, '--dist', box.dist], env);
+        expect(result.status).toBe(0);
+        expect(textOf(result)).toContain('preflight=ok');
+        expect(textOf(result)).toContain('changed=no');
+      }
+      expect(existsSync(sudoLog)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('refuses an unattended install without confirmation or sudo side effects', () => {
+    const box = makeSandbox();
+    try {
+      const result = invoke(box, ['--dist', box.dist], { LAYR_SUDO_OK: '0' });
+      // Without a terminal, explicit consent is required; the installer
+      // must never attempt authentication or mutate the printer.
+      expect(result.status).not.toBe(0);
+      expect(textOf(result)).toContain('No terminal for a question');
+      expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
     } finally {
       cleanup(box);
     }
