@@ -442,8 +442,8 @@ printf '%s\\n' "$*" >> "${installLog}"
       expect(existsSync(installLog)).toBe(Boolean(expectInstall));
       const sudoCalls = readFileSync(sudoLog, 'utf8');
       expect(sudoCalls).toContain('-n -v');
-      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls.split('\\n')).toContain('-v');
-      if (mode === 'noninteractive') expect(sudoCalls.split('\\n')).not.toContain('-v');
+      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls.split('\n')).toContain('-v');
+      if (mode === 'noninteractive') expect(sudoCalls.split('\n')).not.toContain('-v');
     } finally {
       cleanup(box);
     }
