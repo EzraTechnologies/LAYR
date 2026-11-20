@@ -398,7 +398,7 @@ describe('bootstrap platform preflight', () => {
       const result = invoke(box, ['--yes', '--dist', box.dist], { LAYR_SUDO_OK: '0' });
       expect(result.status).not.toBe(0);
       expect(textOf(result)).toContain('changed=no');
-      expect(textOf(result)).toContain('sudo is required');
+      expect(textOf(result)).toContain('sudo access is required');
       expect(existsSync(box.aptLog)).toBe(false);
     } finally {
       cleanup(box);
@@ -442,8 +442,8 @@ printf '%s\\n' "$*" >> "${installLog}"
       expect(existsSync(installLog)).toBe(Boolean(expectInstall));
       const sudoCalls = readFileSync(sudoLog, 'utf8');
       expect(sudoCalls).toContain('-n -v');
-      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls).toContain('\\n-v\\n');
-      if (mode === 'noninteractive') expect(sudoCalls).not.toContain('\\n-v\\n');
+      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls.split('\\n')).toContain('-v');
+      if (mode === 'noninteractive') expect(sudoCalls.split('\\n')).not.toContain('-v');
     } finally {
       cleanup(box);
     }
@@ -471,16 +471,16 @@ exit 1
     }
   });
 
-  it('does not treat a declined installation as failed preflight or request sudo', () => {
+  it('refuses an unattended install without confirmation or sudo side effects', () => {
     const box = makeSandbox();
     try {
       const result = invoke(box, ['--dist', box.dist], { LAYR_SUDO_OK: '0' });
-      // A non-interactive input stream defaults the confirmation to no.
-      expect(result.status).toBe(0);
-      expect(textOf(result)).toContain('installation=cancelled');
-      expect(textOf(result)).toContain('changed=no');
-      expect(textOf(result)).not.toContain('preflight=fail');
+      // Without a terminal, explicit consent is required; the installer
+      // must never attempt authentication or mutate the printer.
+      expect(result.status).not.toBe(0);
+      expect(textOf(result)).toContain('No terminal for a question');
       expect(existsSync(box.aptLog)).toBe(false);
+      expect(existsSync(path.join(box.home, 'layr'))).toBe(false);
     } finally {
       cleanup(box);
     }
