@@ -155,6 +155,15 @@ chromium_package_name() {
   fi
 }
 
+sudo_can_prompt() {
+  # Test-only override for simulated TTYs; normal installs require a real
+  # terminal for both stdin and stderr so sudo can ask for a password.
+  if [ "${LAYR_SUDO_TTY:-}" = 1 ]; then
+    return 0
+  fi
+  [ -t 0 ] && [ -t 2 ]
+}
+
 sudo_ok() {
   case "${LAYR_SUDO_OK:-auto}" in
     1 | yes | true) return 0 ;;
@@ -167,7 +176,7 @@ sudo_ok() {
     return 0
   fi
   if [ "${DO_DIAGNOSE:-0}" = 1 ] || [ "${PREFLIGHT_ONLY:-0}" = 1 ] ||
-     [ "${DRY_RUN:-0}" = 1 ] || [ ! -t 0 ] || [ ! -t 2 ]; then
+     [ "${DRY_RUN:-0}" = 1 ] || ! sudo_can_prompt; then
     return 1
   fi
   printf 'sudo authentication is needed to install packages and LAYR services.\n'
