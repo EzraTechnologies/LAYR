@@ -405,6 +405,87 @@ describe('bootstrap platform preflight', () => {
     }
   });
 
+  it.each([
+    ['cached sudo', 'cached', 0, 1],
+    ['interactive password sudo', 'prompt', 0, 1],
+    ['rejected sudo password', 'denied', 1, 0],
+    ['non-interactive password sudo', 'noninteractive', 1, 0],
+  ])('handles %s safely', (_name, mode, expectedStatus, expectInstall) => {
+    const box = makeSandbox();
+    const sudoLog = path.join(box.root, 'sudo.log');
+    const installLog = path.join(box.root, 'install.log');
+    writeExe(path.join(box.root, 'sudo'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${sudoLog}"
+if [ "$1" = "-n" ] && [ "$2" = "-v" ]; then
+  [ "${mode}" = cached ] && exit 0
+  exit 1
+fi
+if [ "$1" = "-v" ]; then
+  [ "${mode}" = prompt ] && exit 0
+  exit 1
+fi
+exec "$@"
+`);
+    writeExe(path.join(box.root, 'install.sh'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${installLog}"
+`);
+    try {
+      const result = invoke(box, ['--yes', '--dist', box.dist], {
+        LAYR_SUDO_OK: 'auto',
+        LAYR_SUDO_TTY: mode === 'noninteractive' ? '0' : '1',
+        PATH: `${box.root}:${box.env.PATH}`,
+        LAYR_INSTALL_SH: path.join(box.root, 'install.sh'),
+      });
+      const output = textOf(result);
+      expect(result.status === 0 ? 0 : 1).toBe(expectedStatus);
+      expect(output).toContain(expectInstall ? 'preflight=ok' : 'changed=no');
+      expect(existsSync(installLog)).toBe(Boolean(expectInstall));
+      const sudoCalls = readFileSync(sudoLog, 'utf8');
+      expect(sudoCalls).toContain('-n -v');
+      if (mode === 'prompt' || mode === 'denied') expect(sudoCalls).toContain('\\n-v\\n');
+      if (mode === 'noninteractive') expect(sudoCalls).not.toContain('\\n-v\\n');
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('keeps diagnostics read-only even when sudo would require a password', () => {
+    const box = makeSandbox();
+    const sudoLog = path.join(box.root, 'sudo.log');
+    writeExe(path.join(box.root, 'sudo'), `#!/bin/bash
+printf '%s\\n' "$*" >> "${sudoLog}"
+exit 1
+`);
+    try {
+      const env = { LAYR_SUDO_OK: 'auto', LAYR_SUDO_TTY: '1', PATH: `${box.root}:${box.env.PATH}` };
+      for (const flag of ['diagnose', '--preflight']) {
+        const result = invoke(box, [flag, '--dist', box.dist], env);
+        expect(result.status).toBe(0);
+        expect(textOf(result)).toContain('preflight=ok');
+        expect(textOf(result)).toContain('changed=no');
+      }
+      expect(existsSync(sudoLog)).toBe(false);
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
+  it('does not treat a declined installation as failed preflight or request sudo', () => {
+    const box = makeSandbox();
+    try {
+      const result = invoke(box, ['--dist', box.dist], { LAYR_SUDO_OK: '0' });
+      // A non-interactive input stream defaults the confirmation to no.
+      expect(result.status).toBe(0);
+      expect(textOf(result)).toContain('installation=cancelled');
+      expect(textOf(result)).toContain('changed=no');
+      expect(textOf(result)).not.toContain('preflight=fail');
+      expect(existsSync(box.aptLog)).toBe(false);
+    } finally {
+      cleanup(box);
+    }
+  });
+
   it('stops before apt when GitHub cannot be reached', () => {
     const box = makeSandbox();
     try {
