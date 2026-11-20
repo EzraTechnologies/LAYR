@@ -308,9 +308,9 @@ detect_platform() {
       break
     fi
   done
-  # The BIGTREETECH CB2 uses an ARM64 Rockchip SBC, not Raspberry Pi hardware.
-  # Its official Armbian/Debian Trixie image can report no device-tree model.
-  # Match explicit board branding only; never treat generic Debian as supported.
+  # BIGTREETECH CB2 and Pi2 are ARM64 SBCs, not Raspberry Pi hardware.
+  # Their Debian/Armbian images can lack the usual Raspberry Pi device-tree model.
+  # Match explicit board branding only; never accept generic Debian/Armbian.
   case "$pretty_lc" in
     *bigtreetech*cb2* | *bigtreetech*cb-2*)
       if [ "$arch" = "aarch64" ]; then
@@ -319,11 +319,18 @@ detect_platform() {
         kind="bigtreetech-cb2-experimental"
       fi
       ;;
+    *bigtreetech*pi2* | *bigtreetech*pi-2* | *bigtreetech*pi\ 2* | *btt-pi2* | *btt-pi-2*)
+      if [ "$arch" = "aarch64" ]; then
+        looks_pi=1
+        debian_family=1
+        kind="bigtreetech-pi2-experimental"
+      fi
+      ;;
   esac
   PLATFORM_KIND=$kind
   PLATFORM_MODEL=$model
   if [ "$debian_family" != 1 ]; then
-    PLATFORM_REASON="This OS (${pretty:-unknown}) is not supported. Use a supported Raspberry Pi OS/MainsailOS Bookworm or Trixie image, or the explicitly recognized BIGTREETECH CB2 Trixie image. Nothing was changed."
+    PLATFORM_REASON="This OS (${pretty:-unknown}) is not supported. Use a supported Raspberry Pi OS/MainsailOS Bookworm or Trixie image, or an explicitly recognized BIGTREETECH CB2/Pi2 image. Nothing was changed."
     return 0
   fi
   if [ "$supported_release" != 1 ]; then
@@ -335,7 +342,7 @@ detect_platform() {
     return 0
   fi
   if [ "$looks_pi" != 1 ]; then
-    PLATFORM_REASON="This does not appear to be a recognized Raspberry Pi OS, MainsailOS or BIGTREETECH CB2 image. Nothing was changed."
+    PLATFORM_REASON="This does not appear to be a recognized Raspberry Pi OS, MainsailOS or BIGTREETECH CB2/Pi2 image. Nothing was changed."
     return 0
   fi
   PLATFORM_SUPPORT=yes
@@ -1133,7 +1140,7 @@ plan_packages() {
 
 print_scope() {
   cat <<'EOF'
-supported: Raspberry Pi OS/MainsailOS Bookworm (12) or Trixie (13), ARM; BIGTREETECH CB2 Trixie ARM64 experimental, Chromium, with Klipper and Moonraker already installed.
+supported: Raspberry Pi OS/MainsailOS Bookworm (12) or Trixie (13), ARM; BIGTREETECH CB2/Pi2 ARM64 experimental, Chromium, with Klipper and Moonraker already installed.
 not-supported: Ubuntu and other Debian releases, armv6, installing AFC, Happy Hare, or Box Turtle, running both filament controllers at once, the optional WebKit port, forced HDMI modes, reboots, and edits to printer.cfg, moonraker.conf, or mmu.cfg.
 EOF
 }

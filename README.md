@@ -13,7 +13,7 @@ before switching away from KlipperScreen. See [docs/trident-checklist.md](docs/t
 **License:** [GNU General Public License v3.0](LICENSE). Contributions are welcome; see
 [CONTRIBUTING.md](CONTRIBUTING.md) and report security concerns using [SECURITY.md](SECURITY.md).
 
-**Compatibility:** Bookworm (Debian 12) and Trixie (Debian 13) on recognized Raspberry Pi OS/MainsailOS ARM images. The BIGTREETECH CB2 ARM64 Trixie image is an **experimental** candidate and requires real touchscreen validation; Bullseye and Pi 3 are outside the supported baseline. Future Debian major releases need explicit validation before enablement.
+**Compatibility:** Bookworm (Debian 12) and Trixie (Debian 13) on recognized Raspberry Pi OS/MainsailOS ARM images. Explicitly identified BIGTREETECH CB2 and BTT Pi2 ARM64 Bookworm/Trixie images are **experimental** candidates requiring real touchscreen validation; Bullseye and Pi 3 are outside the supported baseline. Future Debian major releases need explicit validation before enablement.
 
 **Install on Raspberry Pi:** Follow the [Raspberry Pi installation guide](INSTALL-FOR-TESTERS.md). See [v1.0.0 release notes](RELEASE-NOTES-v1.0.0.md).
 The installer retains KlipperScreen until you explicitly confirm a display switch. The public repository provides the standalone installer; official release bundles include the deployment scripts.
